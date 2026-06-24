@@ -38,6 +38,9 @@ The long-term goal is to bring full Component Model support to Endive:
 
 ## Current Status
 
+Initial work is in progress on the component type model (`types` module), binary parser (`parser` module), and
+supporting infrastructure including initial `wasm-tools component` command support (`wasm-tools` module).
+
 The repository includes a `wit-parser` module that wraps the
 [wasm-tools](https://github.com/bytecodealliance/wasm-tools) `component wit` command,
 using the same pattern as the
@@ -65,8 +68,13 @@ mvn -Dquickly
 
 Then build endive-cm:
 
+The tests of the `parser` module rely upon downloading a local copy of the .wast tests from the Component Model spec
+repository. A shell script is provided that fetches the most recent copy of the .wast tests.
+
+To build endive-cm:
 ```sh
 cd endive-cm
+./update-spec-tests.sh
 mvn clean install
 ```
 

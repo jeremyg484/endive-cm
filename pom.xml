@@ -18,6 +18,9 @@
   </licenses>
 
   <modules>
+    <module>parser</module>
+    <module>types</module>
+    <module>wasm-tools</module>
     <module>wit-parser</module>
   </modules>
 
@@ -36,6 +39,8 @@
 
     <endive.version>999-SNAPSHOT</endive.version>
     <zerofs.version>0.1.0</zerofs.version>
+    <jackson.version>2.18.3</jackson.version>
+    <assertj.version>3.27.7</assertj.version>
     <junit.version>5.14.4</junit.version>
   </properties>
 
@@ -72,8 +77,41 @@
         <version>${endive.version}</version>
       </dependency>
       <dependency>
+        <groupId>run.endive.cm</groupId>
+        <artifactId>parser</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>run.endive.cm</groupId>
+        <artifactId>types</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>run.endive.cm</groupId>
+        <artifactId>wasm-tools</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>${jackson.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.assertj</groupId>
+        <artifactId>assertj-core</artifactId>
+        <version>${assertj.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
         <groupId>org.junit.jupiter</groupId>
         <artifactId>junit-jupiter-api</artifactId>
+        <version>${junit.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.junit.jupiter</groupId>
+        <artifactId>junit-jupiter-params</artifactId>
         <version>${junit.version}</version>
         <scope>test</scope>
       </dependency>
@@ -200,6 +238,17 @@
               </execution>
             </executions>
           </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <profile>
+      <id>java21</id>
+      <activation>
+        <jdk>[21,)</jdk>
+      </activation>
+      <build>
+        <plugins>
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-checkstyle-plugin</artifactId>
