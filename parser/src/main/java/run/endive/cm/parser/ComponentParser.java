@@ -357,39 +357,11 @@ public final class ComponentParser {
 
     private static Type parseType(ByteBuffer buffer) {
         var opcode = readByte(buffer);
-        var possiblePrimValType = primValTypeForOpcode(opcode);
-        if (possiblePrimValType != null) {
-            return Type.of(possiblePrimValType);
+        var kind = DefValType.Kind.fromOpcode(opcode);
+        if (kind != null) {
+            return parseDefValType(kind, buffer);
         }
         switch (opcode) {
-            case DefValType.ID.RECORD:
-                return Type.of(parseRecordType(buffer));
-            case DefValType.ID.VARIANT:
-                return Type.of(parseVariantType(buffer));
-            case DefValType.ID.LIST:
-                return Type.of(parseListType(buffer));
-            case DefValType.ID.SIZED_LIST:
-                return Type.of(parseSizedListType(buffer));
-            case DefValType.ID.TUPLE:
-                return Type.of(parseTupleType(buffer));
-            case DefValType.ID.FLAGS:
-                return Type.of(parseFlagsType(buffer));
-            case DefValType.ID.ENUM:
-                return Type.of(parseEnumType(buffer));
-            case DefValType.ID.OPTION:
-                return Type.of(parseOptionType(buffer));
-            case DefValType.ID.RESULT:
-                return Type.of(parseResultType(buffer));
-            case DefValType.ID.OWN:
-                return Type.of(parseOwnType(buffer));
-            case DefValType.ID.BORROW:
-                return Type.of(parseBorrowType(buffer));
-            case DefValType.ID.STREAM:
-                return Type.of(parseStreamType(buffer));
-            case DefValType.ID.FUTURE:
-                return Type.of(parseFutureType(buffer));
-            case DefValType.ID.MAP:
-                return Type.of(parseMapType(buffer));
             case 0x40:
                 return Type.of(parseFuncType(buffer, false));
             case 0x43:
@@ -400,6 +372,69 @@ public final class ComponentParser {
                 return Type.of(parseInstanceType(buffer));
             default:
                 throw new MalformedException("unknown type opcode: " + opcode);
+        }
+    }
+
+    private static Type parseDefValType(DefValType.Kind kind, ByteBuffer buffer) {
+        switch (kind) {
+            case BOOL:
+                return Type.of(PrimValType.BOOL);
+            case S8:
+                return Type.of(PrimValType.S8);
+            case U8:
+                return Type.of(PrimValType.U8);
+            case S16:
+                return Type.of(PrimValType.S16);
+            case U16:
+                return Type.of(PrimValType.U16);
+            case S32:
+                return Type.of(PrimValType.S32);
+            case U32:
+                return Type.of(PrimValType.U32);
+            case S64:
+                return Type.of(PrimValType.S64);
+            case U64:
+                return Type.of(PrimValType.U64);
+            case F32:
+                return Type.of(PrimValType.F32);
+            case F64:
+                return Type.of(PrimValType.F64);
+            case CHAR:
+                return Type.of(PrimValType.CHAR);
+            case STRING:
+                return Type.of(PrimValType.STRING);
+            case ERROR_CONTEXT:
+                return Type.of(PrimValType.ERROR_CONTEXT);
+            case RECORD:
+                return Type.of(parseRecordType(buffer));
+            case VARIANT:
+                return Type.of(parseVariantType(buffer));
+            case LIST:
+                return Type.of(parseListType(buffer));
+            case SIZED_LIST:
+                return Type.of(parseSizedListType(buffer));
+            case TUPLE:
+                return Type.of(parseTupleType(buffer));
+            case FLAGS:
+                return Type.of(parseFlagsType(buffer));
+            case ENUM:
+                return Type.of(parseEnumType(buffer));
+            case OPTION:
+                return Type.of(parseOptionType(buffer));
+            case RESULT:
+                return Type.of(parseResultType(buffer));
+            case OWN:
+                return Type.of(parseOwnType(buffer));
+            case BORROW:
+                return Type.of(parseBorrowType(buffer));
+            case STREAM:
+                return Type.of(parseStreamType(buffer));
+            case FUTURE:
+                return Type.of(parseFutureType(buffer));
+            case MAP:
+                return Type.of(parseMapType(buffer));
+            default:
+                throw new MalformedException("unknown DefValType kind: " + kind);
         }
     }
 
@@ -482,20 +517,24 @@ public final class ComponentParser {
     private static Alias parseAlias(ByteBuffer buffer) {
         var sort = parseSort(buffer);
         var opcode = readByte(buffer);
-        switch (opcode) {
-            case Alias.ID.EXPORT:
+        var id = Alias.Kind.fromOpcode(opcode);
+        if (id == null) {
+            throw new MalformedException("unknown alias target opcode " + opcode);
+        }
+        switch (id) {
+            case EXPORT:
                 return ExportAlias.builder()
                         .withSort(sort)
                         .withInstanceIdx(readVarUInt32(buffer))
                         .withName(parseLabel(buffer))
                         .build();
-            case Alias.ID.CORE_EXPORT:
+            case CORE_EXPORT:
                 return CoreExportAlias.builder()
                         .withSort(sort)
                         .withInstanceIdx(readVarUInt32(buffer))
                         .withName(parseLabel(buffer))
                         .build();
-            case Alias.ID.OUTER:
+            case OUTER:
                 return OuterAlias.builder()
                         .withSort(sort)
                         .withCount(readVarUInt32(buffer))
@@ -744,13 +783,51 @@ public final class ComponentParser {
 
     private static ValType parseValType(ByteBuffer buffer) {
         var opcode = peekByte(buffer);
-        var primValType = primValTypeForOpcode(opcode);
-        if (primValType != null) {
-            buffer.position(buffer.position() + 1);
-            return ValType.builder().withPrimValType(primValType).build();
+        var kind = DefValType.Kind.fromOpcode(opcode);
+        if (kind != null) {
+            var primValType = primValTypeForKind(kind);
+            if (primValType != null) {
+                buffer.position(buffer.position() + 1);
+                return ValType.builder().withPrimValType(primValType).build();
+            }
         }
         var typeIdx = readVarUInt32(buffer);
         return ValType.builder().withTypeIdx((int) typeIdx).build();
+    }
+
+    private static PrimValType primValTypeForKind(DefValType.Kind kind) {
+        switch (kind) {
+            case BOOL:
+                return PrimValType.BOOL;
+            case S8:
+                return PrimValType.S8;
+            case U8:
+                return PrimValType.U8;
+            case S16:
+                return PrimValType.S16;
+            case U16:
+                return PrimValType.U16;
+            case S32:
+                return PrimValType.S32;
+            case U32:
+                return PrimValType.U32;
+            case S64:
+                return PrimValType.S64;
+            case U64:
+                return PrimValType.U64;
+            case F32:
+                return PrimValType.F32;
+            case F64:
+                return PrimValType.F64;
+            case CHAR:
+                return PrimValType.CHAR;
+            case STRING:
+                return PrimValType.STRING;
+            case ERROR_CONTEXT:
+                return PrimValType.ERROR_CONTEXT;
+            default:
+                return null;
+        }
     }
 
     private static ValType parseOptionalValType(ByteBuffer buffer) {
@@ -771,41 +848,6 @@ public final class ComponentParser {
         var bytes = new byte[length];
         readBytes(buffer, bytes);
         return new String(bytes, StandardCharsets.UTF_8);
-    }
-
-    private static PrimValType primValTypeForOpcode(int opcode) {
-        switch (opcode) {
-            case DefValType.ID.BOOL:
-                return PrimValType.BOOL;
-            case DefValType.ID.S8:
-                return PrimValType.S8;
-            case DefValType.ID.U8:
-                return PrimValType.U8;
-            case DefValType.ID.S16:
-                return PrimValType.S16;
-            case DefValType.ID.U16:
-                return PrimValType.U16;
-            case DefValType.ID.S32:
-                return PrimValType.S32;
-            case DefValType.ID.U32:
-                return PrimValType.U32;
-            case DefValType.ID.S64:
-                return PrimValType.S64;
-            case DefValType.ID.U64:
-                return PrimValType.U64;
-            case DefValType.ID.F32:
-                return PrimValType.F32;
-            case DefValType.ID.F64:
-                return PrimValType.F64;
-            case DefValType.ID.CHAR:
-                return PrimValType.CHAR;
-            case DefValType.ID.STRING:
-                return PrimValType.STRING;
-            case DefValType.ID.ERROR_CONTEXT:
-                return PrimValType.ERROR_CONTEXT;
-            default:
-                return null;
-        }
     }
 
     static byte readByte(ByteBuffer buffer) {

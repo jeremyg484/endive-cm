@@ -4,28 +4,45 @@ import java.util.Objects;
 
 public abstract class Alias {
 
-    private final int id;
+    private final Kind kind;
     private final Sort sort;
 
-    protected Alias(int id, Sort sort) {
+    protected Alias(Kind kind, Sort sort) {
         Objects.requireNonNull(sort, "sort");
-        this.id = id;
+        this.kind = kind;
         this.sort = sort;
     }
 
-    public int id() {
-        return id;
+    public Kind kind() {
+        return kind;
     }
 
     public Sort sort() {
         return sort;
     }
 
-    public static final class ID {
-        private ID() {}
+    public enum Kind {
+        EXPORT(0x00),
+        CORE_EXPORT(0x01),
+        OUTER(0x02);
 
-        public static final int EXPORT = 0x00;
-        public static final int CORE_EXPORT = 0x01;
-        public static final int OUTER = 0x02;
+        private final int opcode;
+
+        Kind(int opcode) {
+            this.opcode = opcode;
+        }
+
+        public int opcode() {
+            return opcode;
+        }
+
+        public static Kind fromOpcode(int opcode) {
+            for (Kind kind : values()) {
+                if (kind.opcode == opcode) {
+                    return kind;
+                }
+            }
+            return null;
+        }
     }
 }

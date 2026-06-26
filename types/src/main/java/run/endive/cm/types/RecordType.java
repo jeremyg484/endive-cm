@@ -11,7 +11,7 @@ public final class RecordType extends DefValType {
     private final List<LabelValType> fields;
 
     private RecordType(List<LabelValType> fields) {
-        super(ID.RECORD);
+        super(Kind.RECORD);
         this.fields = List.copyOf(fields);
     }
 

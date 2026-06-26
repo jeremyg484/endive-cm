@@ -9,7 +9,7 @@ public final class OptionType extends DefValType {
     private final ValType valType;
 
     private OptionType(ValType valType) {
-        super(ID.OPTION);
+        super(Kind.OPTION);
         this.valType = requireNonNull(valType, "valType");
     }
 

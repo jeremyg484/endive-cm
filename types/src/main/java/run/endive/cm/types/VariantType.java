@@ -11,7 +11,7 @@ public final class VariantType extends DefValType {
     private final List<Case> cases;
 
     private VariantType(List<Case> cases) {
-        super(ID.VARIANT);
+        super(Kind.VARIANT);
         this.cases = List.copyOf(cases);
     }
 

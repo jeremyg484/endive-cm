@@ -7,7 +7,7 @@ public final class OwnType extends DefValType {
     private final int typeIdx;
 
     private OwnType(int typeIdx) {
-        super(ID.OWN);
+        super(Kind.OWN);
         this.typeIdx = typeIdx;
     }
 

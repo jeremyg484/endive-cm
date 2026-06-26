@@ -7,7 +7,7 @@ public final class ListType extends DefValType {
     private static final int UNDEFINED_SIZE = -1;
 
     private ListType(ValType elementType, int fixedSize) {
-        super(ID.LIST);
+        super(Kind.LIST);
         this.elementType = elementType;
         this.size = fixedSize;
     }

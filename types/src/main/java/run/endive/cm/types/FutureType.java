@@ -7,7 +7,7 @@ public final class FutureType extends DefValType {
     private final ValType elementType;
 
     private FutureType(ValType elementType) {
-        super(ID.FUTURE);
+        super(Kind.FUTURE);
         this.elementType = elementType;
     }
 

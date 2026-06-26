@@ -10,7 +10,7 @@ public final class TupleType extends DefValType {
     private final List<ValType> elementTypes;
 
     private TupleType(List<ValType> elementTypes) {
-        super(ID.TUPLE);
+        super(Kind.TUPLE);
         this.elementTypes = List.copyOf(elementTypes);
     }
 

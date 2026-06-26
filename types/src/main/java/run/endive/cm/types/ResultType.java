@@ -8,7 +8,7 @@ public final class ResultType extends DefValType {
     private final ValType error;
 
     private ResultType(ValType ok, ValType error) {
-        super(ID.RESULT);
+        super(Kind.RESULT);
         this.ok = ok;
         this.error = error;
     }

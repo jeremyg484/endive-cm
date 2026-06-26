@@ -7,7 +7,7 @@ public final class BorrowType extends DefValType {
     private final int typeIdx;
 
     private BorrowType(int typeIdx) {
-        super(ID.BORROW);
+        super(Kind.BORROW);
         this.typeIdx = typeIdx;
     }
 

@@ -7,7 +7,7 @@ public final class StreamType extends DefValType {
     private final ValType elementType;
 
     private StreamType(ValType elementType) {
-        super(ID.STREAM);
+        super(Kind.STREAM);
         this.elementType = elementType;
     }
 

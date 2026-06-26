@@ -8,7 +8,7 @@ public final class CoreExportAlias extends Alias {
     private final String name;
 
     private CoreExportAlias(Sort sort, long instanceIdx, String name) {
-        super(ID.CORE_EXPORT, sort);
+        super(Kind.CORE_EXPORT, sort);
         Objects.requireNonNull(name, "name");
         this.instanceIdx = instanceIdx;
         this.name = name;

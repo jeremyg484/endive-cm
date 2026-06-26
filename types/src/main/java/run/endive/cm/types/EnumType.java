@@ -11,7 +11,7 @@ public final class EnumType extends DefValType {
     private final List<String> labels;
 
     private EnumType(List<String> labels) {
-        super(ID.ENUM);
+        super(Kind.ENUM);
         this.labels = List.copyOf(labels);
     }
 

@@ -8,7 +8,7 @@ public final class OuterAlias extends Alias {
     private final long index;
 
     private OuterAlias(Sort sort, long count, long index) {
-        super(ID.OUTER, sort);
+        super(Kind.OUTER, sort);
         this.count = count;
         this.index = index;
     }

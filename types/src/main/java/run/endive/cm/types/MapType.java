@@ -10,7 +10,7 @@ public final class MapType extends DefValType {
     private final ValType valueType;
 
     private MapType(ValType keyType, ValType valueType) {
-        super(ID.MAP);
+        super(Kind.MAP);
         this.keyType = requireNonNull(keyType, "keyType");
         this.valueType = requireNonNull(valueType, "valueType");
     }

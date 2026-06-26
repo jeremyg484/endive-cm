@@ -11,7 +11,7 @@ public final class FlagsType extends DefValType {
     private final List<String> labels;
 
     private FlagsType(List<String> labels) {
-        super(ID.FLAGS);
+        super(Kind.FLAGS);
         this.labels = List.copyOf(labels);
     }
 
