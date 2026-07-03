@@ -78,7 +78,7 @@ public final class Export {
 
     @Override
     public String toString() {
-        return "ExportDecl{"
+        return "Export{"
                 + "name="
                 + name
                 + ", sortIdx="

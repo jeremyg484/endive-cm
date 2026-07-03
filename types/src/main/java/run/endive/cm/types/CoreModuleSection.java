@@ -33,4 +33,23 @@ public final class CoreModuleSection extends Section {
             return new CoreModuleSection(module);
         }
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof CoreModuleSection)) {
+            return false;
+        }
+        CoreModuleSection that = (CoreModuleSection) o;
+        return Objects.equals(module, that.module);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(module);
+    }
+
+    @Override
+    public String toString() {
+        return "CoreModuleSection{" + "module=" + module + '}';
+    }
 }

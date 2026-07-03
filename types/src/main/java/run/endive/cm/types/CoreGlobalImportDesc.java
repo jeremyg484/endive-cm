@@ -48,6 +48,21 @@ public final class CoreGlobalImportDesc extends CoreImportDesc {
     }
 
     @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof CoreGlobalImportDesc)) {
+            return false;
+        }
+        CoreGlobalImportDesc that = (CoreGlobalImportDesc) o;
+        return Objects.equals(mutabilityType, that.mutabilityType)
+                && Objects.equals(valType, that.valType);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(mutabilityType, valType);
+    }
+
+    @Override
     public String toString() {
         return "CoreGlobalImportDesc{"
                 + "mutabilityType="

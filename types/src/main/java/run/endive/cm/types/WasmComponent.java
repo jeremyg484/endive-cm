@@ -5,95 +5,126 @@ import static java.util.Objects.requireNonNull;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 public final class WasmComponent {
 
     private final List<Section> sections;
+    private final List<CustomSection> customSections;
+    private final List<CoreModuleSection> coreModuleSections;
+    private final List<CoreInstanceSection> coreInstanceSections;
+    private final List<CoreTypeSection> coreTypeSections;
+    private final List<ComponentSection> componentSections;
+    private final List<InstanceSection> instanceSections;
+    private final List<AliasSection> aliasSections;
+    private final List<CanonSection> canonSections;
+    private final List<TypeSection> typeSections;
+    private final List<ImportSection> importSections;
+    private final List<ExportSection> exportSections;
 
     private WasmComponent(List<Section> sections) {
         this.sections = List.copyOf(sections);
+
+        var customSections = new ArrayList<CustomSection>();
+        var coreModuleSections = new ArrayList<CoreModuleSection>();
+        var coreInstanceSections = new ArrayList<CoreInstanceSection>();
+        var coreTypeSections = new ArrayList<CoreTypeSection>();
+        var componentSections = new ArrayList<ComponentSection>();
+        var instanceSections = new ArrayList<InstanceSection>();
+        var aliasSections = new ArrayList<AliasSection>();
+        var canonSections = new ArrayList<CanonSection>();
+        var typeSections = new ArrayList<TypeSection>();
+        var importSections = new ArrayList<ImportSection>();
+        var exportSections = new ArrayList<ExportSection>();
+
+        for (Section s : this.sections) {
+            if (s instanceof CustomSection) {
+                customSections.add((CustomSection) s);
+            } else if (s instanceof CoreModuleSection) {
+                coreModuleSections.add((CoreModuleSection) s);
+            } else if (s instanceof CoreInstanceSection) {
+                coreInstanceSections.add((CoreInstanceSection) s);
+            } else if (s instanceof CoreTypeSection) {
+                coreTypeSections.add((CoreTypeSection) s);
+            } else if (s instanceof ComponentSection) {
+                componentSections.add((ComponentSection) s);
+            } else if (s instanceof InstanceSection) {
+                instanceSections.add((InstanceSection) s);
+            } else if (s instanceof AliasSection) {
+                aliasSections.add((AliasSection) s);
+            } else if (s instanceof CanonSection) {
+                canonSections.add((CanonSection) s);
+            } else if (s instanceof TypeSection) {
+                typeSections.add((TypeSection) s);
+            } else if (s instanceof ImportSection) {
+                importSections.add((ImportSection) s);
+            } else if (s instanceof ExportSection) {
+                exportSections.add((ExportSection) s);
+            }
+        }
+
+        this.customSections = List.copyOf(customSections);
+        this.coreModuleSections = List.copyOf(coreModuleSections);
+        this.coreInstanceSections = List.copyOf(coreInstanceSections);
+        this.coreTypeSections = List.copyOf(coreTypeSections);
+        this.componentSections = List.copyOf(componentSections);
+        this.instanceSections = List.copyOf(instanceSections);
+        this.aliasSections = List.copyOf(aliasSections);
+        this.canonSections = List.copyOf(canonSections);
+        this.typeSections = List.copyOf(typeSections);
+        this.importSections = List.copyOf(importSections);
+        this.exportSections = List.copyOf(exportSections);
     }
 
     public static WasmComponent.Builder builder() {
         return new WasmComponent.Builder();
     }
 
+    public List<Section> sections() {
+        return sections;
+    }
+
     public List<CustomSection> coreCustomSections() {
-        return sections.stream()
-                .filter(CustomSection.class::isInstance)
-                .map(CustomSection.class::cast)
-                .collect(Collectors.toList());
+        return customSections;
     }
 
     public List<CoreModuleSection> coreModuleSections() {
-        return sections.stream()
-                .filter(CoreModuleSection.class::isInstance)
-                .map(CoreModuleSection.class::cast)
-                .collect(Collectors.toList());
+        return coreModuleSections;
     }
 
     public List<CoreInstanceSection> coreInstanceSections() {
-        return sections.stream()
-                .filter(CoreInstanceSection.class::isInstance)
-                .map(CoreInstanceSection.class::cast)
-                .collect(Collectors.toList());
+        return coreInstanceSections;
     }
 
     public List<CoreTypeSection> coreTypeSections() {
-        return sections.stream()
-                .filter(CoreTypeSection.class::isInstance)
-                .map(CoreTypeSection.class::cast)
-                .collect(Collectors.toList());
+        return coreTypeSections;
     }
 
     public List<ComponentSection> componentSections() {
-        return sections.stream()
-                .filter(ComponentSection.class::isInstance)
-                .map(ComponentSection.class::cast)
-                .collect(Collectors.toList());
+        return componentSections;
     }
 
     public List<InstanceSection> instanceSections() {
-        return sections.stream()
-                .filter(InstanceSection.class::isInstance)
-                .map(InstanceSection.class::cast)
-                .collect(Collectors.toList());
+        return instanceSections;
     }
 
     public List<AliasSection> aliasSections() {
-        return sections.stream()
-                .filter(AliasSection.class::isInstance)
-                .map(AliasSection.class::cast)
-                .collect(Collectors.toList());
+        return aliasSections;
     }
 
     public List<CanonSection> canonSections() {
-        return sections.stream()
-                .filter(CanonSection.class::isInstance)
-                .map(CanonSection.class::cast)
-                .collect(Collectors.toList());
+        return canonSections;
     }
 
     public List<TypeSection> typeSections() {
-        return sections.stream()
-                .filter(TypeSection.class::isInstance)
-                .map(TypeSection.class::cast)
-                .collect(Collectors.toList());
+        return typeSections;
     }
 
     public List<ImportSection> importSections() {
-        return sections.stream()
-                .filter(ImportSection.class::isInstance)
-                .map(ImportSection.class::cast)
-                .collect(Collectors.toList());
+        return importSections;
     }
 
     public List<ExportSection> exportSections() {
-        return sections.stream()
-                .filter(ExportSection.class::isInstance)
-                .map(ExportSection.class::cast)
-                .collect(Collectors.toList());
+        return exportSections;
     }
 
     public static final class Builder {

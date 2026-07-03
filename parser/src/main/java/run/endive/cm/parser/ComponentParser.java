@@ -370,18 +370,9 @@ public final class ComponentParser {
     private static CoreModuleSection parseCoreModuleSection(
             ByteBuffer buffer, Parser coreModuleParser) {
         var builder = CoreModuleSection.builder();
-        ByteArrayInputStream in;
-        if (buffer.hasArray()) {
-            in =
-                    new ByteArrayInputStream(
-                            buffer.array(),
-                            buffer.arrayOffset() + buffer.position(),
-                            buffer.remaining());
-        } else {
-            byte[] bytes = new byte[buffer.remaining()];
-            buffer.get(bytes);
-            in = new ByteArrayInputStream(bytes);
-        }
+        byte[] bytes = new byte[buffer.remaining()];
+        buffer.get(bytes);
+        ByteArrayInputStream in = new ByteArrayInputStream(bytes);
         return builder.withModule(coreModuleParser.parse(() -> in)).build();
     }
 
@@ -662,8 +653,11 @@ public final class ComponentParser {
                 var builder = Export.builder();
                 builder.withName(readName(buffer)).withSortIdx(parseSortIdx(buffer));
                 var hasExternDesc = readByte(buffer);
-                if (hasExternDesc != 0x00) {
+                if (hasExternDesc == 0x01) {
                     builder.withExternDesc(parseExternDesc(buffer));
+                } else if (hasExternDesc != 0x00) {
+                    throw new MalformedException(
+                            "invalid extern desc presence flag: " + hasExternDesc);
                 }
                 return builder.build();
             case 0x02:
