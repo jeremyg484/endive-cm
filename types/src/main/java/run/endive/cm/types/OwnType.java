@@ -1,6 +1,8 @@
 package run.endive.cm.types;
 
+import java.util.List;
 import java.util.Objects;
+import run.endive.wasm.types.ValType;
 
 public final class OwnType extends DefValType {
 
@@ -17,6 +19,21 @@ public final class OwnType extends DefValType {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    @Override
+    public int alignment(TypeResolver typeResolver, PointerType ptrType) {
+        return 4;
+    }
+
+    @Override
+    public int elementSize(TypeResolver typeResolver, PointerType ptrType) {
+        return 4;
+    }
+
+    @Override
+    public List<ValType> flatten(TypeResolver typeResolver, PointerType ptrType) {
+        return List.of(ValType.I32);
     }
 
     public static final class Builder {

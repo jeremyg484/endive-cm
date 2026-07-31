@@ -18,6 +18,7 @@
   </licenses>
 
   <modules>
+    <module>canonical-abi</module>
     <module>cm-test-gen-lib</module>
     <module>cm-test-gen-plugin</module>
     <module>parser</module>
@@ -44,7 +45,7 @@
     <surefire-plugin.version>3.5.2</surefire-plugin.version>
     <zip4j.version>2.11.6</zip4j.version>
 
-    <endive.version>1.0.1</endive.version>
+    <endive.version>999-SNAPSHOT</endive.version>
     <zerofs.version>0.1.0</zerofs.version>
     <jackson.version>2.22.1</jackson.version>
     <assertj.version>3.27.7</assertj.version>
@@ -97,6 +98,11 @@
         <groupId>run.endive</groupId>
         <artifactId>wasm-tools</artifactId>
         <version>${endive.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>run.endive.cm</groupId>
+        <artifactId>canonical-abi</artifactId>
+        <version>${project.version}</version>
       </dependency>
       <dependency>
         <groupId>run.endive.cm</groupId>

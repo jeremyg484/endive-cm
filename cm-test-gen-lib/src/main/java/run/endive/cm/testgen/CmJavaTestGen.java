@@ -41,6 +41,7 @@ public final class CmJavaTestGen {
         cu.addImport("run.endive.cm.parser.ComponentParser");
         cu.addImport("run.endive.cm.runtime.ComponentLinker");
         cu.addImport("run.endive.cm.runtime.ComponentInstance");
+        cu.addImport("run.endive.cm.runtime.LinkageException");
         cu.addImport("run.endive.cm.tools.ComponentValidate");
         cu.addImport("run.endive.cm.tools.ComponentValidateException");
 
@@ -126,21 +127,15 @@ public final class CmJavaTestGen {
 
         switch (commandType) {
             case MODULE:
-                generateModuleTest(body, command);
-                break;
-            case MODULE_DEFINITION:
-                generateModuleTest(body, command);
-                break;
             case COMPONENT:
                 generateModuleTest(body, command);
                 break;
+            case MODULE_DEFINITION:
+                generateModuleDefinitionTest(body, command);
+                break;
             case ASSERT_MALFORMED:
-                generateAssertInvalidTest(body, command);
-                break;
-            case ASSERT_INVALID:
-                generateAssertInvalidTest(body, command);
-                break;
             case ASSERT_UNLINKABLE:
+            case ASSERT_INVALID:
                 generateAssertInvalidTest(body, command);
                 break;
             case ASSERT_RETURN:
@@ -149,6 +144,9 @@ public final class CmJavaTestGen {
             case ASSERT_TRAP:
                 throw new UnsupportedOperationException(
                         "assert_trap at line " + command.line() + " not yet supported");
+            case ASSERT_UNINSTANTIABLE:
+                generateAssertUninstantiableTest(body, command);
+                break;
             case ACTION:
                 throw new UnsupportedOperationException(
                         "action at line " + command.line() + " not yet supported");
@@ -163,7 +161,38 @@ public final class CmJavaTestGen {
         method.setBody(body);
     }
 
+    private void generateAssertUninstantiableTest(BlockStmt body, CmCommand command) {
+        if (command.filename() == null) {
+            throw new IllegalStateException(
+                    "module command at line " + command.line() + " has no filename");
+        }
+        body.addStatement("byte[] bytes = loadBytes(\"" + command.filename() + "\");");
+        body.addStatement("ComponentValidate.validate(new ByteArrayInputStream(bytes));");
+        body.addStatement("var parser = ComponentParser.builder().build();");
+        body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
+        body.addStatement("assertNotNull(component);");
+        body.addStatement("var linker = ComponentLinker.builder().build();");
+        body.addStatement(
+                "assertThrows(LinkageException.class, () -> linker.instantiate(component));");
+    }
+
     private void generateModuleTest(BlockStmt body, CmCommand command) {
+        if (command.filename() == null) {
+            throw new IllegalStateException(
+                    "module command at line " + command.line() + " has no filename");
+        }
+        body.addStatement("byte[] bytes = loadBytes(\"" + command.filename() + "\");");
+        body.addStatement("ComponentValidate.validate(new ByteArrayInputStream(bytes));");
+        body.addStatement("var parser = ComponentParser.builder().build();");
+        body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
+        body.addStatement("assertNotNull(component);");
+        body.addStatement(
+                "var linker = ComponentLinker.builder().withGenerateImports(true).build();");
+        body.addStatement("ComponentInstance instance = linker.instantiate(component);");
+        body.addStatement("assertNotNull(instance);");
+    }
+
+    private void generateModuleDefinitionTest(BlockStmt body, CmCommand command) {
         if (command.filename() == null) {
             throw new IllegalStateException(
                     "module command at line " + command.line() + " has no filename");
@@ -208,21 +237,18 @@ public final class CmJavaTestGen {
             throw new IllegalStateException(
                     "assert_return at line " + command.line() + " has no preceding component");
         }
-        if (command.expected() != null && command.expected().length > 0) {
-            throw new UnsupportedOperationException(
-                    "assert_return at line "
-                            + command.line()
-                            + " has "
-                            + command.expected().length
-                            + " expected values, not yet supported");
-        }
         body.addStatement("byte[] bytes = loadBytes(\"" + lastComponentFilename + "\");");
         body.addStatement("var parser = ComponentParser.builder().build();");
         body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
         body.addStatement("var linker = ComponentLinker.builder().build();");
         body.addStatement("ComponentInstance instance = linker.instantiate(component);");
         body.addStatement(
-                "Object[] result = instance.export(\"" + command.action().field() + "\").apply();");
-        body.addStatement("assertArrayEquals(new Object[0], result);");
+                "Object[] result = instance.export(\""
+                        + command.action().field()
+                        + "\").apply("
+                        + command.action().emitArgs()
+                        + ");");
+        body.addStatement(
+                "assertArrayEquals(new Object[]{" + command.emitExpected() + "}, result);");
     }
 }

@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-public final class TupleType extends DefValType {
+public final class TupleType extends DefValType implements Specialized<RecordType> {
     private final List<ValType> elementTypes;
 
     private TupleType(List<ValType> elementTypes) {
@@ -20,6 +20,35 @@ public final class TupleType extends DefValType {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    @Override
+    public RecordType despecialize() {
+        var builder = RecordType.builder();
+        for (int i = 0; i < elementTypes.size(); i++) {
+            builder.addField(
+                    LabelValType.builder()
+                            .withLabel(Integer.toString(i))
+                            .withValType(elementTypes.get(i))
+                            .build());
+        }
+        return builder.build();
+    }
+
+    @Override
+    public int alignment(TypeResolver typeResolver, PointerType ptrType) {
+        return despecialize().alignment(typeResolver, ptrType);
+    }
+
+    @Override
+    public int elementSize(TypeResolver typeResolver, PointerType ptrType) {
+        return despecialize().elementSize(typeResolver, ptrType);
+    }
+
+    @Override
+    public List<run.endive.wasm.types.ValType> flatten(
+            TypeResolver typeResolver, PointerType ptrType) {
+        return despecialize().flatten(typeResolver, ptrType);
     }
 
     public static final class Builder {

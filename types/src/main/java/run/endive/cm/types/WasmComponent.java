@@ -5,9 +5,11 @@ import static java.util.Objects.requireNonNull;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 public final class WasmComponent {
 
+    private final WasmComponent parent;
     private final List<Section> sections;
     private final List<CustomSection> customSections;
     private final List<CoreModuleSection> coreModuleSections;
@@ -21,8 +23,22 @@ public final class WasmComponent {
     private final List<ImportSection> importSections;
     private final List<ExportSection> exportSections;
 
-    private WasmComponent(List<Section> sections) {
-        this.sections = List.copyOf(sections);
+    private WasmComponent(WasmComponent parent, List<Section> sections) {
+        this.parent = parent;
+        this.sections =
+                sections.stream()
+                        .map(
+                                s -> {
+                                    if (s instanceof ComponentSection) {
+                                        var componentSection = (ComponentSection) s;
+                                        var component = componentSection.component();
+                                        return ComponentSection.builder()
+                                                .withComponent(component.withParent(this))
+                                                .build();
+                                    }
+                                    return s;
+                                })
+                        .collect(Collectors.toUnmodifiableList());
 
         var customSections = new ArrayList<CustomSection>();
         var coreModuleSections = new ArrayList<CoreModuleSection>();
@@ -75,8 +91,16 @@ public final class WasmComponent {
         this.exportSections = List.copyOf(exportSections);
     }
 
+    public WasmComponent withParent(WasmComponent parent) {
+        return new WasmComponent(parent, sections);
+    }
+
     public static WasmComponent.Builder builder() {
         return new WasmComponent.Builder();
+    }
+
+    public WasmComponent parent() {
+        return parent;
     }
 
     public List<Section> sections() {
@@ -189,7 +213,7 @@ public final class WasmComponent {
         }
 
         public WasmComponent build() {
-            return new WasmComponent(sections);
+            return new WasmComponent(null, sections);
         }
     }
 

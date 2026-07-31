@@ -23,6 +23,10 @@
     </dependency>
     <dependency>
       <groupId>run.endive.cm</groupId>
+      <artifactId>canonical-abi</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
       <artifactId>types</artifactId>
     </dependency>
     <dependency>
@@ -92,6 +96,8 @@
             <wast>wasm-tools/virtualize.wast</wast>
             <wast>wasm-tools/wrong-order.wast</wast>
             <wast>wasmtime/simple.wast</wast>
+            <wast>wasmtime/strings.wast</wast>
+            <wast>wasmtime/types.wast</wast>
           </includedWasts>
           <excludedWasts>
             <wast>async/async-calls-sync.wast</wast>
@@ -150,29 +156,13 @@
             <wast>wasmtime/nested.wast</wast>
             <wast>wasmtime/resources.wast</wast>
             <wast>wasmtime/restrictions.wast</wast>
-            <wast>wasmtime/strings.wast</wast>
             <wast>wasmtime/tags.wast</wast>
-            <wast>wasmtime/types.wast</wast>
           </excludedWasts>
           <excludedTests>
+            <test>CmSpecWasmtimeTypesTest.test20</test>
             <test>CmSpecWasmToolsMemory64Test.test2</test>
             <test>CmSpecWasmToolsMemory64Test.test3</test>
             <test>CmSpecWasmToolsMemory64Test.test4</test>
-            <test>CmSpecWasmToolsNamingTest.test3</test>
-            <test>CmSpecWasmToolsAdaptTest.test14</test>
-            <test>CmSpecWasmToolsAdaptTest.test18</test>
-            <test>CmSpecWasmToolsDefinedtypesTest.test1</test>
-            <test>CmSpecWasmToolsExportIntroducesAliasTest.test3</test>
-            <test>CmSpecWasmToolsInlineExportsTest.test1</test>
-            <test>CmSpecWasmToolsInstanceTypeTest.test8</test>
-            <test>CmSpecWasmToolsInvalidTest.test1</test>
-            <test>CmSpecWasmToolsInvalidTest.test2</test>
-            <test>CmSpecWasmToolsInvalidTest.test3</test>
-            <test>CmSpecWasmToolsInvalidTest.test4</test>
-            <test>CmSpecWasmToolsTypesTest.test15</test>
-            <test>CmSpecWasmToolsTypesTest.test18</test>
-            <test>CmSpecWasmToolsTypesTest.test24</test>
-            <test>CmSpecWasmToolsVeryNestedTest.test4</test>
             <test>CmSpecWasmtimeSimpleTest.test4</test>
             <test>CmSpecWasmtimeSimpleTest.test5</test>
           </excludedTests>

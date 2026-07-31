@@ -9,6 +9,7 @@ public enum CmCommandType {
     ASSERT_UNLINKABLE,
     ASSERT_RETURN,
     ASSERT_TRAP,
+    ASSERT_UNINSTANTIABLE,
     ACTION,
     REGISTER;
 
@@ -30,6 +31,8 @@ public enum CmCommandType {
                 return ASSERT_RETURN;
             case "assert_trap":
                 return ASSERT_TRAP;
+            case "assert_uninstantiable":
+                return ASSERT_UNINSTANTIABLE;
             case "action":
                 return ACTION;
             case "register":

@@ -2,9 +2,10 @@ package run.endive.cm.types;
 
 import static java.util.Objects.requireNonNull;
 
+import java.util.List;
 import java.util.Objects;
 
-public final class OptionType extends DefValType {
+public final class OptionType extends DefValType implements Specialized<VariantType> {
 
     private final ValType valType;
 
@@ -19,6 +20,30 @@ public final class OptionType extends DefValType {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    @Override
+    public VariantType despecialize() {
+        return VariantType.builder()
+                .addCase(Case.builder().withLabel("none").build())
+                .addCase(Case.builder().withLabel("some").withValType(valType).build())
+                .build();
+    }
+
+    @Override
+    public int alignment(TypeResolver typeResolver, PointerType ptrType) {
+        return despecialize().alignment(typeResolver, ptrType);
+    }
+
+    @Override
+    public int elementSize(TypeResolver typeResolver, PointerType ptrType) {
+        return despecialize().elementSize(typeResolver, ptrType);
+    }
+
+    @Override
+    public List<run.endive.wasm.types.ValType> flatten(
+            TypeResolver typeResolver, PointerType ptrType) {
+        return despecialize().flatten(typeResolver, ptrType);
     }
 
     public static final class Builder {

@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import run.endive.wasm.types.ValType;
 
 public final class FlagsType extends DefValType {
 
@@ -21,6 +22,32 @@ public final class FlagsType extends DefValType {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    @Override
+    public int alignment(TypeResolver typeResolver, PointerType ptrType) {
+        return sizeForLabelCount();
+    }
+
+    @Override
+    public int elementSize(TypeResolver typeResolver, PointerType ptrType) {
+        return sizeForLabelCount();
+    }
+
+    private int sizeForLabelCount() {
+        int n = labels.size();
+        if (n <= 8) {
+            return 1;
+        }
+        if (n <= 16) {
+            return 2;
+        }
+        return 4;
+    }
+
+    @Override
+    public List<ValType> flatten(TypeResolver typeResolver, PointerType ptrType) {
+        return List.of(ValType.I32);
     }
 
     public static final class Builder {

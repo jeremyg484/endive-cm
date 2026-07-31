@@ -1,5 +1,6 @@
 package run.endive.cm.types;
 
+import java.util.List;
 import java.util.Objects;
 
 public final class StreamType extends DefValType {
@@ -21,6 +22,22 @@ public final class StreamType extends DefValType {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    @Override
+    public int alignment(TypeResolver typeResolver, PointerType ptrType) {
+        return 4;
+    }
+
+    @Override
+    public int elementSize(TypeResolver typeResolver, PointerType ptrType) {
+        return 4;
+    }
+
+    @Override
+    public List<run.endive.wasm.types.ValType> flatten(
+            TypeResolver typeResolver, PointerType ptrType) {
+        return List.of(run.endive.wasm.types.ValType.I32);
     }
 
     public static final class Builder {

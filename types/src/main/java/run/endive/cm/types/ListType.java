@@ -1,5 +1,8 @@
 package run.endive.cm.types;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public final class ListType extends DefValType {
 
     private final ValType elementType;
@@ -26,6 +29,40 @@ public final class ListType extends DefValType {
 
     public int size() {
         return size;
+    }
+
+    @Override
+    public int alignment(TypeResolver typeResolver, PointerType ptrType) {
+        if (isFixedSize()) {
+            return typeResolver.resolveDefValType(elementType).alignment(typeResolver, ptrType);
+        }
+        return ptrType.size();
+    }
+
+    @Override
+    public int elementSize(TypeResolver typeResolver, PointerType ptrType) {
+        if (isFixedSize()) {
+            return size
+                    * typeResolver
+                            .resolveDefValType(elementType)
+                            .elementSize(typeResolver, ptrType);
+        }
+        return 2 * ptrType.size();
+    }
+
+    @Override
+    public List<run.endive.wasm.types.ValType> flatten(
+            TypeResolver typeResolver, PointerType ptrType) {
+        if (isFixedSize()) {
+            var elemFlat =
+                    typeResolver.resolveDefValType(elementType).flatten(typeResolver, ptrType);
+            List<run.endive.wasm.types.ValType> flat = new ArrayList<>();
+            for (int i = 0; i < size; i++) {
+                flat.addAll(elemFlat);
+            }
+            return List.copyOf(flat);
+        }
+        return List.of(ptrType.coreValType(), ptrType.coreValType());
     }
 
     public static final class Builder {

@@ -1,8 +1,9 @@
 package run.endive.cm.types;
 
+import java.util.List;
 import java.util.Objects;
 
-public final class ResultType extends DefValType {
+public final class ResultType extends DefValType implements Specialized<VariantType> {
 
     private final ValType ok;
     private final ValType error;
@@ -31,6 +32,35 @@ public final class ResultType extends DefValType {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    @Override
+    public VariantType despecialize() {
+        var okCase = Case.builder().withLabel("ok");
+        if (ok != null) {
+            okCase.withValType(ok);
+        }
+        var errorCase = Case.builder().withLabel("error");
+        if (error != null) {
+            errorCase.withValType(error);
+        }
+        return VariantType.builder().addCase(okCase.build()).addCase(errorCase.build()).build();
+    }
+
+    @Override
+    public int alignment(TypeResolver typeResolver, PointerType ptrType) {
+        return despecialize().alignment(typeResolver, ptrType);
+    }
+
+    @Override
+    public int elementSize(TypeResolver typeResolver, PointerType ptrType) {
+        return despecialize().elementSize(typeResolver, ptrType);
+    }
+
+    @Override
+    public List<run.endive.wasm.types.ValType> flatten(
+            TypeResolver typeResolver, PointerType ptrType) {
+        return despecialize().flatten(typeResolver, ptrType);
     }
 
     public static final class Builder {
