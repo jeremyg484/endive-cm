@@ -1,10 +1,8 @@
 package run.endive.cm.abi;
 
 import static java.util.Objects.requireNonNull;
-
 import run.endive.cm.types.PointerType;
 import run.endive.cm.types.TypeResolver;
-import run.endive.runtime.ExportFunction;
 import run.endive.runtime.Memory;
 
 public final class LiftLowerContext {
@@ -13,7 +11,7 @@ public final class LiftLowerContext {
     private final PointerType ptrType;
     private final StringEncoding stringEncoding;
     private final TypeResolver typeResolver;
-    private final ExportFunction postReturn;
+    private final PostReturn postReturn;
     private final Realloc realloc;
     private final boolean async;
     private final Callback callback;
@@ -23,7 +21,7 @@ public final class LiftLowerContext {
             PointerType ptrType,
             StringEncoding stringEncoding,
             TypeResolver typeResolver,
-            ExportFunction postReturn,
+            PostReturn postReturn,
             Realloc realloc,
             boolean async,
             Callback callback) {
@@ -53,7 +51,7 @@ public final class LiftLowerContext {
         return typeResolver;
     }
 
-    public ExportFunction postReturn() {
+    public PostReturn postReturn() {
         return postReturn;
     }
 
@@ -78,7 +76,7 @@ public final class LiftLowerContext {
         private PointerType ptrType;
         private StringEncoding stringEncoding;
         private TypeResolver typeResolver;
-        private ExportFunction postReturn;
+        private PostReturn postReturn;
         private Realloc realloc;
         private boolean async;
         private Callback callback;
@@ -105,7 +103,7 @@ public final class LiftLowerContext {
             return this;
         }
 
-        public Builder withPostReturn(ExportFunction postReturn) {
+        public Builder withPostReturn(PostReturn postReturn) {
             this.postReturn = postReturn;
             return this;
         }

@@ -32,7 +32,7 @@ public final class CoreExportFunction implements CoreFunction<ExportFunction> {
     }
 
     @Override
-    public long[] apply(long[] args) {
+    public long[] apply(long... args) {
         return exportFunction.apply(args);
     }
 }

@@ -225,8 +225,7 @@ public final class CanonicalAbi {
     }
 
     /** Flattens each of {@code ts} in turn and concatenates the results ({@code flatten_types}). */
-    private static List<ValType> flattenTypes(
-            LiftLowerContext ctx, List<run.endive.cm.types.ValType> ts) {
+    static List<ValType> flattenTypes(LiftLowerContext ctx, List<run.endive.cm.types.ValType> ts) {
         List<ValType> flat = new ArrayList<>();
         for (run.endive.cm.types.ValType t : ts) {
             flat.addAll(
@@ -242,7 +241,7 @@ public final class CanonicalAbi {
      * the type used to load/store a whole parameter or result list from a single spill
      * buffer when it is too large to pass as flat core values.
      */
-    private static TupleType tupleTypeOf(List<run.endive.cm.types.ValType> ts) {
+    static TupleType tupleTypeOf(List<run.endive.cm.types.ValType> ts) {
         var builder = TupleType.builder();
         for (run.endive.cm.types.ValType t : ts) {
             builder.addElementType(t);
@@ -299,7 +298,7 @@ public final class CanonicalAbi {
         }
     }
 
-    private static long loadInt(Memory memory, int ptr, int nbytes, boolean signed) {
+    static long loadInt(Memory memory, int ptr, int nbytes, boolean signed) {
         switch (nbytes) {
             case 1:
                 return signed ? memory.read(ptr) : memory.readU8(ptr);
@@ -326,7 +325,7 @@ public final class CanonicalAbi {
         return Double.isNaN(f) ? Double.longBitsToDouble(CANONICAL_FLOAT64_NAN_BITS) : f;
     }
 
-    private static int convertI32ToChar(long i) {
+    static int convertI32ToChar(long i) {
         if (i >= MAX_UNICODE_SCALAR_VALUE) {
             throw new TrapException("char codepoint " + i + " exceeds the maximum scalar value");
         }
@@ -445,58 +444,88 @@ public final class CanonicalAbi {
     }
 
     private static String loadStringFromRange(LiftLowerContext ctx, int ptr, long taggedCodeUnits) {
-        long tag = utf16Tag(ctx.ptrType());
-        int alignment;
-        long byteLength;
-        Charset charset;
+        var range = stringRange(ctx, taggedCodeUnits);
+        return decodeStrict(readStringBytes(ctx, ptr, range), range.charset);
+    }
+
+    /**
+     * Resolves a {@code (ptr, tagged_code_units)} pair against the context's string encoding
+     * into the concrete byte range and charset it denotes, without touching memory. The
+     * {@code latin1+utf16} encoding picks its charset from the high bit of {@code
+     * taggedCodeUnits}; the other two are fixed.
+     */
+    static StringRange stringRange(LiftLowerContext ctx, long taggedCodeUnits) {
         switch (ctx.stringEncoding()) {
             case UTF8:
-                alignment = 1;
-                byteLength = taggedCodeUnits;
-                charset = StandardCharsets.UTF_8;
-                break;
+                return new StringRange(1, taggedCodeUnits, StandardCharsets.UTF_8);
             case UTF16:
-                alignment = 2;
-                byteLength = 2 * taggedCodeUnits;
-                charset = StandardCharsets.UTF_16LE;
-                break;
+                return new StringRange(2, 2 * taggedCodeUnits, StandardCharsets.UTF_16LE);
             case LATIN1_UTF16:
-                alignment = 2;
+                long tag = utf16Tag(ctx.ptrType());
                 if ((taggedCodeUnits & tag) != 0) {
-                    byteLength = 2 * (taggedCodeUnits ^ tag);
-                    charset = StandardCharsets.UTF_16LE;
-                } else {
-                    byteLength = taggedCodeUnits;
-                    charset = StandardCharsets.ISO_8859_1;
+                    return new StringRange(
+                            2, 2 * (taggedCodeUnits ^ tag), StandardCharsets.UTF_16LE);
                 }
-                break;
+                return new StringRange(taggedCodeUnits, StandardCharsets.ISO_8859_1);
             default:
                 throw new IllegalStateException(
                         "unhandled string encoding " + ctx.stringEncoding());
         }
+    }
 
-        if (byteLength > MAX_STRING_BYTE_LENGTH) {
+    /** Applies the length, alignment and bounds traps guarding a string range, then reads it. */
+    static byte[] readStringBytes(LiftLowerContext ctx, int ptr, StringRange range) {
+        if (range.byteLength > MAX_STRING_BYTE_LENGTH) {
             throw new TrapException(
                     "string byte length exceeds the maximum of " + MAX_STRING_BYTE_LENGTH);
         }
-        if (ptr != DefValType.alignTo(ptr, alignment)) {
-            throw new TrapException("string pointer " + ptr + " is not aligned to " + alignment);
-        }
-        if (ptr + byteLength > Memory.bytes(ctx.memory().pages())) {
+        if (ptr != DefValType.alignTo(ptr, range.alignment)) {
             throw new TrapException(
-                    "string of byte length " + byteLength + " at " + ptr + " is out of bounds");
+                    "string pointer " + ptr + " is not aligned to " + range.alignment);
         }
-        byte[] bytes = ctx.memory().readBytes(ptr, (int) byteLength);
-        return decodeStrict(bytes, charset);
+        if (ptr + range.byteLength > Memory.bytes(ctx.memory().pages())) {
+            throw new TrapException(
+                    "string of byte length "
+                            + range.byteLength
+                            + " at "
+                            + ptr
+                            + " is out of bounds");
+        }
+        return ctx.memory().readBytes(ptr, (int) range.byteLength);
+    }
+
+    /** The byte range and charset a {@code (ptr, tagged_code_units)} pair resolves to. */
+    static final class StringRange {
+        final int alignment;
+        final long byteLength;
+        final Charset charset;
+
+        StringRange(int alignment, long byteLength, Charset charset) {
+            this.alignment = alignment;
+            this.byteLength = byteLength;
+            this.charset = charset;
+        }
+
+        StringRange(long byteLength, Charset charset) {
+            this(2, byteLength, charset);
+        }
     }
 
     private static String decodeStrict(byte[] bytes, Charset charset) {
+        return decodeStrictToChars(bytes, charset).toString();
+    }
+
+    /**
+     * Strictly decodes {@code bytes}, trapping on any malformed or unmappable input. Returns
+     * the {@link CharBuffer} rather than a {@link String} so the transfer path can re-encode
+     * without ever materializing one.
+     */
+    static CharBuffer decodeStrictToChars(byte[] bytes, Charset charset) {
         try {
             return charset.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(bytes))
-                    .toString();
+                    .decode(ByteBuffer.wrap(bytes));
         } catch (CharacterCodingException e) {
             throw new TrapException("invalid " + charset.name() + " byte sequence");
         }
@@ -573,7 +602,7 @@ public final class CanonicalAbi {
         }
     }
 
-    private static void storeInt(Memory memory, long v, int ptr, int nbytes) {
+    static void storeInt(Memory memory, long v, int ptr, int nbytes) {
         switch (nbytes) {
             case 1:
                 memory.writeByte(ptr, (byte) v);
@@ -735,7 +764,7 @@ public final class CanonicalAbi {
      * dispatches on the destination encoding alone and always (re-)encodes directly
      * from {@code v}, which is simpler and produces identical results.
      */
-    private static PtrAndCodeUnits storeStringIntoRange(LiftLowerContext ctx, String v) {
+    static PtrAndCodeUnits storeStringIntoRange(LiftLowerContext ctx, CharSequence v) {
         switch (ctx.stringEncoding()) {
             case UTF8:
                 return storeStringCopy(ctx, v, 1, StandardCharsets.UTF_8);
@@ -750,13 +779,14 @@ public final class CanonicalAbi {
     }
 
     private static PtrAndCodeUnits storeStringCopy(
-            LiftLowerContext ctx, String src, int dstCodeUnitSize, Charset dstCharset) {
+            LiftLowerContext ctx, CharSequence src, int dstCodeUnitSize, Charset dstCharset) {
         byte[] encoded = encodeStrict(src, dstCharset);
         int ptr = allocateAndWrite(ctx, dstCodeUnitSize, encoded);
         return new PtrAndCodeUnits(ptr, encoded.length / dstCodeUnitSize);
     }
 
-    private static PtrAndCodeUnits storeStringToLatin1OrUtf16(LiftLowerContext ctx, String src) {
+    private static PtrAndCodeUnits storeStringToLatin1OrUtf16(
+            LiftLowerContext ctx, CharSequence src) {
         boolean fitsLatin1 = src.chars().allMatch(c -> c < 0x100);
         if (fitsLatin1) {
             byte[] encoded = encodeStrict(src, StandardCharsets.ISO_8859_1);
@@ -768,7 +798,7 @@ public final class CanonicalAbi {
         return new PtrAndCodeUnits(ptr, (encoded.length / 2) | utf16Tag(ctx.ptrType()));
     }
 
-    private static byte[] encodeStrict(String src, Charset charset) {
+    static byte[] encodeStrict(CharSequence src, Charset charset) {
         try {
             var buf =
                     charset.newEncoder()
@@ -783,7 +813,7 @@ public final class CanonicalAbi {
         }
     }
 
-    private static int allocateAndWrite(LiftLowerContext ctx, int alignment, byte[] bytes) {
+    static int allocateAndWrite(LiftLowerContext ctx, int alignment, byte[] bytes) {
         if (bytes.length > MAX_STRING_BYTE_LENGTH) {
             throw new TrapException(
                     "string byte length exceeds the maximum of " + MAX_STRING_BYTE_LENGTH);
@@ -794,7 +824,7 @@ public final class CanonicalAbi {
     }
 
     /** {@code (ptr, code_units)} pair returned by the {@code store_string*} family. */
-    private static final class PtrAndCodeUnits {
+    static final class PtrAndCodeUnits {
         final int ptr;
         final long codeUnits;
 
@@ -1410,8 +1440,786 @@ public final class CanonicalAbi {
         }
     }
 
+    // -------------------------------------------------------------------------------------
+    // Direct transfer
+    //
+    // When a lifted component function is immediately lowered back into another core
+    // module — the shape produced by wiring two core modules together through the
+    // component's type — the lift/lower pair above round-trips every value through a Java
+    // String, List, Map or boxed Number that nothing ever observes. The methods below move
+    // the same values straight from the source memory into the destination memory,
+    // collapsing whole records and lists into single copies where the Canonical ABI
+    // guarantees the bytes are identical, and doing real work only where it does not
+    // (string transcoding, pointer re-allocation, and the normalizations catalogued in
+    // {@link Transferability}).
+    // -------------------------------------------------------------------------------------
+
+    /**
+     * Bulk copies move through an intermediate {@code byte[]} because {@link Memory} exposes
+     * no memory-to-memory primitive; chunking bounds that buffer instead of letting it scale
+     * with the list being copied.
+     */
+    private static final int COPY_CHUNK_BYTES = 64 * 1024;
+
+    /**
+     * Whether {@code ft}'s values can move directly between {@code src} and {@code dst}
+     * rather than through the lift/lower pair. A {@code false} result is always safe — the
+     * caller simply keeps using {@link #liftFlatParams}/{@link #lowerFlatParams} — so this
+     * rejects anything the transfer path does not yet model rather than trying to be
+     * exhaustive.
+     */
+    public static boolean canTransfer(LiftLowerContext src, LiftLowerContext dst, FuncType ft) {
+        if (src.isAsync() || dst.isAsync() || ft.isAsync()) {
+            return false;
+        }
+        if (src.ptrType() != dst.ptrType()) {
+            return false;
+        }
+        if (src.memory() == null || dst.memory() == null) {
+            return false;
+        }
+        for (LabelValType p : ft.params()) {
+            if (!Transferability.isSupported(
+                    src.typeResolver(), src.typeResolver().resolveDefValType(p.valType()))) {
+                return false;
+            }
+        }
+        return !ft.hasResult()
+                || Transferability.isSupported(
+                        src.typeResolver(), src.typeResolver().resolveDefValType(ft.result()));
+    }
+
+    /**
+     * Moves the value of type {@code t} at {@code srcPtr} in {@code src}'s memory to {@code
+     * dstPtr} in {@code dst}'s memory, without materializing it as a Java value.
+     *
+     * <p>Observably equivalent to {@code store(dst, load(src, srcPtr, t), t, dstPtr)}, with
+     * one deliberate exception: {@code f32}/{@code f64} NaN payloads are preserved rather
+     * than canonicalized, which the Canonical ABI explicitly permits ("hosts may instead
+     * choose to canonicalize to an arbitrary fixed NaN value, or even to the original value
+     * of the NaN before lifting") and which is what lets float-bearing aggregates copy in
+     * bulk. Every trap the lift path raises is raised here too.
+     *
+     * <p>Both contexts must agree on {@link LiftLowerContext#ptrType()}, since the whole
+     * approach rests on a value occupying the same layout in both memories; {@code dst} must
+     * supply a {@code realloc} if {@code t} contains a string or an unbounded list.
+     */
+    public static void transfer(
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, DefValType t) {
+        requireTransferable(src, dst);
+        var d = despecialize(t);
+        if (Transferability.isBitwiseCopyable(src.typeResolver(), src.ptrType(), d)) {
+            copyBytes(src, dst, srcPtr, dstPtr, d.elementSize(src.typeResolver(), src.ptrType()));
+            return;
+        }
+        transferValue(src, dst, srcPtr, dstPtr, d);
+    }
+
+    /**
+     * Transfers a function's flat core <em>parameters</em> {@code flatArgs} of types {@code
+     * ts} from {@code src} to {@code dst}, returning the destination's flat parameters.
+     *
+     * @see #transfer
+     */
+    public static long[] transferFlatParams(
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            long[] flatArgs,
+            List<run.endive.cm.types.ValType> ts) {
+        requireTransferable(src, dst);
+        return transferFlatValues(src, dst, MAX_FLAT_PARAMS, new CoreValues(flatArgs), ts, null);
+    }
+
+    /**
+     * Transfers a function's flat core <em>results</em> {@code flatResults} of types {@code
+     * ts} from {@code src} to {@code dst}. When the results spill into linear memory,
+     * {@code outParam}'s first element is the destination's caller-provided spill pointer
+     * and no flat values are returned; when it is null, destination storage is freshly
+     * allocated and the returned list is the spill pointer.
+     *
+     * @see #transfer
+     */
+    public static long[] transferFlatResults(
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            long[] flatResults,
+            List<run.endive.cm.types.ValType> ts,
+            long[] outParam) {
+        requireTransferable(src, dst);
+        return transferFlatValues(
+                src, dst, MAX_FLAT_RESULTS, new CoreValues(flatResults), ts, outParam);
+    }
+
+    /**
+     * Rejects context pairs the transfer path cannot serve. A differing pointer width would
+     * give the same value a different layout on each side, which every offset computation
+     * below assumes away; async lifting and lowering are not modeled here yet.
+     */
+    static void requireTransferable(LiftLowerContext src, LiftLowerContext dst) {
+        if (src.ptrType() != dst.ptrType()) {
+            throw new IllegalArgumentException(
+                    "cannot transfer between contexts with different pointer widths: "
+                            + src.ptrType()
+                            + " and "
+                            + dst.ptrType());
+        }
+        if (src.isAsync() || dst.isAsync()) {
+            throw new UnsupportedOperationException(
+                    "transferring values between async contexts is not implemented yet");
+        }
+    }
+
+    /**
+     * Transfers a value that is known not to be wholly bitwise copyable, dispatching on its
+     * kind. Source and destination offsets stay in lockstep throughout: the two memories lay
+     * the value out identically, so only the base pointers differ.
+     */
+    static void transferValue(
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, DefValType t) {
+        var d = despecialize(t);
+        switch (d.kind()) {
+            case BOOL:
+                transferBool(src, dst, srcPtr, dstPtr);
+                return;
+            case U8:
+            case S8:
+                copyScalar(src, dst, srcPtr, dstPtr, 1);
+                return;
+            case U16:
+            case S16:
+                copyScalar(src, dst, srcPtr, dstPtr, 2);
+                return;
+            case U32:
+            case S32:
+            case F32:
+                copyScalar(src, dst, srcPtr, dstPtr, 4);
+                return;
+            case U64:
+            case S64:
+            case F64:
+                copyScalar(src, dst, srcPtr, dstPtr, 8);
+                return;
+            case CHAR:
+                transferChar(src, dst, srcPtr, dstPtr);
+                return;
+            case STRING:
+                transferString(src, dst, srcPtr, dstPtr);
+                return;
+            case LIST:
+                transferList(src, dst, srcPtr, dstPtr, d);
+                return;
+            case RECORD:
+                transferRecord(src, dst, srcPtr, dstPtr, (RecordType) d);
+                return;
+            case VARIANT:
+                transferVariant(src, dst, srcPtr, dstPtr, (VariantType) d);
+                return;
+            case FLAGS:
+                var flags = (FlagsType) d;
+                transferFlags(
+                        src,
+                        dst,
+                        srcPtr,
+                        dstPtr,
+                        flags.elementSize(src.typeResolver(), src.ptrType()),
+                        Transferability.flagsMask(flags));
+                return;
+            case ERROR_CONTEXT:
+            case OWN:
+            case BORROW:
+            case STREAM:
+            case FUTURE:
+                throw new UnsupportedOperationException(
+                        "transferring " + d.kind() + " values is not implemented yet");
+            default:
+                throw new IllegalStateException("unhandled kind " + d.kind());
+        }
+    }
+
+    /** Copies {@code length} bytes verbatim, in bounded chunks. */
+    static void copyBytes(
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, int length) {
+        var srcMemory = src.memory();
+        var dstMemory = dst.memory();
+        int copied = 0;
+        while (copied < length) {
+            int n = Math.min(COPY_CHUNK_BYTES, length - copied);
+            dstMemory.write(dstPtr + copied, srcMemory.readBytes(srcPtr + copied, n));
+            copied += n;
+        }
+    }
+
+    /** Copies a single naturally-sized scalar, avoiding the {@code byte[]} bulk path. */
+    static void copyScalar(
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, int nbytes) {
+        switch (nbytes) {
+            case 1:
+                dst.memory().writeByte(dstPtr, src.memory().read(srcPtr));
+                return;
+            case 2:
+                dst.memory().writeShort(dstPtr, src.memory().readShort(srcPtr));
+                return;
+            case 4:
+                dst.memory().writeI32(dstPtr, src.memory().readInt(srcPtr));
+                return;
+            case 8:
+                dst.memory().writeLong(dstPtr, src.memory().readLong(srcPtr));
+                return;
+            default:
+                throw new IllegalArgumentException("unsupported scalar width " + nbytes);
+        }
+    }
+
+    /** Normalizes any non-zero source byte to {@code 1}, as lifting then lowering would. */
+    static void transferBool(LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr) {
+        dst.memory().writeByte(dstPtr, (byte) (src.memory().readU8(srcPtr) != 0 ? 1 : 0));
+    }
+
+    /** Copies a {@code char}, trapping on surrogates and out-of-range scalar values. */
+    static void transferChar(LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr) {
+        int c = convertI32ToChar(loadInt(src.memory(), srcPtr, 4, false));
+        storeInt(dst.memory(), c, dstPtr, 4);
+    }
+
+    /** Copies a {@code flags} value, dropping the slack bits lifting would discard. */
+    static void transferFlags(
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            int srcPtr,
+            int dstPtr,
+            int size,
+            long mask) {
+        storeInt(dst.memory(), loadInt(src.memory(), srcPtr, size, false) & mask, dstPtr, size);
+    }
+
+    private static void transferRecord(
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, RecordType t) {
+        int off = 0;
+        for (LabelValType f : t.fields()) {
+            var fieldType = src.typeResolver().resolveDefValType(f.valType());
+            off = DefValType.alignTo(off, fieldType.alignment(src.typeResolver(), src.ptrType()));
+            transferValue(src, dst, srcPtr + off, dstPtr + off, fieldType);
+            off += fieldType.elementSize(src.typeResolver(), src.ptrType());
+        }
+    }
+
+    /**
+     * Transfers a variant, validating the discriminant and then only the payload of the case
+     * it selects. The bytes of the wider cases the source did not use are left as the
+     * destination allocator produced them, exactly as {@code store} leaves them.
+     *
+     * <p>The payload offset is computed relative to the value's own base rather than by
+     * aligning the absolute pointer as {@code load}/{@code store} do. The two agree whenever
+     * the pointer is aligned to the variant's alignment — which the Canonical ABI requires —
+     * and only the relative form keeps the source and destination offsets identical.
+     */
+    private static void transferVariant(
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, VariantType t) {
+        var cases = t.cases();
+        int discSize = t.discriminantType().elementSize(src.typeResolver(), src.ptrType());
+        long caseIndex = loadInt(src.memory(), srcPtr, discSize, false);
+        if (caseIndex >= cases.size()) {
+            throw new TrapException("variant case index " + caseIndex + " is out of range");
+        }
+        storeInt(dst.memory(), caseIndex, dstPtr, discSize);
+        var c = cases.get((int) caseIndex);
+        if (!c.hasValType()) {
+            return;
+        }
+        int payloadOff =
+                DefValType.alignTo(discSize, t.maxCaseAlignment(src.typeResolver(), src.ptrType()));
+        transferValue(
+                src,
+                dst,
+                srcPtr + payloadOff,
+                dstPtr + payloadOff,
+                src.typeResolver().resolveDefValType(c.valType()));
+    }
+
+    private static void transferList(
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, DefValType d) {
+        if (d instanceof ListType) {
+            var t = (ListType) d;
+            var elemType = src.typeResolver().resolveDefValType(t.elementType());
+            if (t.isFixedSize()) {
+                transferListElements(src, dst, srcPtr, dstPtr, t.size(), elemType);
+                return;
+            }
+            transferUnboundedList(src, dst, srcPtr, dstPtr, elemType);
+            return;
+        }
+        if (d instanceof MapType.DespecializedMapType) {
+            transferUnboundedList(
+                    src, dst, srcPtr, dstPtr, ((MapType.DespecializedMapType) d).recordType());
+            return;
+        }
+        throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+    }
+
+    static void transferUnboundedList(
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            int srcPtr,
+            int dstPtr,
+            DefValType elemType) {
+        int ptrSize = src.ptrType().size();
+        int begin = (int) loadInt(src.memory(), srcPtr, ptrSize, false);
+        int length = (int) loadInt(src.memory(), srcPtr + ptrSize, ptrSize, false);
+        int dstBegin = transferListIntoRange(src, dst, begin, length, elemType);
+        storeInt(dst.memory(), dstBegin, dstPtr, ptrSize);
+        storeInt(dst.memory(), length, dstPtr + ptrSize, ptrSize);
+    }
+
+    /**
+     * Validates a source list's range, allocates the matching range in the destination and
+     * moves the elements into it, returning the destination pointer.
+     *
+     * <p>The length is treated as unsigned, so a list claiming more than {@code 2^31}
+     * elements traps on the byte-length check. {@link #loadListFromRange} computes the same
+     * product with a signed length and lets such a list through as if it were empty.
+     */
+    static int transferListIntoRange(
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            int begin,
+            int length,
+            DefValType elemType) {
+        int elemSize = elemType.elementSize(src.typeResolver(), src.ptrType());
+        int elemAlignment = elemType.alignment(src.typeResolver(), src.ptrType());
+        long byteLength = Integer.toUnsignedLong(length) * elemSize;
+        if (byteLength > MAX_LIST_BYTE_LENGTH) {
+            throw new TrapException(
+                    "list byte length exceeds the maximum of " + MAX_LIST_BYTE_LENGTH);
+        }
+        if (begin != DefValType.alignTo(begin, elemAlignment)) {
+            throw new TrapException(
+                    "list pointer " + begin + " is not aligned to " + elemAlignment);
+        }
+        if (Integer.toUnsignedLong(begin) + byteLength > Memory.bytes(src.memory().pages())) {
+            throw new TrapException(
+                    "list of length " + length + " at " + begin + " is out of bounds");
+        }
+        int dstBegin = allocate(dst, elemAlignment, (int) byteLength);
+        transferListElements(src, dst, begin, dstBegin, length, elemType);
+        return dstBegin;
+    }
+
+    /**
+     * Moves {@code length} elements. When the element type copies verbatim the whole block
+     * becomes one bulk copy — the case that makes {@code list<u8>}, {@code string} payloads
+     * and {@code list<f32>} cheap.
+     */
+    private static void transferListElements(
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            int srcPtr,
+            int dstPtr,
+            int length,
+            DefValType elemType) {
+        int elemSize = elemType.elementSize(src.typeResolver(), src.ptrType());
+        if (Transferability.isBitwiseCopyable(src.typeResolver(), src.ptrType(), elemType)) {
+            copyBytes(src, dst, srcPtr, dstPtr, length * elemSize);
+            return;
+        }
+        for (int i = 0; i < length; i++) {
+            transferValue(src, dst, srcPtr + i * elemSize, dstPtr + i * elemSize, elemType);
+        }
+    }
+
+    static void transferString(LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr) {
+        int ptrSize = src.ptrType().size();
+        int begin = (int) loadInt(src.memory(), srcPtr, ptrSize, false);
+        long taggedCodeUnits = loadInt(src.memory(), srcPtr + ptrSize, ptrSize, false);
+        var result = transferStringIntoRange(src, dst, begin, taggedCodeUnits);
+        storeInt(dst.memory(), result.ptr, dstPtr, ptrSize);
+        storeInt(dst.memory(), result.codeUnits, dstPtr + ptrSize, ptrSize);
+    }
+
+    /**
+     * Moves a string's bytes into a fresh destination allocation, transcoding only when the
+     * two encodings genuinely disagree.
+     *
+     * <p>When the source bytes are already in the destination's encoding they are validated
+     * in place and copied — no decode, no re-encode, no {@link String}. That covers the
+     * common case of two modules that agreed on UTF-8. The {@code latin1+utf16} pairings are
+     * handled at the byte level too, because a tagged UTF-16 source still has to be re-checked
+     * against Latin-1 to reproduce what {@code store_string} would have chosen. Everything
+     * else decodes to a {@link CharBuffer} and re-encodes from it, still without a {@code
+     * String}.
+     */
+    static PtrAndCodeUnits transferStringIntoRange(
+            LiftLowerContext src, LiftLowerContext dst, int ptr, long taggedCodeUnits) {
+        var range = stringRange(src, taggedCodeUnits);
+        byte[] bytes = readStringBytes(src, ptr, range);
+        var dstEncoding = dst.stringEncoding();
+        if (range.charset == StandardCharsets.UTF_8) {
+            if (dstEncoding == StringEncoding.UTF8) {
+                validateUtf8(bytes);
+                return new PtrAndCodeUnits(allocateAndWrite(dst, 1, bytes), bytes.length);
+            }
+        } else if (range.charset == StandardCharsets.UTF_16LE) {
+            if (dstEncoding == StringEncoding.UTF16) {
+                validateUtf16Le(bytes);
+                return new PtrAndCodeUnits(allocateAndWrite(dst, 2, bytes), bytes.length / 2);
+            }
+            if (dstEncoding == StringEncoding.LATIN1_UTF16) {
+                return transferUtf16ToLatin1OrUtf16(dst, bytes);
+            }
+        } else if (dstEncoding == StringEncoding.LATIN1_UTF16) {
+            // A Latin-1 source can only come from a latin1+utf16 context; every byte is
+            // valid and fits, so it stays untagged and copies as-is.
+            return new PtrAndCodeUnits(allocateAndWrite(dst, 2, bytes), bytes.length);
+        }
+        return storeStringIntoRange(dst, decodeStrictToChars(bytes, range.charset));
+    }
+
+    private static PtrAndCodeUnits transferUtf16ToLatin1OrUtf16(
+            LiftLowerContext dst, byte[] utf16Bytes) {
+        validateUtf16Le(utf16Bytes);
+        if (!fitsLatin1Utf16(utf16Bytes)) {
+            return new PtrAndCodeUnits(
+                    allocateAndWrite(dst, 2, utf16Bytes),
+                    (utf16Bytes.length / 2) | utf16Tag(dst.ptrType()));
+        }
+        byte[] latin1 = new byte[utf16Bytes.length / 2];
+        for (int i = 0; i < latin1.length; i++) {
+            latin1[i] = utf16Bytes[2 * i];
+        }
+        return new PtrAndCodeUnits(allocateAndWrite(dst, 2, latin1), latin1.length);
+    }
+
+    /** Whether every UTF-16LE code unit is below {@code 0x100}, i.e. its high byte is zero. */
+    private static boolean fitsLatin1Utf16(byte[] utf16Bytes) {
+        for (int i = 1; i < utf16Bytes.length; i += 2) {
+            if (utf16Bytes[i] != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Accepts exactly what a strict {@link StandardCharsets#UTF_8} decoder accepts, without
+     * producing any characters: rejects continuation bytes out of place, truncated sequences,
+     * overlong encodings, surrogates and scalar values above {@code U+10FFFF}.
+     */
+    static void validateUtf8(byte[] bytes) {
+        int i = 0;
+        while (i < bytes.length) {
+            int b0 = bytes[i] & 0xFF;
+            if (b0 < 0x80) {
+                i++;
+                continue;
+            }
+            int length;
+            int codePoint;
+            if (b0 >= 0xC2 && b0 <= 0xDF) {
+                length = 2;
+                codePoint = b0 & 0x1F;
+            } else if (b0 >= 0xE0 && b0 <= 0xEF) {
+                length = 3;
+                codePoint = b0 & 0x0F;
+            } else if (b0 >= 0xF0 && b0 <= 0xF4) {
+                length = 4;
+                codePoint = b0 & 0x07;
+            } else {
+                throw invalidUtf8();
+            }
+            if (i + length > bytes.length) {
+                throw invalidUtf8();
+            }
+            for (int k = 1; k < length; k++) {
+                int bk = bytes[i + k] & 0xFF;
+                if ((bk & 0xC0) != 0x80) {
+                    throw invalidUtf8();
+                }
+                codePoint = (codePoint << 6) | (bk & 0x3F);
+            }
+            if (length == 3 && (codePoint < 0x800 || isSurrogate(codePoint))) {
+                throw invalidUtf8();
+            }
+            if (length == 4 && (codePoint < 0x10000 || codePoint > 0x10FFFF)) {
+                throw invalidUtf8();
+            }
+            i += length;
+        }
+    }
+
+    private static boolean isSurrogate(int codePoint) {
+        return codePoint >= MIN_SURROGATE && codePoint <= MAX_SURROGATE;
+    }
+
+    private static TrapException invalidUtf8() {
+        return new TrapException("invalid " + StandardCharsets.UTF_8.name() + " byte sequence");
+    }
+
+    /**
+     * Accepts exactly what a strict {@link StandardCharsets#UTF_16LE} decoder accepts:
+     * every high surrogate must be followed by a low surrogate, and no low surrogate may
+     * stand alone.
+     */
+    static void validateUtf16Le(byte[] bytes) {
+        int i = 0;
+        while (i + 1 < bytes.length) {
+            int unit = codeUnitAt(bytes, i);
+            i += 2;
+            if (unit >= 0xDC00 && unit <= MAX_SURROGATE) {
+                // A low surrogate can only appear as the second half of a pair, which the
+                // high-surrogate branch below consumes.
+                throw invalidUtf16();
+            }
+            if (unit < MIN_SURROGATE || unit > 0xDBFF) {
+                continue;
+            }
+            if (i + 1 >= bytes.length) {
+                throw invalidUtf16();
+            }
+            int low = codeUnitAt(bytes, i);
+            i += 2;
+            if (low < 0xDC00 || low > MAX_SURROGATE) {
+                throw invalidUtf16();
+            }
+        }
+    }
+
+    private static int codeUnitAt(byte[] bytes, int i) {
+        return (bytes[i] & 0xFF) | ((bytes[i + 1] & 0xFF) << 8);
+    }
+
+    private static TrapException invalidUtf16() {
+        return new TrapException("invalid " + StandardCharsets.UTF_16LE.name() + " byte sequence");
+    }
+
+    /**
+     * Transfers a flat parameter or result list. Because neither context is async and both
+     * share a pointer width, the two sides always agree on whether the values spill into
+     * linear memory: either both pass them flat, or both pass a pointer to the same tuple
+     * layout, which reduces to a single {@link #transfer} of that tuple.
+     */
+    private static long[] transferFlatValues(
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            int maxFlat,
+            CoreValues vi,
+            List<run.endive.cm.types.ValType> ts,
+            long[] outParam) {
+        if (ts.isEmpty()) {
+            return EMPTY_CORE_VALUES;
+        }
+        List<ValType> flatTypes = flattenTypes(src, ts);
+        if (flatTypes.size() > maxFlat) {
+            var tupleType = tupleTypeOf(ts);
+            return transferSpilledValues(
+                    src,
+                    dst,
+                    vi,
+                    tupleType.alignment(src.typeResolver(), src.ptrType()),
+                    tupleType.elementSize(src.typeResolver(), src.ptrType()),
+                    outParam,
+                    (s, d, srcPtr, dstPtr) -> transfer(s, d, srcPtr, dstPtr, tupleType));
+        }
+        LongList out = new LongList();
+        for (run.endive.cm.types.ValType t : ts) {
+            transferFlat(src, dst, vi, out, src.typeResolver().resolveDefValType(t));
+        }
+        return out.toArray();
+    }
+
+    /**
+     * Handles the spilled case shared by the interpreted and compiled transfer paths: reads
+     * the source's spill pointer, obtains the destination's (freshly allocated, or the
+     * caller-provided out-param), validates both, and hands them to {@code body} to move the
+     * tuple across.
+     */
+    static long[] transferSpilledValues(
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            CoreValues vi,
+            int align,
+            int size,
+            long[] outParam,
+            TransferPlan.Step body) {
+        int srcPtr = (int) vi.next();
+        if (srcPtr != DefValType.alignTo(srcPtr, align)) {
+            throw new TrapException(
+                    "spilled values pointer " + srcPtr + " is not aligned to " + align);
+        }
+        if ((long) srcPtr + size > Memory.bytes(src.memory().pages())) {
+            throw new TrapException("spilled values at " + srcPtr + " are out of bounds");
+        }
+        int dstPtr;
+        long[] flatVals;
+        if (outParam == null) {
+            dstPtr = allocate(dst, align, size);
+            flatVals = new long[] {Integer.toUnsignedLong(dstPtr)};
+        } else {
+            dstPtr = (int) outParam[0];
+            if (dstPtr != DefValType.alignTo(dstPtr, align)) {
+                throw new TrapException(
+                        "spill out-param pointer " + dstPtr + " is not aligned to " + align);
+            }
+            if ((long) dstPtr + size > Memory.bytes(dst.memory().pages())) {
+                throw new TrapException("spill out-param at " + dstPtr + " is out of bounds");
+            }
+            flatVals = EMPTY_CORE_VALUES;
+        }
+        body.run(src, dst, srcPtr, dstPtr);
+        return flatVals;
+    }
+
+    /**
+     * Transfers one value's worth of flat core values from {@code vi} to {@code out}.
+     *
+     * <p>Scalars mostly pass straight through, but not unconditionally: lifting narrows
+     * {@code u8}/{@code u16} to their type's width and sign-extends {@code s8}/{@code s16}
+     * before lowering re-encodes them, so a source core value with bits set above the type's
+     * width must be normalized here rather than forwarded. {@code bool} collapses to
+     * {@code 0}/{@code 1}, {@code char} is validated, {@code flags} drops its slack bits,
+     * and {@code f32}/{@code f64} keep their exact bit pattern.
+     */
+    static void transferFlat(
+            LiftLowerContext src, LiftLowerContext dst, CoreValues vi, LongList out, DefValType t) {
+        var d = despecialize(t);
+        switch (d.kind()) {
+            case BOOL:
+                out.add((vi.next() & 0xFFFFFFFFL) != 0 ? 1L : 0L);
+                return;
+            case U8:
+                out.add(vi.next() & 0xFFL);
+                return;
+            case U16:
+                out.add(vi.next() & 0xFFFFL);
+                return;
+            case S8:
+                out.add(Integer.toUnsignedLong((byte) vi.next()));
+                return;
+            case S16:
+                out.add(Integer.toUnsignedLong((short) vi.next()));
+                return;
+            case U32:
+            case S32:
+            case F32:
+                out.add(vi.next() & 0xFFFFFFFFL);
+                return;
+            case U64:
+            case S64:
+            case F64:
+                out.add(vi.next());
+                return;
+            case CHAR:
+                out.add(convertI32ToChar(vi.next() & 0xFFFFFFFFL));
+                return;
+            case STRING:
+                transferFlatString(src, dst, vi, out);
+                return;
+            case LIST:
+                transferFlatList(src, dst, vi, out, d);
+                return;
+            case RECORD:
+                for (LabelValType f : ((RecordType) d).fields()) {
+                    transferFlat(
+                            src, dst, vi, out, src.typeResolver().resolveDefValType(f.valType()));
+                }
+                return;
+            case VARIANT:
+                transferFlatVariant(src, dst, vi, out, (VariantType) d);
+                return;
+            case FLAGS:
+                out.add(vi.next() & Transferability.flagsMask((FlagsType) d) & 0xFFFFFFFFL);
+                return;
+            case ERROR_CONTEXT:
+            case OWN:
+            case BORROW:
+            case STREAM:
+            case FUTURE:
+                throw new UnsupportedOperationException(
+                        "transferring " + d.kind() + " values is not implemented yet");
+            default:
+                throw new IllegalStateException("unhandled kind " + d.kind());
+        }
+    }
+
+    static void transferFlatString(
+            LiftLowerContext src, LiftLowerContext dst, CoreValues vi, LongList out) {
+        int ptr = (int) vi.next();
+        long taggedCodeUnits = vi.next() & 0xFFFFFFFFL;
+        var result = transferStringIntoRange(src, dst, ptr, taggedCodeUnits);
+        out.add(Integer.toUnsignedLong(result.ptr));
+        out.add(result.codeUnits & 0xFFFFFFFFL);
+    }
+
+    private static void transferFlatList(
+            LiftLowerContext src, LiftLowerContext dst, CoreValues vi, LongList out, DefValType d) {
+        if (d instanceof ListType) {
+            var t = (ListType) d;
+            var elemType = src.typeResolver().resolveDefValType(t.elementType());
+            if (t.isFixedSize()) {
+                for (int i = 0; i < t.size(); i++) {
+                    transferFlat(src, dst, vi, out, elemType);
+                }
+                return;
+            }
+            transferFlatUnboundedList(src, dst, vi, out, elemType);
+            return;
+        }
+        if (d instanceof MapType.DespecializedMapType) {
+            transferFlatUnboundedList(
+                    src, dst, vi, out, ((MapType.DespecializedMapType) d).recordType());
+            return;
+        }
+        throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+    }
+
+    static void transferFlatUnboundedList(
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            CoreValues vi,
+            LongList out,
+            DefValType elemType) {
+        int ptr = (int) vi.next();
+        int length = (int) vi.next();
+        int dstPtr = transferListIntoRange(src, dst, ptr, length, elemType);
+        out.add(Integer.toUnsignedLong(dstPtr));
+        out.add(Integer.toUnsignedLong(length));
+    }
+
+    /**
+     * Transfers a variant across the joined flat layout, consuming and producing exactly the
+     * slots {@code flatten_variant} defines regardless of which case is present — the source
+     * cursor skips the joined slots the chosen case left unused, and the destination pads
+     * them with {@code 0}, mirroring {@link #liftFlatVariant} and {@link #lowerFlatVariant}.
+     */
+    private static void transferFlatVariant(
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            CoreValues vi,
+            LongList out,
+            VariantType t) {
+        var cases = t.cases();
+        List<ValType> flatTypes = t.flatten(src.typeResolver(), src.ptrType());
+        if (flatTypes.get(0) != ValType.I32) {
+            throw new IllegalStateException("variant discriminant flat type must be i32");
+        }
+        int payloadSlots = flatTypes.size() - 1;
+        long caseIndex = vi.next() & 0xFFFFFFFFL;
+        if (caseIndex >= cases.size()) {
+            throw new TrapException("variant case index " + caseIndex + " is out of range");
+        }
+        out.add(caseIndex);
+        var c = cases.get((int) caseIndex);
+        int srcPayloadStart = vi.position();
+        int dstPayloadStart = out.size();
+        if (c.hasValType()) {
+            transferFlat(src, dst, vi, out, src.typeResolver().resolveDefValType(c.valType()));
+        }
+        vi.skipTo(srcPayloadStart + payloadSlots);
+        for (int i = out.size() - dstPayloadStart; i < payloadSlots; i++) {
+            out.add(0L);
+        }
+    }
+
     /** A growable primitive-{@code long} buffer used to accumulate flat lowered values. */
-    private static final class LongList {
+    static final class LongList {
         private long[] buf = new long[8];
         private int size;
 

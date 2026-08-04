@@ -3,6 +3,7 @@ package run.endive.cm.runtime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import run.endive.cm.abi.LiftLowerContext;
 import run.endive.cm.types.FuncType;
 import run.endive.cm.types.LabelValType;
 import run.endive.cm.types.ValType;
@@ -13,12 +14,60 @@ public final class ComponentFunctionInstance implements ComponentFunction {
     private final ComponentStore store;
     private final FuncType funcType;
     private final ComponentFunctionCall call;
+    private final LiftLowerContext liftLowerContext;
+    private final CoreFunction<?> liftedFunction;
 
-    public ComponentFunctionInstance(
-            ComponentStore store, FuncType funcType, ComponentFunctionCall call) {
+    private ComponentFunctionInstance(
+            ComponentStore store, FuncType funcType, ComponentFunctionCall call, LiftLowerContext liftLowerContext, CoreFunction<?> liftedFunction) {
+        Objects.requireNonNull(store, "store");
+        Objects.requireNonNull(funcType, "funcType");
+        Objects.requireNonNull(call, "call");
         this.store = store;
         this.funcType = funcType;
         this.call = call;
+        this.liftLowerContext = liftLowerContext;
+        this.liftedFunction = liftedFunction;
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static final class Builder {
+        private ComponentStore componentStore;
+        private FuncType funcType;
+        private ComponentFunctionCall call;
+        private LiftLowerContext liftLowerContext;
+        private CoreFunction<?> liftedFunction;
+
+        public Builder withComponentStore(ComponentStore componentStore) {
+            this.componentStore = componentStore;
+            return this;
+        }
+
+        public Builder withFuncType(FuncType funcType) {
+            this.funcType = funcType;
+            return this;
+        }
+
+        public Builder withCall(ComponentFunctionCall call) {
+            this.call = call;
+            return this;
+        }
+
+        public Builder withLiftLowerContext(LiftLowerContext liftLowerContext) {
+            this.liftLowerContext = liftLowerContext;
+            return this;
+        }
+
+        public Builder withLiftedFunction(CoreFunction<?> liftedFunction) {
+            this.liftedFunction = liftedFunction;
+            return this;
+        }
+
+        public ComponentFunctionInstance build() {
+            return new ComponentFunctionInstance(componentStore, funcType, call, liftLowerContext, liftedFunction);
+        }
     }
 
     @Override
@@ -53,6 +102,21 @@ public final class ComponentFunctionInstance implements ComponentFunction {
     @Override
     public FuncType funcType() {
         return funcType;
+    }
+
+    @Override
+    public boolean isLifted() {
+        return liftLowerContext != null;
+    }
+
+    @Override
+    public LiftLowerContext context() {
+        return liftLowerContext;
+    }
+
+    @Override
+    public CoreFunction<?> liftedFunction() {
+        return liftedFunction;
     }
 
     @Override
@@ -153,6 +217,21 @@ public final class ComponentFunctionInstance implements ComponentFunction {
         @Override
         public FuncType funcType() {
             return funcType;
+        }
+
+        @Override
+        public boolean isLifted() {
+            return false;
+        }
+
+        @Override
+        public LiftLowerContext context() {
+            return null;
+        }
+
+        @Override
+        public CoreFunction<?> liftedFunction() {
+            return null;
         }
 
         @Override

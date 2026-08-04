@@ -13,6 +13,7 @@ import run.endive.cm.abi.CanonicalAbi;
 import run.endive.cm.abi.Direction;
 import run.endive.cm.abi.LiftLowerContext;
 import run.endive.cm.abi.StringEncoding;
+import run.endive.cm.abi.ValueTransfer;
 import run.endive.cm.types.Alias;
 import run.endive.cm.types.AliasSection;
 import run.endive.cm.types.CanonSection;
@@ -214,7 +215,11 @@ public final class ComponentLinker {
             }
 
             var funcType = type.funcType();
-            var func = new ComponentFunctionInstance(store, funcType, (args) -> new Object[0]);
+            var func = ComponentFunctionInstance.builder()
+                    .withComponentStore(store)
+                    .withFuncType(funcType)
+                    .withCall((args) -> new Object[0])
+                    .build();
             store.addImport(imp.name(), func);
         }
 
@@ -910,17 +915,13 @@ public final class ComponentLinker {
                 new CoreImportFunction(BuiltinFunctionTypes.CANON_RESOURCE_DROP, coreFunc));
     }
 
-    private static CoreExportFunction resolveCoreExportFunction(
+    private static CoreFunction<?> resolveCoreFunction(
             ComponentStore store, int coreFuncIdx) {
         CoreFunction<?> coreFunc = store.getCoreFunction(coreFuncIdx);
         if (coreFunc == null) {
             throw new LinkageException("Core function at index " + coreFuncIdx + " not found");
         }
-        if (!(coreFunc instanceof CoreExportFunction)) {
-            throw new LinkageException(
-                    "Core function at index " + coreFuncIdx + " is not an exported function");
-        }
-        return (CoreExportFunction) coreFunc;
+        return coreFunc;
     }
 
     private static LiftLowerContext processCanonOpts(ComponentStore store, List<CanonOpt> opts) {
@@ -941,20 +942,19 @@ public final class ComponentLinker {
                     contextBuilder.withMemory(store.getCoreMemory((int) opt.index()));
                     break;
                 case REALLOC:
-                    CoreExportFunction realloc =
-                            resolveCoreExportFunction(store, (int) opt.index());
+                    CoreFunction<?> realloc =
+                            resolveCoreFunction(store, (int) opt.index());
                     contextBuilder.withRealloc(
                             (oldPtr, oldSize, align, newSize) -> {
                                 var result =
-                                        realloc.getFunctionInstance()
-                                                .apply(oldPtr, oldSize, align, newSize);
+                                        realloc.apply(oldPtr, oldSize, align, newSize);
                                 return (int) result[0];
                             });
                     break;
                 case POST_RETURN:
-                    CoreExportFunction postReturn =
-                            resolveCoreExportFunction(store, (int) opt.index());
-                    contextBuilder.withPostReturn(postReturn.getFunctionInstance());
+                    CoreFunction<?> postReturn =
+                            resolveCoreFunction(store, (int) opt.index());
+                    contextBuilder.withPostReturn(postReturn::apply);
                     break;
                 case ASYNC:
                     contextBuilder.withAsync(true);
@@ -985,30 +985,55 @@ public final class ComponentLinker {
         }
         FuncType componentFuncType = func.funcType();
 
-        LiftLowerContext context = processCanonOpts(store, lower.opts());
+        LiftLowerContext callerContext = processCanonOpts(store, lower.opts());
 
         FunctionType coreFuncType =
-                CanonicalAbi.flattenFuncType(context, componentFuncType, Direction.LOWER);
+                CanonicalAbi.flattenFuncType(callerContext, componentFuncType, Direction.LOWER);
 
-        List<ValType> componentFuncParams =
-                componentFuncType.params().stream()
-                        .map(LabelValType::valType)
-                        .collect(Collectors.toList());
+        // When the result flattens to more than MAX_FLAT_RESULTS core values, flattenFuncType's
+        // LOWER direction appends an out-pointer to the params and leaves no returns, so the
+        // caller supplies the destination buffer as the last core argument.
+        boolean resultsSpill = componentFuncType.hasResult() && coreFuncType.returns().isEmpty();
 
-        WasmFunctionHandle coreFuncHandle =
-                (instance, args) -> {
-                    Object[] liftedArgValues =
-                            CanonicalAbi.liftFlatParams(context, args, componentFuncParams)
-                                    .toArray();
-                    Object[] results = func.apply(liftedArgValues);
-                    return componentFuncType.result() == null
-                            ? EMPTY_CORE_VALUES
-                            : CanonicalAbi.lowerFlatResults(
-                                    context,
-                                    Arrays.asList(results),
-                                    List.of(componentFuncType.result()),
-                                    null);
-                };
+        WasmFunctionHandle coreFuncHandle;
+
+        if (func.isLifted() && ValueTransfer.canTransfer(callerContext, func.context(), componentFuncType)) {
+            var transfer = ValueTransfer.compile(callerContext, func.context(), componentFuncType);
+            coreFuncHandle = (instance, args) -> {
+                long[] calleeArgs = transfer.transferParams(args);
+                long[] calleeResults = func.liftedFunction().apply(calleeArgs);
+
+                long[] outParam = resultsSpill ? new long[] {args[args.length - 1]} : null;
+                long[] callerResults = transfer.transferResults(calleeResults, outParam);
+
+                var postReturn = func.context().postReturn();
+                if (postReturn != null) {
+                    postReturn.call(calleeResults != null ? calleeResults : EMPTY_CORE_VALUES);
+                }
+                return callerResults;
+            };
+        } else {
+            List<ValType> componentFuncParams =
+                    componentFuncType.params().stream()
+                            .map(LabelValType::valType)
+                            .collect(Collectors.toList());
+            coreFuncHandle =
+                    (instance, args) -> {
+                        Object[] liftedArgValues =
+                                CanonicalAbi.liftFlatParams(callerContext, args, componentFuncParams)
+                                        .toArray();
+                        Object[] results = func.apply(liftedArgValues);
+                        if (!componentFuncType.hasResult()) {
+                            return EMPTY_CORE_VALUES;
+                        }
+                        long[] outParam = resultsSpill ? new long[] {args[args.length - 1]} : null;
+                        return CanonicalAbi.lowerFlatResults(
+                                callerContext,
+                                Arrays.asList(results),
+                                List.of(componentFuncType.result()),
+                                outParam);
+                    };
+        }
         store.addCoreFunction(new CoreImportFunction(coreFuncType, coreFuncHandle));
     }
 
@@ -1037,19 +1062,24 @@ public final class ComponentLinker {
                     long[] loweredArgs =
                             CanonicalAbi.lowerFlatParams(
                                     context, Arrays.asList(args), componentFuncParams);
-                    long[] result =
-                            coreFunc.apply(loweredArgs);
+                    long[] result = coreFunc.apply(loweredArgs);
 
                     if (context.postReturn() != null) {
-                        context.postReturn().apply(result);
+                        context.postReturn().call(result != null ? result : EMPTY_CORE_VALUES);
                     }
 
                     return resultValType == null
                             ? EMPTY_COMPONENT_VALUES
                             : CanonicalAbi.liftFlatResults(context, result, List.of(resultValType))
-                            .toArray();
+                                    .toArray();
                 };
-        store.addFunction(new ComponentFunctionInstance(store, componentFuncType, call));
+        store.addFunction(ComponentFunctionInstance.builder()
+                .withComponentStore(store)
+                .withFuncType(componentFuncType)
+                .withCall(call)
+                .withLiftLowerContext(context)
+                .withLiftedFunction(coreFunc)
+                .build());
     }
 
     private void processExportSection(ComponentStore store, ExportSection section) {

@@ -11,5 +11,5 @@ public interface CoreFunction<T> {
 
     ImportFunction importFunction(String moduleName, String functionName);
 
-    long[] apply(long[] args);
+    long[] apply(long... args);
 }

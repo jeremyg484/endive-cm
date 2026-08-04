@@ -30,7 +30,7 @@ public class CoreImportFunction implements CoreFunction<WasmFunctionHandle> {
     }
 
     @Override
-    public long[] apply(long[] args) {
+    public long[] apply(long... args) {
         return importFunctionHandle.apply(null, args);
     }
 }
