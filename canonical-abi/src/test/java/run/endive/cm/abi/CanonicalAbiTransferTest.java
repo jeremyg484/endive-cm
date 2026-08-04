@@ -71,8 +71,8 @@ class CanonicalAbiTransferTest {
         var types = new TransferTestSupport.Types();
         assertTransferMatchesLiftLower(types, true, PrimValType.BOOL);
         assertTransferMatchesLiftLower(types, false, PrimValType.BOOL);
-        assertTransferMatchesLiftLower(types, (int) 'x', PrimValType.CHAR);
-        assertTransferMatchesLiftLower(types, 0x1F600, PrimValType.CHAR);
+        assertTransferMatchesLiftLower(types, CharValue.of('x'), PrimValType.CHAR);
+        assertTransferMatchesLiftLower(types, CharValue.of(0x1F600), PrimValType.CHAR);
     }
 
     @Test
@@ -526,7 +526,13 @@ class CanonicalAbiTransferTest {
                     return new Sample(
                             types,
                             t,
-                            record("b", true, "c", 0x1F600, "f", flags(FIVE_LABELS, "b", "e")));
+                            record(
+                                    "b",
+                                    true,
+                                    "c",
+                                    CharValue.of(0x1F600),
+                                    "f",
+                                    flags(FIVE_LABELS, "b", "e")));
                 });
         corpus.put(
                 "list of strings",

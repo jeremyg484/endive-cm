@@ -275,7 +275,7 @@ public final class CanonicalAbi {
             case F64:
                 return canonicalizeNan64(ctx.memory().readDouble(ptr));
             case CHAR:
-                return convertI32ToChar(loadInt(ctx.memory(), ptr, 4, false));
+                return CharValue.of(convertI32ToChar(loadInt(ctx.memory(), ptr, 4, false)));
             case STRING:
                 return loadString(ctx, ptr);
             case LIST:
@@ -554,7 +554,7 @@ public final class CanonicalAbi {
                 ctx.memory().writeF64(ptr, canonicalizeNan64(((Number) v).doubleValue()));
                 return;
             case CHAR:
-                storeInt(ctx.memory(), (Integer) v, ptr, 4);
+                storeInt(ctx.memory(), ((CharValue) v).codePoint(), ptr, 4);
                 return;
             case STRING:
                 storeString(ctx, (String) v, ptr);
@@ -967,7 +967,7 @@ public final class CanonicalAbi {
             case F64:
                 return decodeI64AsFloat(vi.next());
             case CHAR:
-                return convertI32ToChar(vi.next() & 0xFFFFFFFFL);
+                return CharValue.of(convertI32ToChar(vi.next() & 0xFFFFFFFFL));
             case STRING:
                 return liftFlatString(ctx, vi);
             case LIST:
@@ -1317,7 +1317,7 @@ public final class CanonicalAbi {
                 out.add(encodeFloatAsI64(((Number) v).doubleValue()));
                 return;
             case CHAR:
-                out.add(((Integer) v).longValue() & 0xFFFFFFFFL);
+                out.add(Integer.toUnsignedLong(((CharValue) v).codePoint()));
                 return;
             case STRING:
                 lowerFlatString(ctx, (String) v, out);
@@ -1462,31 +1462,163 @@ public final class CanonicalAbi {
     private static final int COPY_CHUNK_BYTES = 64 * 1024;
 
     /**
-     * Whether {@code ft}'s values can move directly between {@code src} and {@code dst}
+     * Whether {@code ft}'s values can move directly between {@code caller} and {@code callee}
      * rather than through the lift/lower pair. A {@code false} result is always safe — the
      * caller simply keeps using {@link #liftFlatParams}/{@link #lowerFlatParams} — so this
      * rejects anything the transfer path does not yet model rather than trying to be
      * exhaustive.
+     *
+     * <p>Linear memory is required only where it is actually used. A function whose values
+     * all travel as core Wasm values — no string, no unbounded list, and neither the
+     * parameters nor the result spilling — never touches memory, so it transfers between
+     * contexts defined with no {@code memory} canonopt at all. That covers the shapes
+     * {@code canon lift}/{@code canon lower} take when declared with no options, which is
+     * common for functions over integers, {@code enum}s and payload-free {@code variant}s.
+     *
+     * @param caller the context the call arrives from — parameters are read from it and
+     *     results are written back into it
+     * @param callee the context the call is dispatched into — parameters are written into it
+     *     and results are read from it
+     * @param ft the component-level function type both sides agree on
      */
-    public static boolean canTransfer(LiftLowerContext src, LiftLowerContext dst, FuncType ft) {
-        if (src.isAsync() || dst.isAsync() || ft.isAsync()) {
+    public static boolean canTransfer(
+            LiftLowerContext caller, LiftLowerContext callee, FuncType ft) {
+        if (caller.isAsync() || callee.isAsync() || ft.isAsync()) {
             return false;
         }
-        if (src.ptrType() != dst.ptrType()) {
+        if (caller.ptrType() != callee.ptrType()) {
             return false;
         }
-        if (src.memory() == null || dst.memory() == null) {
-            return false;
-        }
-        for (LabelValType p : ft.params()) {
-            if (!Transferability.isSupported(
-                    src.typeResolver(), src.typeResolver().resolveDefValType(p.valType()))) {
+        var typeResolver = caller.typeResolver();
+        List<run.endive.cm.types.ValType> paramTypes = paramValTypes(ft);
+        List<run.endive.cm.types.ValType> resultTypes = resultValTypes(ft);
+        for (run.endive.cm.types.ValType t : paramTypes) {
+            if (!Transferability.isSupported(typeResolver, typeResolver.resolveDefValType(t))) {
                 return false;
             }
         }
-        return !ft.hasResult()
-                || Transferability.isSupported(
-                        src.typeResolver(), src.typeResolver().resolveDefValType(ft.result()));
+        for (run.endive.cm.types.ValType t : resultTypes) {
+            if (!Transferability.isSupported(typeResolver, typeResolver.resolveDefValType(t))) {
+                return false;
+            }
+        }
+        // Parameters move caller -> callee and results move callee -> caller, so each
+        // direction needs memory on both ends and a realloc on the receiving end — but only
+        // if anything actually goes through memory.
+        if (needsMemory(caller, paramTypes, MAX_FLAT_PARAMS)
+                && !canMoveThroughMemory(caller, callee)) {
+            return false;
+        }
+        return !needsMemory(caller, resultTypes, MAX_FLAT_RESULTS)
+                || canMoveThroughMemory(callee, caller);
+    }
+
+    /**
+     * Whether {@code ft}'s values can be handed from {@code caller} to {@code callee} with no
+     * adapter at all — the caller's flat core arguments passed to the callee's core function
+     * as they stand, and its core results returned unchanged.
+     *
+     * <p>True only when nothing reaches linear memory (no string, no unbounded list, and
+     * neither side spilling) <em>and</em> every flat slot survives untouched, which rules out
+     * {@code bool}, {@code char}, the narrow integers, sparse {@code flags} and every
+     * {@code variant} — see {@link Transferability#isFlatIdentity(TypeResolver, PointerType, DefValType)} for why, and for the sense
+     * in which an {@code i32} slot counts as unchanged.
+     *
+     * <p>This covers the values only. A caller acting on it must also confirm the callee has
+     * no {@code post_return} to run; if it does, the values still need no work but the call
+     * itself still needs a wrapper. Where both hold, the callee's core function can be
+     * registered as the caller's import directly.
+     */
+    public static boolean isIdentityTransfer(
+            LiftLowerContext caller, LiftLowerContext callee, FuncType ft) {
+        if (!canTransfer(caller, callee, ft)) {
+            return false;
+        }
+        List<run.endive.cm.types.ValType> paramTypes = paramValTypes(ft);
+        List<run.endive.cm.types.ValType> resultTypes = resultValTypes(ft);
+        if (needsMemory(caller, paramTypes, MAX_FLAT_PARAMS)
+                || needsMemory(caller, resultTypes, MAX_FLAT_RESULTS)) {
+            return false;
+        }
+        for (run.endive.cm.types.ValType t : paramTypes) {
+            if (!Transferability.isFlatIdentity(
+                    caller.typeResolver(),
+                    caller.ptrType(),
+                    caller.typeResolver().resolveDefValType(t))) {
+                return false;
+            }
+        }
+        for (run.endive.cm.types.ValType t : resultTypes) {
+            if (!Transferability.isFlatIdentity(
+                    caller.typeResolver(),
+                    caller.ptrType(),
+                    caller.typeResolver().resolveDefValType(t))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<run.endive.cm.types.ValType> paramValTypes(FuncType ft) {
+        List<run.endive.cm.types.ValType> ts = new ArrayList<>(ft.params().size());
+        for (LabelValType p : ft.params()) {
+            ts.add(p.valType());
+        }
+        return ts;
+    }
+
+    private static List<run.endive.cm.types.ValType> resultValTypes(FuncType ft) {
+        return ft.hasResult() ? List.of(ft.result()) : List.of();
+    }
+
+    /**
+     * Whether values of {@code ts} reach linear memory at all: either the flat list exceeds
+     * {@code maxFlat} and spills into a tuple, or some value is stored out of line behind a
+     * pointer.
+     */
+    private static boolean needsMemory(
+            LiftLowerContext ctx, List<run.endive.cm.types.ValType> ts, int maxFlat) {
+        if (ts.isEmpty()) {
+            return false;
+        }
+        if (flattenTypes(ctx, ts).size() > maxFlat) {
+            return true;
+        }
+        for (run.endive.cm.types.ValType t : ts) {
+            if (contains(
+                    ctx.typeResolver(),
+                    ctx.typeResolver().resolveDefValType(t),
+                    CanonicalAbi::livesBehindPointer)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a value of this type is stored out of line, behind a pointer the destination
+     * has to allocate. A fixed-size list is stored inline and so needs no allocation of its
+     * own; every other {@code list} — including the despecialized form of a {@code map} — is
+     * a (pointer, length) pair, as is a {@code string}.
+     */
+    private static boolean livesBehindPointer(DefValType d) {
+        if (d.kind() == DefValType.Kind.STRING) {
+            return true;
+        }
+        if (d.kind() != DefValType.Kind.LIST) {
+            return false;
+        }
+        return !(d instanceof ListType) || !((ListType) d).isFixedSize();
+    }
+
+    /**
+     * Whether values can be read out of {@code src}'s memory and allocated into {@code
+     * dst}'s. Checking {@code realloc} here keeps {@link #canTransfer} honest: without it a
+     * missing one surfaces as a failure part-way through a transfer rather than as a clean
+     * decision to fall back.
+     */
+    private static boolean canMoveThroughMemory(LiftLowerContext src, LiftLowerContext dst) {
+        return src.memory() != null && dst.memory() != null && dst.realloc() != null;
     }
 
     /**

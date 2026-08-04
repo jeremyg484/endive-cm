@@ -42,6 +42,7 @@ public final class CmJavaTestGen {
         cu.addImport("run.endive.wasm.WasmEngineException");
         cu.addImport("run.endive.cm.parser.ComponentParser");
         cu.addImport("run.endive.cm.runtime.ComponentLinker");
+        cu.addImport("run.endive.cm.abi.CharValue");
         cu.addImport("run.endive.cm.runtime.ComponentInstance");
         cu.addImport("run.endive.cm.runtime.LinkageException");
         cu.addImport("run.endive.cm.tools.ComponentValidate");

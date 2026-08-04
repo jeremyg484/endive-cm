@@ -56,6 +56,19 @@ public final class ValueTransfer {
     }
 
     /**
+     * Whether {@code ft} needs no adapter at all: the caller's flat core arguments can go
+     * straight to the callee's core function and its results straight back. When this holds
+     * and the callee has no {@code post_return}, there is nothing to compile — register the
+     * callee's core function as the caller's import.
+     *
+     * @see CanonicalAbi#isIdentityTransfer
+     */
+    public static boolean isIdentityTransfer(
+            LiftLowerContext caller, LiftLowerContext callee, FuncType ft) {
+        return CanonicalAbi.isIdentityTransfer(caller, callee, ft);
+    }
+
+    /**
      * Compiles the transfer of {@code ft}'s parameters and result.
      *
      * @param caller the context the call arrives from — the {@code canon lower} side, whose

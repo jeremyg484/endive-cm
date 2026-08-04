@@ -54,6 +54,29 @@ class CanonicalAbiLoadStoreTest {
     }
 
     @Test
+    void requiresACharValueWhenStoringAChar() {
+        // CharValue is the only accepted representation; char and Character cannot express
+        // the whole type, so they are rejected rather than silently truncating.
+        var ctx = newContext();
+        CanonicalAbi.store(ctx, CharValue.of('x'), PrimValType.CHAR, 0);
+        assertThat(CanonicalAbi.load(ctx, 0, PrimValType.CHAR)).isEqualTo(CharValue.of('x'));
+
+        assertThatThrownBy(() -> CanonicalAbi.store(ctx, 'x', PrimValType.CHAR, 4))
+                .isInstanceOf(ClassCastException.class);
+        assertThatThrownBy(() -> CanonicalAbi.store(ctx, (int) 'x', PrimValType.CHAR, 4))
+                .isInstanceOf(ClassCastException.class);
+    }
+
+    @Test
+    void roundTripsACharAboveTheBasicMultilingualPlane() {
+        // U+1F370 is a scalar value that does not fit in a Java char at all, which is why
+        // Integer is the representation lifting produces.
+        var ctx = newContext();
+        CanonicalAbi.store(ctx, CharValue.of(0x1F370), PrimValType.CHAR, 0);
+        assertThat(CanonicalAbi.load(ctx, 0, PrimValType.CHAR)).isEqualTo(CharValue.of(0x1F370));
+    }
+
+    @Test
     void roundTripsBool() {
         var ctx = newContext();
         CanonicalAbi.store(ctx, true, PrimValType.BOOL, 0);
@@ -120,11 +143,11 @@ class CanonicalAbiLoadStoreTest {
     @Test
     void roundTripsChar() {
         var ctx = newContext();
-        CanonicalAbi.store(ctx, (int) 'A', PrimValType.CHAR, 0);
-        assertThat(CanonicalAbi.load(ctx, 0, PrimValType.CHAR)).isEqualTo((int) 'A');
+        CanonicalAbi.store(ctx, CharValue.of('A'), PrimValType.CHAR, 0);
+        assertThat(CanonicalAbi.load(ctx, 0, PrimValType.CHAR)).isEqualTo(CharValue.of('A'));
 
-        CanonicalAbi.store(ctx, 0x1F600, PrimValType.CHAR, 8); // outside the BMP
-        assertThat(CanonicalAbi.load(ctx, 8, PrimValType.CHAR)).isEqualTo(0x1F600);
+        CanonicalAbi.store(ctx, CharValue.of(0x1F600), PrimValType.CHAR, 8); // outside the BMP
+        assertThat(CanonicalAbi.load(ctx, 8, PrimValType.CHAR)).isEqualTo(CharValue.of(0x1F600));
     }
 
     @Test

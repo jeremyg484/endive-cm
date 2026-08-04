@@ -66,6 +66,13 @@ class CanonicalAbiFlatTest {
     }
 
     @Test
+    void roundTripsACharAboveTheBasicMultilingualPlane() {
+        var ctx = newContext();
+        assertThat(roundTrip(ctx, CharValue.of(0x1F370), PrimValType.CHAR))
+                .isEqualTo(CharValue.of(0x1F370));
+    }
+
+    @Test
     void flattenFuncTypeWithinLimitsPassesThroughUnchanged() {
         var ft =
                 FuncType.builder()
@@ -159,7 +166,8 @@ class CanonicalAbiFlatTest {
         assertThat(roundTrip(ctx, Long.MIN_VALUE, PrimValType.S64)).isEqualTo(Long.MIN_VALUE);
         assertThat(roundTrip(ctx, 3.5f, PrimValType.F32)).isEqualTo(3.5f);
         assertThat(roundTrip(ctx, 3.5, PrimValType.F64)).isEqualTo(3.5);
-        assertThat(roundTrip(ctx, (int) 'A', PrimValType.CHAR)).isEqualTo((int) 'A');
+        assertThat(roundTrip(ctx, CharValue.of('A'), PrimValType.CHAR))
+                .isEqualTo(CharValue.of('A'));
     }
 
     @Test

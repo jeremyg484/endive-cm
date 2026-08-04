@@ -533,13 +533,137 @@ class CanonicalAbiTransferFlatTest {
         assertThat(ValueTransfer.canTransfer(newContext(types), newContext(types), ft)).isFalse();
     }
 
-    @Test
-    void canTransferRejectsContextsWithoutMemory() {
-        var types = new TransferTestSupport.Types();
-        var ft = FuncType.builder().addParam(param("x", prim(PrimValType.U32))).build();
-        var noMemory = LiftLowerContext.builder().withTypeResolver(types).build();
+    /**
+     * A context declared with no {@code memory} canonopt — the shape {@code canon lift} and
+     * {@code canon lower} take when written with no options at all.
+     */
+    private static LiftLowerContext memorylessContext(TransferTestSupport.Types types) {
+        return LiftLowerContext.builder().withTypeResolver(types).build();
+    }
 
-        assertThat(ValueTransfer.canTransfer(newContext(types), noMemory, ft)).isFalse();
+    @Test
+    void canTransferAcceptsMemorylessContextsForValuesThatNeverReachMemory() {
+        var types = new TransferTestSupport.Types();
+        var ft =
+                FuncType.builder()
+                        .addParam(param("x", prim(PrimValType.U32)))
+                        .addParam(param("y", prim(PrimValType.F64)))
+                        .withResult(prim(PrimValType.S64))
+                        .build();
+
+        assertThat(
+                        ValueTransfer.canTransfer(
+                                memorylessContext(types), memorylessContext(types), ft))
+                .isTrue();
+    }
+
+    @Test
+    void canTransferAcceptsMemorylessContextsForAFixedSizeListOfScalars() {
+        // A fixed-size list is stored inline, so it needs no allocation of its own.
+        var types = new TransferTestSupport.Types();
+        var list =
+                ListType.builder().withElementType(prim(PrimValType.U32)).withFixedSize(2).build();
+        var ft = FuncType.builder().addParam(param("xs", types.add(list))).build();
+
+        assertThat(
+                        ValueTransfer.canTransfer(
+                                memorylessContext(types), memorylessContext(types), ft))
+                .isTrue();
+    }
+
+    @Test
+    void canTransferRejectsMemorylessContextsWhenAValueLivesBehindAPointer() {
+        var types = new TransferTestSupport.Types();
+        var withString = FuncType.builder().addParam(param("s", prim(PrimValType.STRING))).build();
+        var withList =
+                FuncType.builder()
+                        .addParam(
+                                param(
+                                        "xs",
+                                        types.add(
+                                                ListType.builder()
+                                                        .withElementType(prim(PrimValType.U8))
+                                                        .build())))
+                        .build();
+
+        assertThat(
+                        ValueTransfer.canTransfer(
+                                memorylessContext(types), memorylessContext(types), withString))
+                .isFalse();
+        assertThat(
+                        ValueTransfer.canTransfer(
+                                memorylessContext(types), memorylessContext(types), withList))
+                .isFalse();
+    }
+
+    @Test
+    void canTransferRejectsMemorylessContextsWhenTheValuesSpill() {
+        var types = new TransferTestSupport.Types();
+        var builder = FuncType.builder();
+        for (int i = 0; i < CanonicalAbi.MAX_FLAT_PARAMS + 1; i++) {
+            builder.addParam(param("p" + i, prim(PrimValType.U32)));
+        }
+
+        assertThat(
+                        ValueTransfer.canTransfer(
+                                memorylessContext(types),
+                                memorylessContext(types),
+                                builder.build()))
+                .isFalse();
+    }
+
+    @Test
+    void canTransferRejectsASpilledResultWithoutMemory() {
+        // A record of two u32s flattens to two core values, one more than MAX_FLAT_RESULTS.
+        var types = new TransferTestSupport.Types();
+        var wide =
+                RecordType.builder()
+                        .addField(field("a", prim(PrimValType.U32)))
+                        .addField(field("b", prim(PrimValType.U32)))
+                        .build();
+        var ft = FuncType.builder().withResult(types.add(wide)).build();
+
+        assertThat(
+                        ValueTransfer.canTransfer(
+                                memorylessContext(types), memorylessContext(types), ft))
+                .isFalse();
+    }
+
+    @Test
+    void canTransferRejectsAMissingReallocOnTheReceivingSide() {
+        var types = new TransferTestSupport.Types();
+        var ft = FuncType.builder().addParam(param("s", prim(PrimValType.STRING))).build();
+        var noRealloc =
+                LiftLowerContext.builder()
+                        .withTypeResolver(types)
+                        .withMemory(new ByteArrayMemory(new MemoryLimits(1)))
+                        .build();
+
+        // Parameters are allocated in the callee, so the callee is the one that needs it.
+        assertThat(ValueTransfer.canTransfer(newContext(types), noRealloc, ft)).isFalse();
+        assertThat(ValueTransfer.canTransfer(noRealloc, newContext(types), ft)).isTrue();
+    }
+
+    /**
+     * The shape at {@code fused.wast:672}: a payload-free {@code variant} lifted and lowered
+     * with no canonopts on either side. It flattens to a single {@code i32}, so nothing ever
+     * reaches memory — but the discriminant still has to be range-checked, which is why this
+     * needs the transfer path rather than a straight pass-through.
+     */
+    @Test
+    void transfersAPayloadFreeVariantBetweenMemorylessContexts() {
+        var types = new TransferTestSupport.Types();
+        var variant = VariantType.builder().addCase(Case.builder().withLabel("x").build()).build();
+        var ft = FuncType.builder().addParam(param("a", types.add(variant))).build();
+        var caller = memorylessContext(types);
+        var callee = memorylessContext(types);
+
+        assertThat(ValueTransfer.canTransfer(caller, callee, ft)).isTrue();
+        var transfer = ValueTransfer.compile(caller, callee, ft);
+
+        assertThat(transfer.transferParams(new long[] {0L})).containsExactly(0L);
+        assertThatThrownBy(() -> transfer.transferParams(new long[] {1L}))
+                .isInstanceOf(TrapException.class);
     }
 
     // --- helpers ------------------------------------------------------------------------

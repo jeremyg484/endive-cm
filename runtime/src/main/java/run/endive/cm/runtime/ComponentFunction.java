@@ -2,6 +2,7 @@ package run.endive.cm.runtime;
 
 import run.endive.cm.abi.LiftLowerContext;
 import run.endive.cm.types.FuncType;
+import run.endive.cm.types.TypeResolver;
 
 public interface ComponentFunction {
 
@@ -14,6 +15,8 @@ public interface ComponentFunction {
     LiftLowerContext context();
 
     CoreFunction<?> liftedFunction();
+
+    TypeResolver typeResolver();
 
     ComponentFunction typed(
             HostTypeDescriptor resultDescriptor, HostTypeDescriptor... paramDescriptors);

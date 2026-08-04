@@ -43,7 +43,13 @@ public final class TypedValue {
             case "f64":
                 return value + "d";
             case "char":
-                return "'" + ((String) value).charAt(0) + "'";
+                // A component char is any Unicode scalar value up to U+10FFFF, so it cannot
+                // be emitted as a Java char literal: charAt(0) would truncate anything above
+                // the BMP to a lone surrogate. CharValue carries the whole range.
+                String text = (String) value;
+                return "CharValue.of(0x"
+                        + Integer.toHexString(text.codePointAt(0)).toUpperCase()
+                        + ")";
             case "string":
                 return "\"" + value + "\"";
             case "list":

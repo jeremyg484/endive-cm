@@ -1,6 +1,8 @@
 package run.endive.cm.runtime;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigInteger;
@@ -8,6 +10,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import run.endive.cm.abi.CharValue;
 import run.endive.cm.types.EnumType;
 import run.endive.cm.types.FlagsType;
 import run.endive.cm.types.PrimValType;
@@ -502,54 +505,39 @@ public class ComponentFunctionTests {
 
     @Test
     void testCharCompatibility() {
+        // A component char binds to CharValue, not to char/Character: both of those are 16
+        // bits and cannot hold a scalar value above U+FFFF.
         checkedValTypes.stream()
                 .collect(Collectors.partitioningBy(t -> t == CHAR_VAL_TYPE))
                 .forEach(
                         (compatible, types) -> {
-                            if (compatible) {
-                                for (ValType t : types) {
-                                    assertTrue(
-                                            ComponentFunctionInstance.isTypeCompatible(
-                                                    store, Character.class, t));
-                                    assertTrue(
-                                            ComponentFunctionInstance.isTypeCompatible(
-                                                    store, char.class, t));
-                                    assertTrue(
-                                            ComponentFunctionInstance.isTypeCompatible(
-                                                    store,
-                                                    PrimitiveHostTypeDescriptor.forClass(
-                                                            Character.class),
-                                                    t));
-                                    assertTrue(
-                                            ComponentFunctionInstance.isTypeCompatible(
-                                                    store,
-                                                    PrimitiveHostTypeDescriptor.forClass(
-                                                            char.class),
-                                                    t));
-                                }
-                            } else {
-                                for (ValType t : types) {
-                                    assertFalse(
-                                            ComponentFunctionInstance.isTypeCompatible(
-                                                    store, Character.class, t));
-                                    assertFalse(
-                                            ComponentFunctionInstance.isTypeCompatible(
-                                                    store, char.class, t));
-                                    assertFalse(
-                                            ComponentFunctionInstance.isTypeCompatible(
-                                                    store,
-                                                    PrimitiveHostTypeDescriptor.forClass(
-                                                            Character.class),
-                                                    t));
-                                    assertFalse(
-                                            ComponentFunctionInstance.isTypeCompatible(
-                                                    store,
-                                                    PrimitiveHostTypeDescriptor.forClass(
-                                                            char.class),
-                                                    t));
-                                }
+                            for (ValType t : types) {
+                                assertEquals(
+                                        compatible,
+                                        ComponentFunctionInstance.isTypeCompatible(
+                                                store, CharValue.class, t));
+                                assertEquals(
+                                        compatible,
+                                        ComponentFunctionInstance.isTypeCompatible(
+                                                store,
+                                                PrimitiveHostTypeDescriptor.forClass(
+                                                        CharValue.class),
+                                                t));
                             }
                         });
+    }
+
+    @Test
+    void charAndCharacterAreNoLongerBoundToAComponentChar() {
+        // Rejected outright rather than silently truncating anything above the BMP.
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        ComponentFunctionInstance.isTypeCompatible(
+                                store, Character.class, CHAR_VAL_TYPE));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ComponentFunctionInstance.isTypeCompatible(store, char.class, CHAR_VAL_TYPE));
     }
 
     @Test

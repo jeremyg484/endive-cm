@@ -6,6 +6,7 @@ import java.util.Objects;
 import run.endive.cm.abi.LiftLowerContext;
 import run.endive.cm.types.FuncType;
 import run.endive.cm.types.LabelValType;
+import run.endive.cm.types.TypeResolver;
 import run.endive.cm.types.ValType;
 import run.endive.wasm.WasmEngineException;
 
@@ -13,17 +14,25 @@ public final class ComponentFunctionInstance implements ComponentFunction {
 
     private final ComponentStore store;
     private final FuncType funcType;
+    private final TypeResolver typeResolver;
     private final ComponentFunctionCall call;
     private final LiftLowerContext liftLowerContext;
     private final CoreFunction<?> liftedFunction;
 
     private ComponentFunctionInstance(
-            ComponentStore store, FuncType funcType, ComponentFunctionCall call, LiftLowerContext liftLowerContext, CoreFunction<?> liftedFunction) {
+            ComponentStore store,
+            FuncType funcType,
+            TypeResolver typeResolver,
+            ComponentFunctionCall call,
+            LiftLowerContext liftLowerContext,
+            CoreFunction<?> liftedFunction) {
         Objects.requireNonNull(store, "store");
         Objects.requireNonNull(funcType, "funcType");
+        Objects.requireNonNull(typeResolver, "typeResolver");
         Objects.requireNonNull(call, "call");
         this.store = store;
         this.funcType = funcType;
+        this.typeResolver = typeResolver;
         this.call = call;
         this.liftLowerContext = liftLowerContext;
         this.liftedFunction = liftedFunction;
@@ -36,6 +45,7 @@ public final class ComponentFunctionInstance implements ComponentFunction {
     public static final class Builder {
         private ComponentStore componentStore;
         private FuncType funcType;
+        private TypeResolver typeResolver;
         private ComponentFunctionCall call;
         private LiftLowerContext liftLowerContext;
         private CoreFunction<?> liftedFunction;
@@ -47,6 +57,11 @@ public final class ComponentFunctionInstance implements ComponentFunction {
 
         public Builder withFuncType(FuncType funcType) {
             this.funcType = funcType;
+            return this;
+        }
+
+        public Builder withTypeResolver(TypeResolver typeResolver) {
+            this.typeResolver = typeResolver;
             return this;
         }
 
@@ -66,7 +81,8 @@ public final class ComponentFunctionInstance implements ComponentFunction {
         }
 
         public ComponentFunctionInstance build() {
-            return new ComponentFunctionInstance(componentStore, funcType, call, liftLowerContext, liftedFunction);
+            return new ComponentFunctionInstance(
+                    componentStore, funcType, typeResolver, call, liftLowerContext, liftedFunction);
         }
     }
 
@@ -102,6 +118,11 @@ public final class ComponentFunctionInstance implements ComponentFunction {
     @Override
     public FuncType funcType() {
         return funcType;
+    }
+
+    @Override
+    public TypeResolver typeResolver() {
+        return typeResolver;
     }
 
     @Override
@@ -217,6 +238,11 @@ public final class ComponentFunctionInstance implements ComponentFunction {
         @Override
         public FuncType funcType() {
             return funcType;
+        }
+
+        @Override
+        public TypeResolver typeResolver() {
+            return typeResolver;
         }
 
         @Override

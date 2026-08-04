@@ -5,9 +5,19 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import run.endive.cm.abi.CharValue;
 import run.endive.cm.types.PrimValType;
 import run.endive.cm.types.ValType;
 
+/**
+ * Binds a Java host type to one of the Component Model's primitive value types.
+ *
+ * <p>"Primitive" here describes the <em>component</em> side, not the Java side — which is why
+ * reference types like {@link String}, {@link BigInteger} and {@link CharValue} sit alongside
+ * the boxed numerics. Some component primitives simply have no Java primitive that can carry
+ * them: {@code u64} exceeds {@code long}, and {@code char} is any Unicode scalar value up to
+ * {@code U+10FFFF}, which neither {@code char} nor {@link Character} can hold.
+ */
 public final class PrimitiveHostTypeDescriptor extends HostTypeDescriptor {
 
     private static final ValType BOOL_VAL_TYPE =
@@ -71,10 +81,8 @@ public final class PrimitiveHostTypeDescriptor extends HostTypeDescriptor {
             new PrimitiveHostTypeDescriptor(Double.class, F64_VAL_TYPE);
     private static final PrimitiveHostTypeDescriptor DOUBLE_PRIMITIVE =
             new PrimitiveHostTypeDescriptor(Double.TYPE, F64_VAL_TYPE);
-    private static final PrimitiveHostTypeDescriptor CHAR_WRAPPER =
-            new PrimitiveHostTypeDescriptor(Character.class, CHAR_VAL_TYPE);
-    private static final PrimitiveHostTypeDescriptor CHAR_PRIMITIVE =
-            new PrimitiveHostTypeDescriptor(Character.TYPE, CHAR_VAL_TYPE);
+    private static final PrimitiveHostTypeDescriptor CHAR_VALUE =
+            new PrimitiveHostTypeDescriptor(CharValue.class, CHAR_VAL_TYPE);
     private static final PrimitiveHostTypeDescriptor STRING =
             new PrimitiveHostTypeDescriptor(String.class, STRING_VAL_TYPE);
 
@@ -120,10 +128,8 @@ public final class PrimitiveHostTypeDescriptor extends HostTypeDescriptor {
             return DOUBLE_WRAPPER;
         } else if (hostType == Double.TYPE) {
             return DOUBLE_PRIMITIVE;
-        } else if (hostType == Character.class) {
-            return CHAR_WRAPPER;
-        } else if (hostType == Character.TYPE) {
-            return CHAR_PRIMITIVE;
+        } else if (hostType == CharValue.class) {
+            return CHAR_VALUE;
         } else if (hostType == String.class) {
             return STRING;
         }
@@ -146,8 +152,7 @@ public final class PrimitiveHostTypeDescriptor extends HostTypeDescriptor {
                 || hostType == Float.TYPE
                 || hostType == Double.class
                 || hostType == Double.TYPE
-                || hostType == Character.class
-                || hostType == Character.TYPE
+                || hostType == CharValue.class
                 || hostType == String.class;
     }
 
