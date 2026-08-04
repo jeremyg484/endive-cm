@@ -28,4 +28,9 @@ public class CoreImportFunction implements CoreFunction<WasmFunctionHandle> {
     public ImportFunction importFunction(String moduleName, String functionName) {
         return new ImportFunction(moduleName, functionName, funcType, importFunctionHandle);
     }
+
+    @Override
+    public long[] apply(long[] args) {
+        return importFunctionHandle.apply(null, args);
+    }
 }

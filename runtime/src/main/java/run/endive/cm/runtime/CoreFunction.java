@@ -10,4 +10,6 @@ public interface CoreFunction<T> {
     FunctionType funcType();
 
     ImportFunction importFunction(String moduleName, String functionName);
+
+    long[] apply(long[] args);
 }

@@ -98,6 +98,19 @@
             <wast>wasmtime/simple.wast</wast>
             <wast>wasmtime/strings.wast</wast>
             <wast>wasmtime/types.wast</wast>
+
+            <wast>wasmtime/adapter.wast</wast>
+            <wast>wasmtime/aliasing.wast</wast>
+            <wast>wasmtime/fused.wast</wast>
+            <wast>wasmtime/import.wast</wast>
+            <wast>wasmtime/instance.wast</wast>
+            <wast>wasmtime/linking.wast</wast>
+            <wast>wasmtime/modules.wast</wast>
+            <wast>wasmtime/nested.wast</wast>
+            <wast>wasmtime/resources.wast</wast>
+            <wast>wasmtime/restrictions.wast</wast>
+            <wast>wasmtime/tags.wast</wast>
+
           </includedWasts>
           <excludedWasts>
             <wast>async/async-calls-sync.wast</wast>
@@ -146,23 +159,14 @@
             <wast>values/concat.wast</wast>
             <wast>values/post-return.wast</wast>
             <wast>values/strings.wast</wast>
-            <wast>wasmtime/adapter.wast</wast>
-            <wast>wasmtime/aliasing.wast</wast>
-            <wast>wasmtime/fused.wast</wast>
-            <wast>wasmtime/import.wast</wast>
-            <wast>wasmtime/instance.wast</wast>
-            <wast>wasmtime/linking.wast</wast>
-            <wast>wasmtime/modules.wast</wast>
-            <wast>wasmtime/nested.wast</wast>
-            <wast>wasmtime/resources.wast</wast>
-            <wast>wasmtime/restrictions.wast</wast>
-            <wast>wasmtime/tags.wast</wast>
           </excludedWasts>
           <excludedTests>
             <test>CmSpecWasmtimeTypesTest.test20</test>
             <test>CmSpecWasmToolsMemory64Test.test2</test>
             <test>CmSpecWasmToolsMemory64Test.test3</test>
             <test>CmSpecWasmToolsMemory64Test.test4</test>
+            <test>CmSpecWasmtimeAdapterTest.test5</test>
+            <test>CmSpecWasmtimeInstanceTest.test5</test>
             <test>CmSpecWasmtimeSimpleTest.test4</test>
             <test>CmSpecWasmtimeSimpleTest.test5</test>
           </excludedTests>

@@ -30,4 +30,9 @@ public final class CoreExportFunction implements CoreFunction<ExportFunction> {
         WasmFunctionHandle functionHandle = (instance, args) -> exportFunction.apply(args);
         return new ImportFunction(moduleName, functionName, funcType, functionHandle);
     }
+
+    @Override
+    public long[] apply(long[] args) {
+        return exportFunction.apply(args);
+    }
 }

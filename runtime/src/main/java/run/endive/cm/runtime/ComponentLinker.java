@@ -58,9 +58,9 @@ import run.endive.cm.types.canon.CanonLift;
 import run.endive.cm.types.canon.CanonLower;
 import run.endive.cm.types.canon.CanonOpt;
 import run.endive.cm.types.canon.CanonResource;
-import run.endive.runtime.ExportFunction;
 import run.endive.runtime.GlobalInstance;
 import run.endive.runtime.ImportFunction;
+import run.endive.runtime.ImportMemory;
 import run.endive.runtime.ImportValues;
 import run.endive.runtime.Machine;
 import run.endive.runtime.Memory;
@@ -191,12 +191,31 @@ public final class ComponentLinker {
                 case INSTANCE:
                     generateInstanceImport(store, imp);
                     break;
+                case FUNC:
+                    generateFunctionImport(store, imp);
+                    break;
                 default:
                     throw new LinkageException(
                             "Generation of import type "
                                     + imp.externDesc().kind()
                                     + " not supported yet");
             }
+        }
+
+        private void generateFunctionImport(ComponentStore store, Import imp) {
+            var type = store.getType((int) imp.externDesc().typeIdx());
+            if (type.funcType() == null) {
+                throw new LinkageException(
+                        "Function type not found at index "
+                                + imp.externDesc().typeIdx()
+                                + " for import '"
+                                + imp.name()
+                                + "'");
+            }
+
+            var funcType = type.funcType();
+            var func = new ComponentFunctionInstance(store, funcType, (args) -> new Object[0]);
+            store.addImport(imp.name(), func);
         }
 
         private void generateInstanceImport(ComponentStore store, Import imp) {
@@ -562,12 +581,13 @@ public final class ComponentLinker {
             var builder = ImportValues.builder();
             for (CoreInstantiateArg arg : expr.instantiateArgs()) {
                 if (arg.sortIdx().sort() != CoreSort.INSTANCE) {
-                    throw new LinkageException("core instantiate args must be instance of sort");
+                    throw new LinkageException("core instantiate args must be of instance sort");
                 }
                 CoreModuleInstance coreInstance = store.getCoreInstance((int) arg.sortIdx().idx());
                 if (coreInstance instanceof CoreEndiveInstance) {
                     var moduleInstance = ((CoreEndiveInstance) coreInstance).getModuleInstance();
                     module.importSection().stream()
+                            .filter(i -> i.module().equals(arg.name()))
                             .forEach(
                                     i -> {
                                         switch (i.importType()) {
@@ -580,6 +600,13 @@ public final class ComponentLinker {
                                                                 i.name());
                                                 builder.addFunction(func);
                                                 break;
+                                            case MEMORY:
+                                                var memory =
+                                                        moduleInstance.exports().memory(i.name());
+                                                builder.addMemory(
+                                                        new ImportMemory(
+                                                                arg.name(), i.name(), memory));
+                                                break;
                                             default:
                                                 throw new LinkageException(
                                                         "core instantiate module import of type "
@@ -590,6 +617,7 @@ public final class ComponentLinker {
                 } else if (coreInstance instanceof CoreInlineInstance) {
                     var inlineInstance = ((CoreInlineInstance) coreInstance);
                     module.importSection().stream()
+                            .filter(i -> i.module().equals(arg.name()))
                             .forEach(
                                     i -> {
                                         switch (i.importType()) {
@@ -806,19 +834,19 @@ public final class ComponentLinker {
     }
 
     private void processCanonResourceNew(ComponentStore store, ResourceType resourceType) {
-        ExportFunction coreFunc =
-                (args) -> {
+        WasmFunctionHandle coreFunc =
+                (instance, args) -> {
                     var resourceHandle =
                             new ResourceHandle(resourceType, (int) args[0], true, null);
                     return new long[] {store.getInstance().addHandle(resourceHandle)};
                 };
         store.addCoreFunction(
-                new CoreExportFunction(BuiltinFunctionTypes.CANON_RESOURCE_NEW, coreFunc));
+                new CoreImportFunction(BuiltinFunctionTypes.CANON_RESOURCE_NEW, coreFunc));
     }
 
     private void processCanonResourceRep(ComponentStore store, ResourceType resourceType) {
-        ExportFunction coreFunc =
-                (args) -> {
+        WasmFunctionHandle coreFunc =
+                (instance, args) -> {
                     var handle = store.getInstance().getHandle((int) args[0]);
                     if (!(handle instanceof ResourceHandle)) {
                         throw new IllegalStateException(
@@ -837,12 +865,12 @@ public final class ComponentLinker {
                     return new long[] {resourceHandle.rep()};
                 };
         store.addCoreFunction(
-                new CoreExportFunction(BuiltinFunctionTypes.CANON_RESOURCE_REP, coreFunc));
+                new CoreImportFunction(BuiltinFunctionTypes.CANON_RESOURCE_REP, coreFunc));
     }
 
     private void processCanonResourceDrop(ComponentStore store, ResourceType resourceType) {
-        ExportFunction coreFunc =
-                (args) -> {
+        WasmFunctionHandle coreFunc =
+                (instance, args) -> {
                     var handle = store.getInstance().removeHandle((int) args[0]);
                     if (!(handle instanceof ResourceHandle)) {
                         throw new IllegalStateException(
@@ -879,47 +907,7 @@ public final class ComponentLinker {
                     return new long[0];
                 };
         store.addCoreFunction(
-                new CoreExportFunction(BuiltinFunctionTypes.CANON_RESOURCE_DROP, coreFunc));
-    }
-
-    private void processCanonLift(ComponentStore store, CanonLift lift) {
-        int coreFuncIdx = (int) lift.funcIdx().idx();
-
-        CoreExportFunction coreExportFunc = resolveCoreExportFunction(store, coreFuncIdx);
-        FuncType componentFuncType = resolveComponentFuncType(store, (int) lift.typeIdx());
-        // TODO - Do we need to validate that the component function signature flattens to the same
-        //  signature as the core export function? Does wasm-tools validation already do that for
-        // us?
-
-        List<ValType> componentFuncParams =
-                componentFuncType.params().stream()
-                        .map(LabelValType::valType)
-                        .collect(Collectors.toList());
-        ValType resultValType = componentFuncType.result();
-
-        LiftLowerContext context = processCanonOpts(store, lift.opts());
-
-        ComponentFunctionCall call =
-                (args) -> {
-                    long[] result =
-                            coreExportFunc
-                                    .getFunctionInstance()
-                                    .apply(
-                                            CanonicalAbi.lowerFlatParams(
-                                                    context,
-                                                    Arrays.asList(args),
-                                                    componentFuncParams));
-
-                    if (context.postReturn() != null) {
-                        context.postReturn().apply(result);
-                    }
-
-                    return resultValType == null
-                            ? EMPTY_COMPONENT_VALUES
-                            : CanonicalAbi.liftFlatResults(context, result, List.of(resultValType))
-                                    .toArray();
-                };
-        store.addFunction(new ComponentFunctionInstance(store, componentFuncType, call));
+                new CoreImportFunction(BuiltinFunctionTypes.CANON_RESOURCE_DROP, coreFunc));
     }
 
     private static CoreExportFunction resolveCoreExportFunction(
@@ -1009,10 +997,10 @@ public final class ComponentLinker {
 
         WasmFunctionHandle coreFuncHandle =
                 (instance, args) -> {
-                    Object[] argValuesLifted =
+                    Object[] liftedArgValues =
                             CanonicalAbi.liftFlatParams(context, args, componentFuncParams)
                                     .toArray();
-                    Object[] results = func.apply(argValuesLifted);
+                    Object[] results = func.apply(liftedArgValues);
                     return componentFuncType.result() == null
                             ? EMPTY_CORE_VALUES
                             : CanonicalAbi.lowerFlatResults(
@@ -1022,6 +1010,46 @@ public final class ComponentLinker {
                                     null);
                 };
         store.addCoreFunction(new CoreImportFunction(coreFuncType, coreFuncHandle));
+    }
+
+    private void processCanonLift(ComponentStore store, CanonLift lift) {
+        int coreFuncIdx = (int) lift.funcIdx().idx();
+
+        CoreFunction<?> coreFunc = store.getCoreFunction(coreFuncIdx);
+        if (coreFunc == null) {
+            throw new LinkageException("Core function at index " + coreFuncIdx + " not found");
+        }
+        FuncType componentFuncType = resolveComponentFuncType(store, (int) lift.typeIdx());
+        // TODO - Do we need to validate that the component function signature flattens to the same
+        //  signature as the core export function? Does wasm-tools validation already do that for
+        // us?
+
+        List<ValType> componentFuncParams =
+                componentFuncType.params().stream()
+                        .map(LabelValType::valType)
+                        .collect(Collectors.toList());
+        ValType resultValType = componentFuncType.result();
+
+        LiftLowerContext context = processCanonOpts(store, lift.opts());
+
+        ComponentFunctionCall call =
+                (args) -> {
+                    long[] loweredArgs =
+                            CanonicalAbi.lowerFlatParams(
+                                    context, Arrays.asList(args), componentFuncParams);
+                    long[] result =
+                            coreFunc.apply(loweredArgs);
+
+                    if (context.postReturn() != null) {
+                        context.postReturn().apply(result);
+                    }
+
+                    return resultValType == null
+                            ? EMPTY_COMPONENT_VALUES
+                            : CanonicalAbi.liftFlatResults(context, result, List.of(resultValType))
+                            .toArray();
+                };
+        store.addFunction(new ComponentFunctionInstance(store, componentFuncType, call));
     }
 
     private void processExportSection(ComponentStore store, ExportSection section) {

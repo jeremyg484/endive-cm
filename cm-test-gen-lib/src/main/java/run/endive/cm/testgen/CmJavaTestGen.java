@@ -38,6 +38,8 @@ public final class CmJavaTestGen {
         cu.addImport("org.junit.jupiter.api.Assertions.assertArrayEquals", true, false);
         cu.addImport("org.junit.jupiter.api.Assertions.assertNotNull", true, false);
         cu.addImport("org.junit.jupiter.api.Assertions.assertThrows", true, false);
+        cu.addImport("org.junit.jupiter.api.Assertions.fail", true, false);
+        cu.addImport("run.endive.wasm.WasmEngineException");
         cu.addImport("run.endive.cm.parser.ComponentParser");
         cu.addImport("run.endive.cm.runtime.ComponentLinker");
         cu.addImport("run.endive.cm.runtime.ComponentInstance");
@@ -142,23 +144,67 @@ public final class CmJavaTestGen {
                 generateAssertReturnTest(body, command, lastComponentFilename);
                 break;
             case ASSERT_TRAP:
-                throw new UnsupportedOperationException(
-                        "assert_trap at line " + command.line() + " not yet supported");
+                generateAssertTrapTest(body, command, lastComponentFilename);
+                break;
             case ASSERT_UNINSTANTIABLE:
                 generateAssertUninstantiableTest(body, command);
                 break;
             case ACTION:
-                throw new UnsupportedOperationException(
-                        "action at line " + command.line() + " not yet supported");
+                generateUnsupportedTest(
+                        body, "action at line " + command.line() + " not yet supported");
+                break;
             case REGISTER:
-                throw new UnsupportedOperationException(
-                        "register at line " + command.line() + " not yet supported");
+                generateUnsupportedTest(
+                        body, "register at line " + command.line() + " not yet supported");
+                break;
+            case MODULE_INSTANCE:
+                generateUnsupportedTest(
+                        body, "module_instance at line " + command.line() + " not yet supported");
+                break;
             default:
                 throw new UnsupportedOperationException(
                         "Unknown command type " + commandType + " at line " + command.line());
         }
 
         method.setBody(body);
+    }
+
+    private void generateUnsupportedTest(BlockStmt body, String failureMessage) {
+        body.addStatement("fail(\"" + failureMessage + "\");");
+    }
+
+    private void generateAssertTrapTest(
+            BlockStmt body, CmCommand command, String lastComponentFilename) {
+        if (command.action() == null) {
+            throw new IllegalStateException(
+                    "assert_return at line " + command.line() + " has no action");
+        }
+        if (!"invoke".equals(command.action().type())) {
+            throw new UnsupportedOperationException(
+                    "assert_return at line "
+                            + command.line()
+                            + " has unsupported action type: "
+                            + command.action().type());
+        }
+        if (command.action().field() == null) {
+            throw new IllegalStateException(
+                    "assert_return invoke at line " + command.line() + " has no field");
+        }
+        if (lastComponentFilename == null) {
+            throw new IllegalStateException(
+                    "assert_return at line " + command.line() + " has no preceding component");
+        }
+        body.addStatement("byte[] bytes = loadBytes(\"" + lastComponentFilename + "\");");
+        body.addStatement("var parser = ComponentParser.builder().build();");
+        body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
+        body.addStatement("var linker = ComponentLinker.builder().build();");
+        body.addStatement("ComponentInstance instance = linker.instantiate(component);");
+        body.addStatement(
+                "assertThrows(WasmEngineException.class, () -> instance.export(\""
+                        + command.action().field()
+                        + "\").apply("
+                        + command.action().emitArgs()
+                        + "));");
     }
 
     private void generateAssertUninstantiableTest(BlockStmt body, CmCommand command) {

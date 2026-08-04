@@ -3,6 +3,7 @@ package run.endive.cm.testgen.wast;
 public enum CmCommandType {
     MODULE,
     MODULE_DEFINITION,
+    MODULE_INSTANCE,
     COMPONENT,
     ASSERT_MALFORMED,
     ASSERT_INVALID,
@@ -19,6 +20,8 @@ public enum CmCommandType {
                 return MODULE;
             case "module_definition":
                 return MODULE_DEFINITION;
+            case "module_instance":
+                return MODULE_INSTANCE;
             case "component":
                 return COMPONENT;
             case "assert_malformed":
