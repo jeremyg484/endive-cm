@@ -16,6 +16,9 @@ public final class LiftLowerContext {
     private final Realloc realloc;
     private final boolean async;
     private final Callback callback;
+    private final HandleTable handles;
+    private final ResourceTypeRef.Resolver resourceTypes;
+    private final BorrowScope borrowScope;
 
     private LiftLowerContext(
             Memory memory,
@@ -25,7 +28,10 @@ public final class LiftLowerContext {
             PostReturn postReturn,
             Realloc realloc,
             boolean async,
-            Callback callback) {
+            Callback callback,
+            HandleTable handles,
+            ResourceTypeRef.Resolver resourceTypes,
+            BorrowScope borrowScope) {
         this.memory = memory;
         this.ptrType = ptrType == null ? PointerType.I32 : ptrType;
         this.stringEncoding = stringEncoding == null ? StringEncoding.UTF8 : stringEncoding;
@@ -34,6 +40,9 @@ public final class LiftLowerContext {
         this.realloc = realloc;
         this.async = async;
         this.callback = callback;
+        this.handles = handles;
+        this.resourceTypes = resourceTypes;
+        this.borrowScope = borrowScope;
     }
 
     public Memory memory() {
@@ -68,6 +77,47 @@ public final class LiftLowerContext {
         return callback;
     }
 
+    /**
+     * The handle table of the component instance this context lifts out of and lowers into
+     * ({@code cx.inst.handles}). Absent unless the context's types involve resources.
+     */
+    public HandleTable handles() {
+        return handles;
+    }
+
+    /** Resolves the type indices carried by {@code own} and {@code borrow} types. */
+    public ResourceTypeRef.Resolver resourceTypes() {
+        return resourceTypes;
+    }
+
+    /**
+     * The call {@code borrow} handles lifted or lowered through this context are scoped to.
+     * Absent when those types contain no {@code borrow}.
+     */
+    public BorrowScope borrowScope() {
+        return borrowScope;
+    }
+
+    /**
+     * This context with its borrow scope replaced. The rest of a context is fixed by the
+     * {@code canonopt}s of a canonical definition and so is built once at link time, but the
+     * scope belongs to an individual call and has to be supplied per invocation.
+     */
+    public LiftLowerContext withBorrowScope(BorrowScope borrowScope) {
+        return new LiftLowerContext(
+                memory,
+                ptrType,
+                stringEncoding,
+                typeResolver,
+                postReturn,
+                realloc,
+                async,
+                callback,
+                handles,
+                resourceTypes,
+                borrowScope);
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -81,6 +131,9 @@ public final class LiftLowerContext {
         private Realloc realloc;
         private boolean async;
         private Callback callback;
+        private HandleTable handles;
+        private ResourceTypeRef.Resolver resourceTypes;
+        private BorrowScope borrowScope;
 
         private Builder() {}
 
@@ -124,6 +177,21 @@ public final class LiftLowerContext {
             return this;
         }
 
+        public Builder withHandles(HandleTable handles) {
+            this.handles = handles;
+            return this;
+        }
+
+        public Builder withResourceTypes(ResourceTypeRef.Resolver resourceTypes) {
+            this.resourceTypes = resourceTypes;
+            return this;
+        }
+
+        public Builder withBorrowScope(BorrowScope borrowScope) {
+            this.borrowScope = borrowScope;
+            return this;
+        }
+
         public LiftLowerContext build() {
             return new LiftLowerContext(
                     memory,
@@ -133,7 +201,10 @@ public final class LiftLowerContext {
                     postReturn,
                     realloc,
                     async,
-                    callback);
+                    callback,
+                    handles,
+                    resourceTypes,
+                    borrowScope);
         }
     }
 }

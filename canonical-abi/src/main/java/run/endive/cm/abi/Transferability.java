@@ -247,10 +247,16 @@ final class Transferability {
     }
 
     /**
-     * Whether every type reachable from {@code t} is one the lift/lower and transfer paths
-     * actually implement. Resource handles and the async value types are rejected here so a
-     * caller can decide up front to fall back rather than trapping partway through a
-     * transfer.
+     * Whether every type reachable from {@code t} is one the transfer path can carry, so that a
+     * caller can decide up front to fall back rather than trapping partway through.
+     *
+     * <p>{@code own} and {@code borrow} are rejected permanently rather than pending: a handle
+     * is an index into one component instance's table, and the bytes that encode it are
+     * meaningless in another's. Moving one means removing an entry on the source side and
+     * minting one on the destination side, which is bookkeeping no byte copy can express — so
+     * handles always take the lift/lower path, where {@link CanonicalAbi#liftOwn} and its
+     * siblings do that work. The async value types are rejected because they are not modeled
+     * here yet.
      */
     static boolean isSupported(TypeResolver typeResolver, DefValType t) {
         return !CanonicalAbi.contains(typeResolver, t, Transferability::isUnsupportedKind);

@@ -223,8 +223,7 @@ final class TransferPlan {
                         long caseIndex =
                                 CanonicalAbi.loadInt(src.memory(), srcPtr + off, discSize, false);
                         if (caseIndex >= casePlans.length) {
-                            throw new TrapException(
-                                    "variant case index " + caseIndex + " is out of range");
+                            throw new TrapException("invalid variant discriminant");
                         }
                         CanonicalAbi.storeInt(dst.memory(), caseIndex, dstPtr + off, discSize);
                         TransferPlan payload = casePlans[(int) caseIndex];

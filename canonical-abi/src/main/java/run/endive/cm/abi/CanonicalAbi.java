@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Predicate;
+import run.endive.cm.types.BorrowType;
 import run.endive.cm.types.DefValType;
 import run.endive.cm.types.FlagsType;
 import run.endive.cm.types.FuncType;
@@ -21,6 +22,7 @@ import run.endive.cm.types.FutureType;
 import run.endive.cm.types.LabelValType;
 import run.endive.cm.types.ListType;
 import run.endive.cm.types.MapType;
+import run.endive.cm.types.OwnType;
 import run.endive.cm.types.PointerType;
 import run.endive.cm.types.RecordType;
 import run.endive.cm.types.Specialized;
@@ -30,6 +32,7 @@ import run.endive.cm.types.TypeResolver;
 import run.endive.cm.types.VariantType;
 import run.endive.runtime.Memory;
 import run.endive.runtime.TrapException;
+import run.endive.runtime.WasmRuntimeException;
 import run.endive.wasm.types.FunctionType;
 import run.endive.wasm.types.ValType;
 
@@ -286,9 +289,11 @@ public final class CanonicalAbi {
                 return loadVariant(ctx, ptr, (VariantType) d);
             case FLAGS:
                 return loadFlags(ctx, ptr, (FlagsType) d);
-            case ERROR_CONTEXT:
             case OWN:
+                return liftOwn(ctx, (int) loadInt(ctx.memory(), ptr, 4, false), (OwnType) d);
             case BORROW:
+                return liftBorrow(ctx, (int) loadInt(ctx.memory(), ptr, 4, false), (BorrowType) d);
+            case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
@@ -327,10 +332,10 @@ public final class CanonicalAbi {
 
     static int convertI32ToChar(long i) {
         if (i >= MAX_UNICODE_SCALAR_VALUE) {
-            throw new TrapException("char codepoint " + i + " exceeds the maximum scalar value");
+            throw new TrapException("invalid `char` bit pattern");
         }
         if (i >= MIN_SURROGATE && i <= MAX_SURROGATE) {
-            throw new TrapException("char codepoint " + i + " is a surrogate, which is invalid");
+            throw new TrapException("invalid `char` bit pattern");
         }
         return (int) i;
     }
@@ -403,7 +408,7 @@ public final class CanonicalAbi {
         int discSize = t.discriminantType().elementSize(ctx.typeResolver(), ctx.ptrType());
         long caseIndex = loadInt(ctx.memory(), ptr, discSize, false);
         if (caseIndex >= cases.size()) {
-            throw new TrapException("variant case index " + caseIndex + " is out of range");
+            throw new TrapException("invalid variant discriminant");
         }
         var c = cases.get((int) caseIndex);
         int payloadPtr =
@@ -480,8 +485,7 @@ public final class CanonicalAbi {
                     "string byte length exceeds the maximum of " + MAX_STRING_BYTE_LENGTH);
         }
         if (ptr != DefValType.alignTo(ptr, range.alignment)) {
-            throw new TrapException(
-                    "string pointer " + ptr + " is not aligned to " + range.alignment);
+            throw new TrapException("unaligned pointer");
         }
         if (ptr + range.byteLength > Memory.bytes(ctx.memory().pages())) {
             throw new TrapException(
@@ -491,7 +495,11 @@ public final class CanonicalAbi {
                             + ptr
                             + " is out of bounds");
         }
-        return ctx.memory().readBytes(ptr, (int) range.byteLength);
+        try {
+            return ctx.memory().readBytes(ptr, (int) range.byteLength);
+        } catch (WasmRuntimeException e) {
+            throw new TrapException("string content out-of-bounds");
+        }
     }
 
     /** The byte range and charset a {@code (ptr, tagged_code_units)} pair resolves to. */
@@ -571,9 +579,13 @@ public final class CanonicalAbi {
             case FLAGS:
                 storeFlags(ctx, (Map<?, ?>) v, ptr, (FlagsType) d);
                 return;
-            case ERROR_CONTEXT:
             case OWN:
+                storeInt(ctx.memory(), lowerOwn(ctx, (ResourceValue) v, (OwnType) d), ptr, 4);
+                return;
             case BORROW:
+                storeInt(ctx.memory(), lowerBorrow(ctx, (ResourceValue) v, (BorrowType) d), ptr, 4);
+                return;
+            case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
@@ -678,7 +690,7 @@ public final class CanonicalAbi {
                         ctx.realloc(), "storing this value requires a realloc in the context");
         int ptr = realloc.realloc(0, 0, align, size);
         if (ptr != DefValType.alignTo(ptr, align)) {
-            throw new TrapException("realloc returned misaligned pointer " + ptr);
+            throw new TrapException("realloc returned unaligned pointer " + ptr);
         }
         if ((long) ptr + size > Memory.bytes(ctx.memory().pages())) {
             throw new TrapException("realloc returned out-of-bounds pointer " + ptr);
@@ -931,8 +943,7 @@ public final class CanonicalAbi {
             int size = tupleType.elementSize(ctx.typeResolver(), ctx.ptrType());
             int ptr = (int) vi.next();
             if (ptr != DefValType.alignTo(ptr, align)) {
-                throw new TrapException(
-                        "spilled values pointer " + ptr + " is not aligned to " + align);
+                throw new TrapException("unaligned pointer");
             }
             if ((long) ptr + size > Memory.bytes(ctx.memory().pages())) {
                 throw new TrapException("spilled values at " + ptr + " are out of bounds");
@@ -978,9 +989,11 @@ public final class CanonicalAbi {
                 return liftFlatVariant(ctx, vi, (VariantType) d);
             case FLAGS:
                 return liftFlatFlags(vi, (FlagsType) d);
-            case ERROR_CONTEXT:
             case OWN:
+                return liftOwn(ctx, (int) vi.next(), (OwnType) d);
             case BORROW:
+                return liftBorrow(ctx, (int) vi.next(), (BorrowType) d);
+            case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
@@ -1177,7 +1190,7 @@ public final class CanonicalAbi {
         int payloadSlots = flatTypes.size() - 1;
         long caseIndex = vi.next() & 0xFFFFFFFFL;
         if (caseIndex >= cases.size()) {
-            throw new TrapException("variant case index " + caseIndex + " is out of range");
+            throw new TrapException("invalid variant discriminant");
         }
         var c = cases.get((int) caseIndex);
         int payloadStart = vi.position();
@@ -1270,8 +1283,7 @@ public final class CanonicalAbi {
             } else {
                 ptr = (int) outParam[0];
                 if (ptr != DefValType.alignTo(ptr, align)) {
-                    throw new TrapException(
-                            "spill out-param pointer " + ptr + " is not aligned to " + align);
+                    throw new TrapException("unaligned pointer");
                 }
                 if ((long) ptr + size > Memory.bytes(ctx.memory().pages())) {
                     throw new TrapException("spill out-param at " + ptr + " is out of bounds");
@@ -1334,9 +1346,15 @@ public final class CanonicalAbi {
             case FLAGS:
                 out.add(packFlagsIntoInt((Map<?, ?>) v, ((FlagsType) d).labels()) & 0xFFFFFFFFL);
                 return;
-            case ERROR_CONTEXT:
             case OWN:
+                out.add(Integer.toUnsignedLong(lowerOwn(ctx, (ResourceValue) v, (OwnType) d)));
+                return;
             case BORROW:
+                out.add(
+                        Integer.toUnsignedLong(
+                                lowerBorrow(ctx, (ResourceValue) v, (BorrowType) d)));
+                return;
+            case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
@@ -1438,6 +1456,149 @@ public final class CanonicalAbi {
         for (int i = out.size() - payloadStart; i < payloadSlots; i++) {
             out.add(0L);
         }
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Resource handles
+    //
+    // A handle is never a value in the way an integer or a record is: it is an index into the
+    // owning component instance's table, and the table is what gives it meaning. So unlike
+    // every type above, lifting and lowering a handle mutate state — lifting takes an index
+    // out of the source instance's table (for `own`) or registers a lend against it (for
+    // `borrow`), and lowering puts a fresh index into the destination's. The rep itself never
+    // crosses as a rep; each side only ever sees its own index.
+    //
+    // The guards below are what make `own` and `borrow` mean anything at runtime, and they are
+    // reproduced from the reference exactly, including the order in which they fire: `lift_own`
+    // removes before it validates, so a handle named by a well-formed-but-wrong index is
+    // consumed either way.
+    // -------------------------------------------------------------------------------------
+
+    /**
+     * Lifts an {@code own} handle, transferring ownership out of the source instance: the index
+     * is removed from its table, so the component that held it can no longer name the resource.
+     *
+     * <p>Fails unless ownership is genuinely transferable — the index must name a handle of
+     * this exact resource type, that handle must itself be owning rather than borrowed, and it
+     * must not currently be lent out, since giving the resource away while a callee still holds
+     * a borrow of it would leave that borrow dangling.
+     */
+    static ResourceValue liftOwn(LiftLowerContext ctx, int i, OwnType t) {
+        var rt = resourceTypeOf(ctx, t.typeIdx());
+        var h = requireHandle(handles(ctx).remove(i), i);
+        requireResourceType(h, rt, i);
+        if (h.numLends() != 0) {
+            throw new TrapException("cannot remove owned resource while borrowed");
+        }
+        if (!h.own()) {
+            throw new TrapException(
+                    "handle index " + i + " is a borrowed handle, expected an owned one");
+        }
+        return ResourceValue.owned(rt, h.rep());
+    }
+
+    /**
+     * Lifts a {@code borrow} handle, leaving the source handle in place — the caller keeps it,
+     * and only the right to use it for the duration of the call crosses over.
+     *
+     * <p>Registering the source handle as a lender on the call's scope is what bounds that
+     * duration: until the call resolves, the handle counts as lent and {@link #liftOwn} will
+     * refuse to transfer it away.
+     */
+    static ResourceValue liftBorrow(LiftLowerContext ctx, int i, BorrowType t) {
+        var rt = resourceTypeOf(ctx, t.typeIdx());
+        var h = requireHandle(handles(ctx).get(i), i);
+        requireResourceType(h, rt, i);
+        subtaskScope(ctx).addLender(h);
+        return ResourceValue.borrowed(rt, h.rep());
+    }
+
+    /** Lowers an {@code own} handle by minting a fresh owning index in the destination. */
+    static int lowerOwn(LiftLowerContext ctx, ResourceValue v, OwnType t) {
+        var rt = resourceTypeOf(ctx, t.typeIdx());
+        return handles(ctx).add(rt, v.rep(), true, null);
+    }
+
+    /**
+     * Lowers a {@code borrow} handle, charging it to the current call so that it must be
+     * dropped before that call may return.
+     *
+     * <p>Lowering into the component that <em>implements</em> the resource type skips the table
+     * entirely and passes the representation itself. This is the reference's one deliberate
+     * shortcut, and it is observable rather than internal: a component receiving a borrow of
+     * its own resource is handed a rep, not an index, and so must neither call {@code
+     * resource.rep} on it nor drop it. That is sound because the only thing such a handle could
+     * have been used for is recovering the rep it already is.
+     */
+    static int lowerBorrow(LiftLowerContext ctx, ResourceValue v, BorrowType t) {
+        var rt = resourceTypeOf(ctx, t.typeIdx());
+        var handles = handles(ctx);
+        if (rt.impl() == handles) {
+            return v.rep();
+        }
+        var scope = taskScope(ctx);
+        scope.borrow();
+        return handles.add(rt, v.rep(), false, scope);
+    }
+
+    /** Resolves an {@code own}/{@code borrow} type's index to the resource type it denotes. */
+    private static ResourceTypeRef resourceTypeOf(LiftLowerContext ctx, int typeIdx) {
+        var resolver =
+                Objects.requireNonNull(
+                        ctx.resourceTypes(),
+                        "lifting or lowering a resource handle requires a resource type resolver"
+                                + " in the context");
+        return resolver.resolveResourceType(typeIdx);
+    }
+
+    private static HandleTable handles(LiftLowerContext ctx) {
+        return Objects.requireNonNull(
+                ctx.handles(),
+                "lifting or lowering a resource handle requires a handle table in the context");
+    }
+
+    /**
+     * A handle table also holds waitables, waitable sets and error contexts, so an index
+     * naming one of those where a resource handle is expected has to trap rather than be
+     * misread.
+     */
+    private static Handle requireHandle(Object element, int i) {
+        if (!(element instanceof Handle)) {
+            throw new TrapException("handle index " + i + " is not a resource handle");
+        }
+        return (Handle) element;
+    }
+
+    /**
+     * Resource types are compared by identity, not structure: two instantiations of the same
+     * component declare distinct resource types even though they share one declaration, and a
+     * handle from one must not be usable against the other.
+     */
+    private static void requireResourceType(Handle h, ResourceTypeRef expected, int i) {
+        if (h.resourceType() != expected) {
+            throw new TrapException(
+                    "handle index " + i + " used with the wrong type, expected " + expected);
+        }
+    }
+
+    private static BorrowScope.Task taskScope(LiftLowerContext ctx) {
+        var scope = ctx.borrowScope();
+        if (!(scope instanceof BorrowScope.Task)) {
+            throw new IllegalStateException(
+                    "lowering a borrow requires the context's borrow scope to be a task, got "
+                            + scope);
+        }
+        return (BorrowScope.Task) scope;
+    }
+
+    private static BorrowScope.Subtask subtaskScope(LiftLowerContext ctx) {
+        var scope = ctx.borrowScope();
+        if (!(scope instanceof BorrowScope.Subtask)) {
+            throw new IllegalStateException(
+                    "lifting a borrow requires the context's borrow scope to be a subtask, got "
+                            + scope);
+        }
+        return (BorrowScope.Subtask) scope;
     }
 
     // -------------------------------------------------------------------------------------
@@ -1851,7 +2012,7 @@ public final class CanonicalAbi {
         int discSize = t.discriminantType().elementSize(src.typeResolver(), src.ptrType());
         long caseIndex = loadInt(src.memory(), srcPtr, discSize, false);
         if (caseIndex >= cases.size()) {
-            throw new TrapException("variant case index " + caseIndex + " is out of range");
+            throw new TrapException("invalid variant discriminant");
         }
         storeInt(dst.memory(), caseIndex, dstPtr, discSize);
         var c = cases.get((int) caseIndex);
@@ -2173,8 +2334,7 @@ public final class CanonicalAbi {
             TransferPlan.Step body) {
         int srcPtr = (int) vi.next();
         if (srcPtr != DefValType.alignTo(srcPtr, align)) {
-            throw new TrapException(
-                    "spilled values pointer " + srcPtr + " is not aligned to " + align);
+            throw new TrapException("unaligned pointer");
         }
         if ((long) srcPtr + size > Memory.bytes(src.memory().pages())) {
             throw new TrapException("spilled values at " + srcPtr + " are out of bounds");
@@ -2187,8 +2347,7 @@ public final class CanonicalAbi {
         } else {
             dstPtr = (int) outParam[0];
             if (dstPtr != DefValType.alignTo(dstPtr, align)) {
-                throw new TrapException(
-                        "spill out-param pointer " + dstPtr + " is not aligned to " + align);
+                throw new TrapException("unaligned pointer");
             }
             if ((long) dstPtr + size > Memory.bytes(dst.memory().pages())) {
                 throw new TrapException("spill out-param at " + dstPtr + " is out of bounds");
@@ -2335,7 +2494,7 @@ public final class CanonicalAbi {
         int payloadSlots = flatTypes.size() - 1;
         long caseIndex = vi.next() & 0xFFFFFFFFL;
         if (caseIndex >= cases.size()) {
-            throw new TrapException("variant case index " + caseIndex + " is out of range");
+            throw new TrapException("invalid variant discriminant");
         }
         out.add(caseIndex);
         var c = cases.get((int) caseIndex);

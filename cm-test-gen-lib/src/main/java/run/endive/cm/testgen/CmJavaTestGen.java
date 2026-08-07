@@ -38,6 +38,7 @@ public final class CmJavaTestGen {
         cu.addImport("org.junit.jupiter.api.Assertions.assertArrayEquals", true, false);
         cu.addImport("org.junit.jupiter.api.Assertions.assertNotNull", true, false);
         cu.addImport("org.junit.jupiter.api.Assertions.assertThrows", true, false);
+        cu.addImport("org.junit.jupiter.api.Assertions.assertTrue", true, false);
         cu.addImport("org.junit.jupiter.api.Assertions.fail", true, false);
         cu.addImport("run.endive.wasm.WasmEngineException");
         cu.addImport("run.endive.cm.parser.ComponentParser");
@@ -45,6 +46,7 @@ public final class CmJavaTestGen {
         cu.addImport("run.endive.cm.abi.CharValue");
         cu.addImport("run.endive.cm.runtime.ComponentInstance");
         cu.addImport("run.endive.cm.runtime.LinkageException");
+        cu.addImport("run.endive.cm.runtime.SpecTestImports");
         cu.addImport("run.endive.cm.tools.ComponentValidate");
         cu.addImport("run.endive.cm.tools.ComponentValidateException");
 
@@ -137,7 +139,6 @@ public final class CmJavaTestGen {
                 generateModuleDefinitionTest(body, command);
                 break;
             case ASSERT_MALFORMED:
-            case ASSERT_UNLINKABLE:
             case ASSERT_INVALID:
                 generateAssertInvalidTest(body, command);
                 break;
@@ -148,6 +149,7 @@ public final class CmJavaTestGen {
                 generateAssertTrapTest(body, command, lastComponentFilename);
                 break;
             case ASSERT_UNINSTANTIABLE:
+            case ASSERT_UNLINKABLE:
                 generateAssertUninstantiableTest(body, command);
                 break;
             case ACTION:
@@ -199,7 +201,9 @@ public final class CmJavaTestGen {
         body.addStatement("var parser = ComponentParser.builder().build();");
         body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
         body.addStatement("var linker = ComponentLinker.builder().build();");
-        body.addStatement("ComponentInstance instance = linker.instantiate(component);");
+        body.addStatement(
+                "ComponentInstance instance = linker.instantiate(component,"
+                        + " SpecTestImports.build());");
         body.addStatement(
                 "assertThrows(WasmEngineException.class, () -> instance.export(\""
                         + command.action().field()
@@ -220,7 +224,15 @@ public final class CmJavaTestGen {
         body.addStatement("assertNotNull(component);");
         body.addStatement("var linker = ComponentLinker.builder().build();");
         body.addStatement(
-                "assertThrows(LinkageException.class, () -> linker.instantiate(component));");
+                "var ex = assertThrows(LinkageException.class, () -> linker.instantiate(component,"
+                        + " SpecTestImports.build()));");
+        body.addStatement(
+                "assertTrue(ex.getMessage().contains(\""
+                        + command.text()
+                        + "\"), \"Expected exception message to contain '"
+                        + command.text()
+                        + "', but"
+                        + " was: '\"+ex.getMessage()+\"'\");");
     }
 
     private void generateModuleTest(BlockStmt body, CmCommand command) {
@@ -233,9 +245,10 @@ public final class CmJavaTestGen {
         body.addStatement("var parser = ComponentParser.builder().build();");
         body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
         body.addStatement("assertNotNull(component);");
+        body.addStatement("var linker = ComponentLinker.builder().build();");
         body.addStatement(
-                "var linker = ComponentLinker.builder().withGenerateImports(true).build();");
-        body.addStatement("ComponentInstance instance = linker.instantiate(component);");
+                "ComponentInstance instance = linker.instantiate(component,"
+                        + " SpecTestImports.build());");
         body.addStatement("assertNotNull(instance);");
     }
 
@@ -288,7 +301,9 @@ public final class CmJavaTestGen {
         body.addStatement("var parser = ComponentParser.builder().build();");
         body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
         body.addStatement("var linker = ComponentLinker.builder().build();");
-        body.addStatement("ComponentInstance instance = linker.instantiate(component);");
+        body.addStatement(
+                "ComponentInstance instance = linker.instantiate(component,"
+                        + " SpecTestImports.build());");
         body.addStatement(
                 "Object[] result = instance.export(\""
                         + command.action().field()

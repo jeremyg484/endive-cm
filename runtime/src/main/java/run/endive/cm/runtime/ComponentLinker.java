@@ -13,6 +13,7 @@ import run.endive.cm.abi.CanonicalAbi;
 import run.endive.cm.abi.Direction;
 import run.endive.cm.abi.LiftLowerContext;
 import run.endive.cm.abi.PostReturn;
+import run.endive.cm.abi.ResourceTypeRef;
 import run.endive.cm.abi.StringEncoding;
 import run.endive.cm.abi.ValueTransfer;
 import run.endive.cm.types.Alias;
@@ -34,6 +35,7 @@ import run.endive.cm.types.CoreTypeSection;
 import run.endive.cm.types.CustomSection;
 import run.endive.cm.types.Export;
 import run.endive.cm.types.ExportAlias;
+import run.endive.cm.types.ExportDecl;
 import run.endive.cm.types.ExportSection;
 import run.endive.cm.types.ExternDesc;
 import run.endive.cm.types.FuncType;
@@ -43,11 +45,11 @@ import run.endive.cm.types.InlineExport;
 import run.endive.cm.types.InlineExportInstanceExpr;
 import run.endive.cm.types.Instance;
 import run.endive.cm.types.InstanceSection;
+import run.endive.cm.types.InstanceType;
 import run.endive.cm.types.InstantiateArg;
 import run.endive.cm.types.InstantiateInstanceExpr;
 import run.endive.cm.types.LabelValType;
 import run.endive.cm.types.OuterAlias;
-import run.endive.cm.types.ResourceType;
 import run.endive.cm.types.Section;
 import run.endive.cm.types.Sort;
 import run.endive.cm.types.Type;
@@ -63,12 +65,14 @@ import run.endive.cm.types.canon.CanonOpt;
 import run.endive.cm.types.canon.CanonResource;
 import run.endive.runtime.GlobalInstance;
 import run.endive.runtime.ImportFunction;
+import run.endive.runtime.ImportGlobal;
 import run.endive.runtime.ImportMemory;
 import run.endive.runtime.ImportValues;
 import run.endive.runtime.Machine;
 import run.endive.runtime.Memory;
 import run.endive.runtime.TableInstance;
 import run.endive.runtime.TagInstance;
+import run.endive.runtime.TrapException;
 import run.endive.runtime.WasmFunctionHandle;
 import run.endive.wasm.WasmEngineException;
 import run.endive.wasm.WasmModule;
@@ -104,15 +108,18 @@ public final class ComponentLinker {
 
     public ComponentInstance instantiate(WasmComponent component, Map<String, Object> imports) {
         try {
-            return instantiate(component, imports, true);
+            return instantiate(component, imports, true, null);
         } catch (WasmEngineException e) {
-            throw new LinkageException("Failed to instantiate component", e);
+            throw new LinkageException("Failed to instantiate component: " + e.getMessage(), e);
         }
     }
 
     private ComponentInstance instantiate(
-            WasmComponent component, Map<String, Object> imports, boolean root) {
-        ComponentStore store = new ComponentStore(component, root);
+            WasmComponent component,
+            Map<String, Object> imports,
+            boolean root,
+            ComponentStore parent) {
+        ComponentStore store = new ComponentStore(component, root, parent);
         stores.put(component, store);
 
         if (!imports.isEmpty()) {
@@ -158,9 +165,6 @@ public final class ComponentLinker {
 
     private void processImportSection(ComponentStore store, ImportSection section) {
         for (Import imp : section.imports()) {
-            if (store.isRoot() && generateImports) {
-                hostImportGenerator.generateImport(store, imp);
-            }
             switch (imp.externDesc().kind()) {
                 case TYPE:
                     processTypeImport(store, imp);
@@ -221,6 +225,7 @@ public final class ComponentLinker {
                     ComponentFunctionInstance.builder()
                             .withComponentStore(store)
                             .withFuncType(funcType)
+                            .withTypeResolver(store)
                             .withCall((args) -> new Object[0])
                             .build();
             store.addImport(imp.name(), func);
@@ -263,10 +268,20 @@ public final class ComponentLinker {
                                             + name
                                             + "' for import generation");
                         }
+                    } else if (externalDesc.kind() == ExternDesc.Kind.INSTANCE) {
+                        Type instanceType = store.getType((int) externalDesc.typeIdx());
+                        if (instanceType == null) {
+                            throw new LinkageException(
+                                    "Host instance export of type "
+                                            + externalDesc.kind()
+                                            + " not yet supported for import '"
+                                            + name
+                                            + "' for import generation");
+                        }
                     } else {
                         throw new LinkageException(
                                 "Host instance export of type "
-                                        + ExternDesc.Kind.TYPE
+                                        + externalDesc.kind()
                                         + " not yet supported for import generation");
                     }
                 }
@@ -345,15 +360,315 @@ public final class ComponentLinker {
                             + "'");
         }
 
-        if (store.hasImport(imp.name())) {
-            var instanceImport = (ComponentInstance) store.getImport(imp.name());
-            store.addChildInstance(instanceImport);
-        } else {
+        if (!store.hasImport(imp.name())) {
             throw new LinkageException(
                     "Unable to resolve component instance import "
                             + imp.name()
                             + " with description "
                             + imp.externDesc());
+        }
+        var instanceImport = (ComponentInstance) store.getImport(imp.name());
+        matchInstanceType(store, imp, type.instanceType(), instanceImport);
+        store.addChildInstance(instanceImport);
+    }
+
+    /**
+     * Checks that {@code provider} satisfies the instance type an import declares.
+     *
+     * <p>The declaration is read in order, building up {@link InstanceTypeSpace the little type
+     * index space it defines} as it goes. That ordering is not incidental: a type export earlier
+     * in the declaration is what a later {@code (own N)} refers to, and only by matching the
+     * earlier one against the provider do we learn which resource type {@code N} actually names.
+     * So each declaration is both checked and, where it names a type, bound.
+     */
+    private void matchInstanceType(
+            ComponentStore store,
+            Import imp,
+            InstanceType instanceType,
+            ComponentInstance provider) {
+        ComponentStore providerStore = provider.store();
+        var space = new InstanceTypeSpace();
+        for (var decl : instanceType.getInstanceDecls()) {
+            switch (decl.kind()) {
+                case CORE_TYPE:
+                    // Core types occupy their own index space, which nothing in an instance
+                    // type's value or function types can refer to, so there is nothing to
+                    // record and nothing to check.
+                    break;
+                case TYPE:
+                    // A type the instance type defines for its own use. Nothing to check
+                    // against the provider — it only becomes observable where an export
+                    // mentions it.
+                    space.addLocalType(decl.type());
+                    break;
+                case ALIAS:
+                    matchInstanceAliasDecl(space, store, providerStore, imp, decl.alias());
+                    break;
+                case EXPORT_DECL:
+                    matchInstanceExportDecl(space, providerStore, imp, decl.exportDecl());
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Instance import type checking for " + decl + " not supported yet");
+            }
+        }
+    }
+
+    private void matchInstanceAliasDecl(
+            InstanceTypeSpace space,
+            ComponentStore declStore,
+            ComponentStore providerStore,
+            Import imp,
+            Alias alias) {
+        if (alias.kind() != Alias.Kind.OUTER) {
+            throw new LinkageException(
+                    "Instance alias of kind " + alias.kind() + " not supported yet");
+        }
+        var outerAlias = (OuterAlias) alias;
+        if (!matchInstanceOuterAliasDecl(providerStore, declStore, outerAlias)) {
+            throw new LinkageException(
+                    "Instance alias mismatch for '"
+                            + imp.name()
+                            + "' with description "
+                            + imp.externDesc());
+        }
+        if (outerAlias.sort().kind() == Sort.Kind.TYPE) {
+            // An aliased type occupies a slot in the instance type's index space just as a
+            // declared one does, so later declarations keep referring to the right thing. It
+            // still resolves in the space it came from, though: the indices inside it were
+            // written against that component's types, not against this declaration's.
+            ComponentStore origin = resolveOuterAliasStore(declStore, outerAlias);
+            Type aliased = origin.getType((int) outerAlias.index());
+            space.addForeignType(
+                    aliased,
+                    origin.asMatcherSpace(),
+                    aliased.resourceType() == null ? null : origin.resourceTypeFor(aliased));
+        }
+    }
+
+    /**
+     * Checks one export a declared instance type requires against what the provider actually
+     * exports, binding any type it introduces into {@code space}.
+     */
+    private void matchInstanceExportDecl(
+            InstanceTypeSpace space,
+            ComponentStore providerStore,
+            Import imp,
+            ExportDecl exportDecl) {
+        String name = exportDecl.name();
+        ExternDesc externDesc = exportDecl.externDesc();
+        if (externDesc.kind() == ExternDesc.Kind.TYPE) {
+            matchInstanceTypeExportDecl(space, providerStore, imp, exportDecl);
+            return;
+        }
+        if (!providerStore.hasExport(name)) {
+            throw instanceExportNotFound(imp, name);
+        }
+        Object export = providerStore.getExport(name);
+        switch (externDesc.kind()) {
+            case CORE_MODULE:
+                requireInstanceExport(export instanceof CoreModuleInstance, imp, name, export);
+                return;
+            case COMPONENT:
+                requireInstanceExport(export instanceof WasmComponent, imp, name, export);
+                return;
+            case INSTANCE:
+                requireInstanceExport(export instanceof ComponentInstance, imp, name, export);
+                return;
+            case FUNC:
+                {
+                    requireInstanceExport(export instanceof ComponentFunction, imp, name, export);
+                    var provided = (ComponentFunction) export;
+                    var slot = space.slotAt((int) externDesc.typeIdx());
+                    FuncType declared = slot.type().funcType();
+                    if (declared == null) {
+                        throw new LinkageException(
+                                "Instance export '"
+                                        + name
+                                        + "' of '"
+                                        + imp.name()
+                                        + "' is declared with a non-function type");
+                    }
+                    if (!TypeMatcher.funcTypesMatch(
+                            slot.space(),
+                            declared,
+                            providerStore.asMatcherSpace(),
+                            provided.funcType(),
+                            !provided.hostProvided())) {
+                        throw new LinkageException(
+                                "Instance export '"
+                                        + name
+                                        + "' of '"
+                                        + imp.name()
+                                        + "' does not match - expected "
+                                        + declared
+                                        + ", got "
+                                        + provided.funcType());
+                    }
+                    return;
+                }
+            default:
+                throw new IllegalArgumentException("Unhandled export kind: " + externDesc.kind());
+        }
+    }
+
+    /**
+     * Matches a {@code type} export, which both constrains the provider and introduces a name
+     * the rest of the instance type can use.
+     *
+     * <p>A {@code sub resource} bound says only "some resource type goes here", so the provider
+     * decides which; an {@code eq} bound names one already fixed, so the provider — if it
+     * supplies the export at all — has to agree. Either way, what gets recorded is the runtime
+     * resource type, since that identity is what every later {@code own} and {@code borrow} in
+     * this declaration will be checked against.
+     */
+    private void matchInstanceTypeExportDecl(
+            InstanceTypeSpace space,
+            ComponentStore providerStore,
+            Import imp,
+            ExportDecl exportDecl) {
+        String name = exportDecl.name();
+        TypeBound typeBound = exportDecl.externDesc().typeBound();
+        switch (typeBound.kind()) {
+            case SUB_RESOURCE:
+                {
+                    if (!providerStore.hasExport(name)) {
+                        throw instanceExportNotFound(imp, name);
+                    }
+                    Object export = providerStore.getExport(name);
+                    requireInstanceExport(export instanceof Type, imp, name, export);
+                    Type exported = (Type) export;
+                    if (exported.resourceType() == null) {
+                        throw new LinkageException(
+                                "instance exports do not match - expected resource found "
+                                        + exported.simpleName());
+                    }
+                    space.addForeignType(
+                            exported,
+                            providerStore.asMatcherSpace(),
+                            providerStore.resourceTypeFor(exported));
+                    return;
+                }
+            case EQ:
+                {
+                    var bound = space.slotAt((int) typeBound.typeIdx());
+                    if (!providerStore.hasExport(name)) {
+                        // An `eq` bound pins the type down on its own, so the provider does not
+                        // have to supply it under this name as well.
+                        space.addForeignType(bound.type(), bound.space(), bound.resourceType());
+                        return;
+                    }
+                    Object export = providerStore.getExport(name);
+                    requireInstanceExport(export instanceof Type, imp, name, export);
+                    Type exported = (Type) export;
+                    if (bound.resourceType() != null) {
+                        if (exported.resourceType() == null
+                                || providerStore.resourceTypeFor(exported)
+                                        != bound.resourceType()) {
+                            throw new LinkageException("mismatched resource types");
+                        }
+                        space.addForeignType(
+                                exported, providerStore.asMatcherSpace(), bound.resourceType());
+                        return;
+                    }
+                    if (!TypeMatcher.typesMatch(
+                            bound.space(),
+                            bound.type(),
+                            providerStore.asMatcherSpace(),
+                            exported)) {
+                        throw new LinkageException(
+                                "Instance export '"
+                                        + name
+                                        + "' of '"
+                                        + imp.name()
+                                        + "' does not match - expected "
+                                        + bound.type()
+                                        + ", got "
+                                        + exported);
+                    }
+                    space.addForeignType(exported, providerStore.asMatcherSpace(), null);
+                    return;
+                }
+            default:
+                throw new IllegalArgumentException(
+                        "Unhandled type bound kind: " + typeBound.kind());
+        }
+    }
+
+    private static void requireInstanceExport(
+            boolean condition, Import imp, String name, Object export) {
+        if (!condition) {
+            throw new LinkageException(
+                    "Instance export '"
+                            + name
+                            + "' of '"
+                            + imp.name()
+                            + "' is of the wrong sort - got "
+                            + (export == null ? "nothing" : export.getClass().getSimpleName()));
+        }
+    }
+
+    private static LinkageException instanceExportNotFound(Import imp, String name) {
+        return new LinkageException(
+                "Instance export '"
+                        + name
+                        + "' was not found for '"
+                        + imp.name()
+                        + "' with description "
+                        + imp.externDesc());
+    }
+
+    private ComponentStore resolveOuterAliasStore(ComponentStore declStore, OuterAlias alias) {
+        if (alias.count() == 0) {
+            throw new LinkageException(
+                    "Outer alias count 0 could not be resolved for instance outer alias decl");
+        }
+        WasmComponent containingComponent = declStore.getComponent();
+        for (int i = 2; i <= alias.count(); i++) {
+            if (containingComponent.parent() == null) {
+                throw new LinkageException(
+                        "Outer alias count " + alias.count() + " failed to resolve");
+            }
+            containingComponent = containingComponent.parent();
+        }
+        if (!stores.containsKey(containingComponent)) {
+            throw new LinkageException(
+                    "Outer alias count "
+                            + alias.count()
+                            + " failed to resolve to a root component that is associated with a"
+                            + " store");
+        }
+        return stores.get(containingComponent);
+    }
+
+    private boolean matchInstanceOuterAliasDecl(
+            ComponentStore instanceStore, ComponentStore declStore, OuterAlias alias) {
+        ComponentStore containingStore = resolveOuterAliasStore(declStore, alias);
+        switch (alias.sort().kind()) {
+            case CORE:
+                CoreSort coreSort = alias.sort().coreSort();
+                switch (coreSort) {
+                    case MODULE:
+                        WasmModule declaredModule =
+                                containingStore.getCoreModule((int) alias.index());
+                        return instanceStore.getCoreModules().stream()
+                                .anyMatch(module -> module.equals(declaredModule));
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Outer alias core sort " + coreSort + " not yet supported");
+                }
+            case COMPONENT:
+                WasmComponent declaredComponent =
+                        containingStore.getChildComponent((int) alias.index());
+                return instanceStore.getChildComponents().stream()
+                        .anyMatch(component -> component.equals(declaredComponent));
+            case TYPE:
+                Type declaredType = containingStore.getType((int) alias.index());
+                return instanceStore.getTypes().stream()
+                        .anyMatch(type -> type.equals(declaredType));
+            default:
+                throw new UnsupportedOperationException(
+                        "Outer alias sort " + alias.sort() + " not yet supported");
         }
     }
 
@@ -422,7 +737,7 @@ public final class ComponentLinker {
     private void instantiateInlineComponent(ComponentStore store, InlineExportInstanceExpr expr) {
         WasmComponent inlineComponent =
                 WasmComponent.builder().build().withParent(store.getComponent());
-        ComponentStore inlineStore = new ComponentStore(inlineComponent, false);
+        ComponentStore inlineStore = new ComponentStore(inlineComponent, false, store);
         for (InlineExport export : expr.inlineExports()) {
             switch (export.sortIdx().sort().kind()) {
                 case CORE:
@@ -500,7 +815,7 @@ public final class ComponentLinker {
                             "Unknown instantiate arg sort kind: " + arg.sortIdx().sort().kind());
             }
         }
-        store.addChildInstance(instantiate(component, imports, false));
+        store.addChildInstance(instantiate(component, imports, false, store));
     }
 
     public static final class Builder {
@@ -614,6 +929,13 @@ public final class ComponentLinker {
                                                 builder.addMemory(
                                                         new ImportMemory(
                                                                 arg.name(), i.name(), memory));
+                                                break;
+                                            case GLOBAL:
+                                                var global =
+                                                        moduleInstance.exports().global(i.name());
+                                                builder.addGlobal(
+                                                        new ImportGlobal(
+                                                                arg.name(), i.name(), global));
                                                 break;
                                             default:
                                                 throw new LinkageException(
@@ -795,6 +1117,12 @@ public final class ComponentLinker {
 
     private void processTypeSection(ComponentStore store, TypeSection section) {
         for (Type type : section.types()) {
+            // A resource declaration brings a new resource type into existence, distinct from
+            // the one any other instantiation of this component declares, and implemented by
+            // this instance. Claim that before addType, which otherwise adopts it as foreign.
+            if (type.resourceType() != null) {
+                store.declareResourceType(type);
+            }
             store.addType(type);
         }
     }
@@ -826,96 +1154,93 @@ public final class ComponentLinker {
             throw new LinkageException("Resource rep type " + repType + " is not supported");
         }
 
+        ResourceTypeInstance resourceType = store.resourceTypeAt((int) canon.typeIdx());
         switch (canon.kind()) {
             case RESOURCE_NEW:
-                processCanonResourceNew(store, type.resourceType());
+                processCanonResourceNew(store, resourceType);
                 break;
             case RESOURCE_REP:
-                processCanonResourceRep(store, type.resourceType());
+                processCanonResourceRep(store, resourceType);
                 break;
             case RESOURCE_DROP:
-                processCanonResourceDrop(store, type.resourceType());
+                processCanonResourceDrop(store, resourceType);
                 break;
             default:
                 throw new LinkageException("Canon kind " + canon.kind() + " is not supported yet");
         }
     }
 
-    private void processCanonResourceNew(ComponentStore store, ResourceType resourceType) {
+    private void processCanonResourceNew(ComponentStore store, ResourceTypeInstance resourceType) {
         WasmFunctionHandle coreFunc =
-                (instance, args) -> {
-                    var resourceHandle =
-                            new ResourceHandle(resourceType, (int) args[0], true, null);
-                    return new long[] {store.getInstance().addHandle(resourceHandle)};
-                };
+                (instance, args) ->
+                        new long[] {
+                            store.getInstance().add(resourceType, (int) args[0], true, null)
+                        };
         store.addCoreFunction(
                 new CoreImportFunction(BuiltinFunctionTypes.CANON_RESOURCE_NEW, coreFunc));
     }
 
-    private void processCanonResourceRep(ComponentStore store, ResourceType resourceType) {
+    private void processCanonResourceRep(ComponentStore store, ResourceTypeInstance resourceType) {
         WasmFunctionHandle coreFunc =
                 (instance, args) -> {
-                    var handle = store.getInstance().getHandle((int) args[0]);
-                    if (!(handle instanceof ResourceHandle)) {
-                        throw new IllegalStateException(
-                                "Handle at slot " + args[0] + " is not a resource handle");
-                    }
-                    var resourceHandle = (ResourceHandle) handle;
-                    if (!resourceType.equals(resourceHandle.resourceType())) {
-                        throw new IllegalStateException(
-                                "Handle at slot "
-                                        + args[0]
-                                        + " has different resource type - got: "
-                                        + resourceHandle.resourceType()
-                                        + ", expected: "
-                                        + resourceType);
-                    }
-                    return new long[] {resourceHandle.rep()};
+                    int index = (int) args[0];
+                    var handle =
+                            requireResourceHandle(
+                                    store.getInstance().getHandle(index), index, resourceType);
+                    return new long[] {handle.rep()};
                 };
         store.addCoreFunction(
                 new CoreImportFunction(BuiltinFunctionTypes.CANON_RESOURCE_REP, coreFunc));
     }
 
-    private void processCanonResourceDrop(ComponentStore store, ResourceType resourceType) {
+    private void processCanonResourceDrop(ComponentStore store, ResourceTypeInstance resourceType) {
         WasmFunctionHandle coreFunc =
                 (instance, args) -> {
-                    var handle = store.getInstance().removeHandle((int) args[0]);
-                    if (!(handle instanceof ResourceHandle)) {
-                        throw new IllegalStateException(
-                                "Handle at slot " + args[0] + " is not a resource handle");
+                    int index = (int) args[0];
+                    var handle =
+                            requireResourceHandle(
+                                    store.getInstance().removeHandle(index), index, resourceType);
+                    if (handle.numLends() != 0) {
+                        throw new TrapException(
+                                "cannot drop handle index " + index + " while it is lent");
                     }
-                    var resourceHandle = (ResourceHandle) handle;
-                    if (!resourceType.equals(resourceHandle.resourceType())) {
-                        throw new IllegalStateException(
-                                "Handle at slot "
-                                        + args[0]
-                                        + " has different resource type - got: "
-                                        + resourceHandle.resourceType()
-                                        + ", expected: "
-                                        + resourceType);
-                    }
-                    if (resourceHandle.numLends() != 0) {
-                        throw new IllegalStateException(
-                                "Handle at slot " + args[0] + " is currently lent");
-                    }
-                    if (resourceHandle.own()) {
-                        if (resourceHandle.borrowScope() != null) {
-                            throw new IllegalStateException(
-                                    "Owned handle at slot "
-                                            + args[0]
-                                            + " should have no borrow scope");
-                        }
+                    if (handle.own()) {
+                        // Dropping the last owning handle destroys the resource.
                         if (resourceType.hasDtor()) {
-                            throw new UnsupportedOperationException(
-                                    "Owned handles with destructors are not supported yet");
+                            resourceType.runDtor(handle.rep());
                         }
                     } else {
-                        resourceHandle.borrowScope().unborrow();
+                        // Dropping a borrow discharges it from the call it was lowered into,
+                        // which is what eventually lets that call return.
+                        handle.borrowScope().unborrow();
                     }
-                    return new long[0];
+                    return EMPTY_CORE_VALUES;
                 };
         store.addCoreFunction(
                 new CoreImportFunction(BuiltinFunctionTypes.CANON_RESOURCE_DROP, coreFunc));
+    }
+
+    /**
+     * Checks that a handle table index names a resource handle of the expected type. Resource
+     * types are compared by identity: two instantiations declaring the same resource are
+     * distinct types, and a handle from one is not usable against the other.
+     */
+    private static ResourceHandle requireResourceHandle(
+            Object handle, int index, ResourceTypeInstance expected) {
+        if (!(handle instanceof ResourceHandle)) {
+            throw new TrapException("handle index " + index + " is not a resource handle");
+        }
+        var resourceHandle = (ResourceHandle) handle;
+        if (resourceHandle.resourceType() != expected) {
+            throw new TrapException(
+                    "handle index "
+                            + index
+                            + " used with the wrong type, expected "
+                            + expected
+                            + " but found "
+                            + resourceHandle.resourceType());
+        }
+        return resourceHandle;
     }
 
     private static CoreFunction<?> resolveCoreFunction(ComponentStore store, int coreFuncIdx) {
@@ -928,7 +1253,20 @@ public final class ComponentLinker {
 
     private static LiftLowerContext processCanonOpts(
             ComponentStore store, TypeResolver typeResolver, List<CanonOpt> opts) {
-        var contextBuilder = LiftLowerContext.builder().withTypeResolver(typeResolver);
+        var contextBuilder =
+                LiftLowerContext.builder()
+                        .withTypeResolver(typeResolver)
+                        // A handle is an index into the table of the instance this canonical
+                        // definition belongs to, so the table comes from this store. The
+                        // resource type an `own` or `borrow` names, though, is an index into
+                        // the type space its function type was written in — which for `canon
+                        // lower` is the callee's, not this one's — so it resolves against the
+                        // same resolver as every other type here.
+                        .withHandles(store.getInstance())
+                        .withResourceTypes(
+                                typeResolver instanceof ResourceTypeRef.Resolver
+                                        ? (ResourceTypeRef.Resolver) typeResolver
+                                        : store);
         for (var opt : opts) {
             switch (opt.kind()) {
                 case STRING_ENCODING_UTF8:
@@ -966,6 +1304,19 @@ public final class ComponentLinker {
             }
         }
         return contextBuilder.build();
+    }
+
+    /** Whether any parameter or result of {@code ft} contains a {@code borrow}. */
+    private static boolean containsBorrow(TypeResolver typeResolver, FuncType ft) {
+        for (LabelValType p : ft.params()) {
+            if (CanonicalAbi.containsBorrow(
+                    typeResolver, typeResolver.resolveDefValType(p.valType()))) {
+                return true;
+            }
+        }
+        return ft.hasResult()
+                && CanonicalAbi.containsBorrow(
+                        typeResolver, typeResolver.resolveDefValType(ft.result()));
     }
 
     private FuncType resolveComponentFuncType(ComponentStore store, int funcIdx) {
@@ -1038,23 +1389,39 @@ public final class ComponentLinker {
                     componentFuncType.params().stream()
                             .map(LabelValType::valType)
                             .collect(Collectors.toList());
+            // Lifting a `borrow` argument out of the caller holds the caller's handle lent for
+            // the duration of the call, so that the resource behind it cannot be given away
+            // while the callee still has a borrow of it.
+            boolean scopesBorrows = containsBorrow(func.typeResolver(), componentFuncType);
             coreFuncHandle =
                     (instance, args) -> {
                         // Full trampoline path
-                        Object[] liftedArgValues =
-                                CanonicalAbi.liftFlatParams(
-                                                callerContext, args, componentFuncParams)
-                                        .toArray();
-                        Object[] results = func.apply(liftedArgValues);
-                        if (!componentFuncType.hasResult()) {
-                            return EMPTY_CORE_VALUES;
+                        Subtask subtask = scopesBorrows ? new Subtask() : null;
+                        LiftLowerContext callContext =
+                                subtask == null
+                                        ? callerContext
+                                        : callerContext.withBorrowScope(subtask);
+                        try {
+                            Object[] liftedArgValues =
+                                    CanonicalAbi.liftFlatParams(
+                                                    callContext, args, componentFuncParams)
+                                            .toArray();
+                            Object[] results = func.apply(liftedArgValues);
+                            if (!componentFuncType.hasResult()) {
+                                return EMPTY_CORE_VALUES;
+                            }
+                            long[] outParam =
+                                    resultsSpill ? new long[] {args[args.length - 1]} : null;
+                            return CanonicalAbi.lowerFlatResults(
+                                    callContext,
+                                    Arrays.asList(results),
+                                    List.of(componentFuncType.result()),
+                                    outParam);
+                        } finally {
+                            if (subtask != null) {
+                                subtask.releaseLenders();
+                            }
                         }
-                        long[] outParam = resultsSpill ? new long[] {args[args.length - 1]} : null;
-                        return CanonicalAbi.lowerFlatResults(
-                                callerContext,
-                                Arrays.asList(results),
-                                List.of(componentFuncType.result()),
-                                outParam);
                     };
         }
         store.addCoreFunction(new CoreImportFunction(coreFuncType, coreFuncHandle));
@@ -1080,21 +1447,38 @@ public final class ComponentLinker {
 
         LiftLowerContext context = processCanonOpts(store, store, lift.opts());
 
+        // Lowering a `borrow` parameter into the callee charges it to this call, which then
+        // may not return until the callee has dropped it. Functions with no `borrow` anywhere
+        // in their signature need no such bookkeeping, so they skip it entirely.
+        boolean scopesBorrows = containsBorrow(store, componentFuncType);
+
         ComponentFunctionCall call =
                 (args) -> {
+                    Task task = scopesBorrows ? new Task() : null;
+                    LiftLowerContext callContext =
+                            task == null ? context : context.withBorrowScope(task);
+
                     long[] loweredArgs =
                             CanonicalAbi.lowerFlatParams(
-                                    context, Arrays.asList(args), componentFuncParams);
+                                    callContext, Arrays.asList(args), componentFuncParams);
                     long[] result = coreFunc.apply(loweredArgs);
 
+                    // Lift before post_return, which is free to release the very buffers the
+                    // results point into.
+                    Object[] lifted =
+                            resultValType == null
+                                    ? EMPTY_COMPONENT_VALUES
+                                    : CanonicalAbi.liftFlatResults(
+                                                    callContext, result, List.of(resultValType))
+                                            .toArray();
+
+                    if (task != null) {
+                        task.requireBorrowsReleased();
+                    }
                     if (context.postReturn() != null) {
                         context.postReturn().call(result != null ? result : EMPTY_CORE_VALUES);
                     }
-
-                    return resultValType == null
-                            ? EMPTY_COMPONENT_VALUES
-                            : CanonicalAbi.liftFlatResults(context, result, List.of(resultValType))
-                                    .toArray();
+                    return lifted;
                 };
         store.addFunction(
                 ComponentFunctionInstance.builder()

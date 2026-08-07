@@ -18,6 +18,7 @@ public final class ComponentFunctionInstance implements ComponentFunction {
     private final ComponentFunctionCall call;
     private final LiftLowerContext liftLowerContext;
     private final CoreFunction<?> liftedFunction;
+    private final boolean hostProvided;
 
     private ComponentFunctionInstance(
             ComponentStore store,
@@ -25,7 +26,8 @@ public final class ComponentFunctionInstance implements ComponentFunction {
             TypeResolver typeResolver,
             ComponentFunctionCall call,
             LiftLowerContext liftLowerContext,
-            CoreFunction<?> liftedFunction) {
+            CoreFunction<?> liftedFunction,
+            boolean hostProvided) {
         Objects.requireNonNull(store, "store");
         Objects.requireNonNull(funcType, "funcType");
         Objects.requireNonNull(typeResolver, "typeResolver");
@@ -36,6 +38,7 @@ public final class ComponentFunctionInstance implements ComponentFunction {
         this.call = call;
         this.liftLowerContext = liftLowerContext;
         this.liftedFunction = liftedFunction;
+        this.hostProvided = hostProvided;
     }
 
     public static Builder builder() {
@@ -49,6 +52,7 @@ public final class ComponentFunctionInstance implements ComponentFunction {
         private ComponentFunctionCall call;
         private LiftLowerContext liftLowerContext;
         private CoreFunction<?> liftedFunction;
+        private boolean hostProvided;
 
         public Builder withComponentStore(ComponentStore componentStore) {
             this.componentStore = componentStore;
@@ -80,9 +84,21 @@ public final class ComponentFunctionInstance implements ComponentFunction {
             return this;
         }
 
+        /** Marks this as an embedder-supplied function; see {@link #hostProvided()}. */
+        public Builder withHostProvided(boolean hostProvided) {
+            this.hostProvided = hostProvided;
+            return this;
+        }
+
         public ComponentFunctionInstance build() {
             return new ComponentFunctionInstance(
-                    componentStore, funcType, typeResolver, call, liftLowerContext, liftedFunction);
+                    componentStore,
+                    funcType,
+                    typeResolver,
+                    call,
+                    liftLowerContext,
+                    liftedFunction,
+                    hostProvided);
         }
     }
 
@@ -126,6 +142,11 @@ public final class ComponentFunctionInstance implements ComponentFunction {
     }
 
     @Override
+    public boolean hostProvided() {
+        return hostProvided;
+    }
+
+    @Override
     public boolean isLifted() {
         return liftLowerContext != null;
     }
@@ -154,6 +175,8 @@ public final class ComponentFunctionInstance implements ComponentFunction {
         } else if (EnumHostTypeDescriptor.supports(hostType)) {
             return isTypeCompatible(
                     store, EnumHostTypeDescriptor.forClass(hostType), componentType);
+        } else if (ResourceHostTypeDescriptor.supports(hostType)) {
+            return isTypeCompatible(store, ResourceHostTypeDescriptor.instance(), componentType);
         }
         throw new IllegalArgumentException(
                 "host type " + hostType.getName() + " is not yet supported");

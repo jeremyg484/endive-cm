@@ -1,49 +1,58 @@
 package run.endive.cm.runtime;
 
 import java.util.Objects;
-import run.endive.cm.types.ResourceType;
+import run.endive.cm.abi.BorrowScope;
+import run.endive.cm.abi.Handle;
+import run.endive.cm.abi.ResourceTypeRef;
 
-public final class ResourceHandle {
+public final class ResourceHandle implements Handle {
 
-    private final ResourceType resourceType;
+    private final ResourceTypeRef resourceType;
     private final int rep;
     private final boolean own;
-    private final Task borrowScope;
+    private final BorrowScope.Task borrowScope;
     private int numLends;
 
-    ResourceHandle(ResourceType resourceType, int rep, boolean own, Task borrowScope) {
-        Objects.requireNonNull(resourceType, "resourceType");
-        this.resourceType = resourceType;
+    ResourceHandle(
+            ResourceTypeRef resourceType, int rep, boolean own, BorrowScope.Task borrowScope) {
+        this.resourceType = Objects.requireNonNull(resourceType, "resourceType");
         this.rep = rep;
         this.own = own;
         this.borrowScope = borrowScope;
     }
 
-    ResourceType resourceType() {
+    @Override
+    public ResourceTypeRef resourceType() {
         return resourceType;
     }
 
-    int rep() {
+    @Override
+    public int rep() {
         return rep;
     }
 
-    boolean own() {
+    @Override
+    public boolean own() {
         return own;
     }
 
-    Task borrowScope() {
+    @Override
+    public BorrowScope.Task borrowScope() {
         return borrowScope;
     }
 
-    int numLends() {
+    @Override
+    public int numLends() {
         return numLends;
     }
 
-    void lend() {
+    @Override
+    public void lend() {
         numLends++;
     }
 
-    void returnLend() {
+    @Override
+    public void returnLend() {
         numLends--;
     }
 }

@@ -234,8 +234,7 @@ final class FlatTransferPlan {
                     (src, dst, vi, out) -> {
                         long caseIndex = vi.next() & 0xFFFFFFFFL;
                         if (caseIndex >= casePlans.length) {
-                            throw new TrapException(
-                                    "variant case index " + caseIndex + " is out of range");
+                            throw new TrapException("invalid variant discriminant");
                         }
                         out.add(caseIndex);
                         int srcPayloadStart = vi.position();
