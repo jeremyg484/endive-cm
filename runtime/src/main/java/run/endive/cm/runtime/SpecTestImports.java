@@ -151,8 +151,8 @@ public final class SpecTestImports {
         var types = new HostTypes(store);
 
         Type resource1 = hostResourceType();
-        store.declareHostResourceType(resource1, state::recordDrop);
-        types.add(resource1); // 0
+        ResourceTypeInstance rt1 = store.declareHostResourceType(resource1, state::recordDrop);
+        types.add(resource1, rt1); // 0
         ValType ownR1 = types.add(Type.of(OwnType.builder().withTypeIdx(0).build()));
         ValType borrowR1 = types.add(Type.of(BorrowType.builder().withTypeIdx(0).build()));
 
@@ -160,7 +160,8 @@ public final class SpecTestImports {
         // the two declarations are identical, which is what the "mismatched resource types"
         // test turns on.
         Type resource2 = hostResourceType();
-        types.add(resource2);
+        ResourceTypeInstance rt2 = store.declareHostResourceType(resource2, null);
+        types.add(resource2, rt2);
 
         FuncType constructor = func().addParam(param("r", u32())).withResult(ownR1).build();
         FuncType staticAssert =
@@ -173,9 +174,9 @@ public final class SpecTestImports {
         FuncType takeOwn =
                 func().addParam(param("self", borrowR1)).addParam(param("b", ownR1)).build();
 
-        store.addExport("resource1", resource1);
-        store.addExport("resource2", resource2);
-        store.addExport("resource1-again", resource1);
+        store.addExport("resource1", rt1);
+        store.addExport("resource2", rt2);
+        store.addExport("resource1-again", rt1);
 
         // A function, deliberately not a resource, so that an import declaring it as one is
         // rejected with "expected resource found func" — and callable, because another test
@@ -270,7 +271,11 @@ public final class SpecTestImports {
         }
 
         ValType add(Type type) {
-            store.addType(type);
+            return add(type, null);
+        }
+
+        ValType add(Type type, ResourceTypeInstance resourceType) {
+            store.addType(type, resourceType);
             return ValType.builder().withTypeIdx(count++).build();
         }
     }

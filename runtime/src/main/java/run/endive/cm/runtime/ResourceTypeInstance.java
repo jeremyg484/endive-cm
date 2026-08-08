@@ -5,6 +5,7 @@ import java.util.function.IntConsumer;
 import run.endive.cm.abi.HandleTable;
 import run.endive.cm.abi.ResourceTypeRef;
 import run.endive.cm.types.ResourceType;
+import run.endive.cm.types.Type;
 
 /**
  * A resource type brought into existence by instantiating the component that declares it, or
@@ -19,6 +20,7 @@ import run.endive.cm.types.ResourceType;
  */
 final class ResourceTypeInstance implements ResourceTypeRef {
 
+    private final Type type;
     private final ResourceType declared;
     private final ComponentInstance impl;
     private final ComponentStore store;
@@ -26,11 +28,9 @@ final class ResourceTypeInstance implements ResourceTypeRef {
     private CoreFunction<?> dtor;
 
     ResourceTypeInstance(
-            ResourceType declared,
-            ComponentStore store,
-            ComponentInstance impl,
-            IntConsumer hostDtor) {
-        this.declared = Objects.requireNonNull(declared, "declared");
+            Type type, ComponentStore store, ComponentInstance impl, IntConsumer hostDtor) {
+        this.type = Objects.requireNonNull(type, "type");
+        this.declared = Objects.requireNonNull(type.resourceType(), "resourceType");
         this.store = Objects.requireNonNull(store, "store");
         this.impl = impl;
         this.hostDtor = hostDtor;
@@ -49,6 +49,14 @@ final class ResourceTypeInstance implements ResourceTypeRef {
     /** The static declaration this is an instantiation of. */
     ResourceType declared() {
         return declared;
+    }
+
+    /**
+     * The declaration as it appears in a type index space, so that whoever receives this
+     * identity can record the pair together.
+     */
+    Type type() {
+        return type;
     }
 
     /**

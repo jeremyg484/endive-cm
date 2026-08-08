@@ -326,6 +326,22 @@ public final class ComponentLinker {
         return type.cast(value);
     }
 
+    /**
+     * The declaration behind a type arriving as a value. A resource type travels as its runtime
+     * identity, because that identity <em>is</em> the type; anything else travels as itself.
+     */
+    private static Type typeOf(Object value) {
+        if (value instanceof ResourceTypeInstance) {
+            return ((ResourceTypeInstance) value).type();
+        }
+        return value instanceof Type ? (Type) value : null;
+    }
+
+    /** The resource type a value names, or {@code null} if it names an ordinary type. */
+    private static ResourceTypeInstance resourceOf(Object value) {
+        return value instanceof ResourceTypeInstance ? (ResourceTypeInstance) value : null;
+    }
+
     /** How the Component Model's linkage diagnostics name the sort of a supplied import. */
     private static String sortOf(Object value) {
         if (value instanceof ComponentInstance) {
@@ -339,6 +355,9 @@ public final class ComponentLinker {
         }
         if (value instanceof ComponentClosure || value instanceof WasmComponent) {
             return "component";
+        }
+        if (value instanceof ResourceTypeInstance) {
+            return "resource";
         }
         if (value instanceof Type) {
             return ((Type) value).simpleName();
@@ -601,11 +620,10 @@ public final class ComponentLinker {
             // still resolves in the space it came from, though: the indices inside it were
             // written against that component's types, not against this declaration's.
             ComponentStore origin = resolveOuterAliasStore(declStore, outerAlias);
-            Type aliased = origin.getType((int) outerAlias.index());
             space.addForeignType(
-                    aliased,
+                    origin.getType((int) outerAlias.index()),
                     origin.asMatcherSpace(),
-                    aliased.resourceType() == null ? null : origin.resourceTypeFor(aliased));
+                    origin.resourceTypeAtOrNull((int) outerAlias.index()));
         }
     }
 
@@ -718,16 +736,14 @@ public final class ComponentLinker {
                     // Anything that is not a resource type fails the same way, whether it is
                     // some other kind of type or not a type at all — a function, say, which is
                     // what an instance is most likely to be offering under the name.
-                    Type exported = export instanceof Type ? (Type) export : null;
-                    if (exported == null || exported.resourceType() == null) {
+                    ResourceTypeInstance resourceType = resourceOf(export);
+                    if (resourceType == null) {
                         throw new LinkageException(
                                 "instance exports do not match - expected resource found "
                                         + sortOf(export));
                     }
                     space.addForeignType(
-                            exported,
-                            providerStore.asMatcherSpace(),
-                            providerStore.resourceTypeFor(exported));
+                            resourceType.type(), providerStore.asMatcherSpace(), resourceType);
                     return;
                 }
             case EQ:
@@ -740,12 +756,10 @@ public final class ComponentLinker {
                         return;
                     }
                     Object export = providerStore.getExport(name);
-                    requireInstanceExport(export instanceof Type, imp, name, export);
-                    Type exported = (Type) export;
+                    Type exported = typeOf(export);
+                    requireInstanceExport(exported != null, imp, name, export);
                     if (bound.resourceType() != null) {
-                        if (exported.resourceType() == null
-                                || providerStore.resourceTypeFor(exported)
-                                        != bound.resourceType()) {
+                        if (resourceOf(export) != bound.resourceType()) {
                             throw new LinkageException("mismatched resource types");
                         }
                         space.addForeignType(
@@ -891,11 +905,19 @@ public final class ComponentLinker {
             if (!store.hasImport(imp.name())) {
                 // An `eq` bound says which type this is, so there is nothing left for anyone
                 // to decide and nothing to supply. The import resolves to the bound itself.
-                store.addType(bound);
+                store.addType(bound, store.resourceTypeAtOrNull((int) typeBound.typeIdx()));
                 return;
             }
             // Supplying one anyway is allowed, but then it has to agree.
-            Type supplied = requireImportSort(imp, store.getImport(imp.name()), Type.class, "type");
+            Object suppliedValue = store.getImport(imp.name());
+            Type supplied = typeOf(suppliedValue);
+            if (supplied == null) {
+                throw new LinkageException(
+                        "Import \""
+                                + imp.name()
+                                + "\" does not match - expected type found "
+                                + sortOf(suppliedValue));
+            }
             if (!TypeMatcher.typesMatch(
                     store.asMatcherSpace(), bound, store.asMatcherSpace(), supplied)) {
                 throw new LinkageException(
@@ -906,17 +928,18 @@ public final class ComponentLinker {
                                 + ", got "
                                 + supplied);
             }
-            store.addType(supplied);
+            store.addType(supplied, resourceOf(suppliedValue));
         } else if (typeBound.kind() == TypeBound.Kind.SUB_RESOURCE) {
             var importValue = store.getImport(imp.name());
-            if (!(importValue instanceof Type) || ((Type) importValue).resourceType() == null) {
+            ResourceTypeInstance resourceType = resourceOf(importValue);
+            if (resourceType == null) {
                 throw new LinkageException(
                         "Type sub-resource bound check failed on import '"
                                 + imp.name()
                                 + "' - expected resource type, got "
-                                + importValue);
+                                + sortOf(importValue));
             }
-            store.addType((Type) importValue);
+            store.addType(resourceType.type(), resourceType);
         } else {
             throw new LinkageException(
                     "Type bound kind " + typeBound.kind() + " not supported yet");
@@ -967,9 +990,14 @@ public final class ComponentLinker {
                             export.name(), store.getChildComponent((int) export.sortIdx().idx()));
                     break;
                 case TYPE:
-                    inlineStore.addExport(
-                            export.name(), store.getType((int) export.sortIdx().idx()));
-                    break;
+                    {
+                        int typeIdx = (int) export.sortIdx().idx();
+                        ResourceTypeInstance resourceType = store.resourceTypeAtOrNull(typeIdx);
+                        inlineStore.addExport(
+                                export.name(),
+                                resourceType != null ? resourceType : store.getType(typeIdx));
+                        break;
+                    }
                 case INSTANCE:
                     inlineStore.addExport(
                             export.name(), store.getChildInstance((int) export.sortIdx().idx()));
@@ -1008,8 +1036,14 @@ public final class ComponentLinker {
                     imports.put(arg.name(), store.getChildComponent((int) arg.sortIdx().idx()));
                     break;
                 case TYPE:
-                    imports.put(arg.name(), store.getType((int) arg.sortIdx().idx()));
-                    break;
+                    {
+                        int idx = (int) arg.sortIdx().idx();
+                        ResourceTypeInstance resourceType = store.resourceTypeAtOrNull(idx);
+                        imports.put(
+                                arg.name(),
+                                resourceType != null ? resourceType : store.getType(idx));
+                        break;
+                    }
                 case INSTANCE:
                     imports.put(arg.name(), store.getChildInstance((int) arg.sortIdx().idx()));
                     break;
@@ -1269,8 +1303,11 @@ public final class ComponentLinker {
                 store.addChildInstance((ComponentInstance) linkedStore.getExport(alias.name()));
                 break;
             case TYPE:
-                store.addType((Type) linkedStore.getExport(alias.name()));
-                break;
+                {
+                    Object exported = linkedStore.getExport(alias.name());
+                    store.addType(typeOf(exported), resourceOf(exported));
+                    break;
+                }
             case VALUE:
                 throw new LinkageException("VALUE sort not yet supported for export alias");
             default:
@@ -1375,8 +1412,9 @@ public final class ComponentLinker {
                 store.addComponent(containingStore.getChildComponent((int) alias.index()));
                 break;
             case TYPE:
-                Type type = containingStore.getType((int) alias.index());
-                store.addType(type);
+                store.addType(
+                        containingStore.getType((int) alias.index()),
+                        containingStore.resourceTypeAtOrNull((int) alias.index()));
                 break;
             default:
                 throw new UnsupportedOperationException(
@@ -1388,11 +1426,9 @@ public final class ComponentLinker {
         for (Type type : section.types()) {
             // A resource declaration brings a new resource type into existence, distinct from
             // the one any other instantiation of this component declares, and implemented by
-            // this instance. Claim that before addType, which otherwise adopts it as foreign.
-            if (type.resourceType() != null) {
-                store.declareResourceType(type);
-            }
-            store.addType(type);
+            // this instance.
+            store.addType(
+                    type, type.resourceType() == null ? null : store.declareResourceType(type));
         }
     }
 
@@ -1797,10 +1833,13 @@ public final class ComponentLinker {
                     store.addExport(name, func);
                     break;
                 case TYPE:
-                    Type type = store.getType(idx);
-                    store.addType(type);
-                    store.addExport(name, type);
-                    break;
+                    {
+                        Type type = store.getType(idx);
+                        ResourceTypeInstance resourceType = store.resourceTypeAtOrNull(idx);
+                        store.addType(type, resourceType);
+                        store.addExport(name, resourceType != null ? resourceType : type);
+                        break;
+                    }
                 case INSTANCE:
                     ComponentInstance instance = store.getChildInstance(idx);
                     store.addChildInstance(instance);
