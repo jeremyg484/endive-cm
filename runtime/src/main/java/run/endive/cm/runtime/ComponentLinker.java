@@ -439,9 +439,9 @@ public final class ComponentLinker {
         for (var decl : instanceType.getInstanceDecls()) {
             switch (decl.kind()) {
                 case CORE_TYPE:
-                    // Core types occupy their own index space, which nothing in an instance
-                    // type's value or function types can refer to, so there is nothing to
-                    // record and nothing to check.
+                    // Its own index space, which a `core module` export declaration indexes
+                    // into to say what shape of module it wants.
+                    space.addCoreType(decl.coreType());
                     break;
                 case TYPE:
                     // A type the instance type defines for its own use. Nothing to check
@@ -515,11 +515,24 @@ public final class ComponentLinker {
         Object export = providerStore.getExport(name);
         switch (externDesc.kind()) {
             case CORE_MODULE:
-                // A core module export is the module itself, not an instance of one --
-                // CoreModuleInstance is what instantiating a module produces, and never
-                // appears among a component's exports.
-                requireInstanceExport(export instanceof WasmModule, imp, name, export);
-                return;
+                {
+                    // A core module export is the module itself, not an instance of one --
+                    // CoreModuleInstance is what instantiating a module produces, and never
+                    // appears among a component's exports.
+                    requireInstanceExport(export instanceof WasmModule, imp, name, export);
+                    CoreType declaredModule = space.coreTypeAt((int) externDesc.typeIdx());
+                    if (declaredModule.moduleType() == null) {
+                        throw new LinkageException(
+                                "Instance export '"
+                                        + name
+                                        + "' of '"
+                                        + imp.name()
+                                        + "' is declared with a non-module core type");
+                    }
+                    CoreModuleMatcher.requireSubtype(
+                            declaredModule.moduleType(), (WasmModule) export);
+                    return;
+                }
             case COMPONENT:
                 requireInstanceExport(export instanceof WasmComponent, imp, name, export);
                 return;

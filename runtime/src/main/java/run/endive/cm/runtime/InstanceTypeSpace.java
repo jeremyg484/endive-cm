@@ -3,6 +3,7 @@ package run.endive.cm.runtime;
 import java.util.ArrayList;
 import java.util.List;
 import run.endive.cm.abi.ResourceTypeRef;
+import run.endive.cm.types.CoreType;
 import run.endive.cm.types.Type;
 import run.endive.cm.types.ValType;
 
@@ -31,6 +32,7 @@ import run.endive.cm.types.ValType;
 final class InstanceTypeSpace implements TypeMatcher.Space {
 
     private final List<Slot> slots = new ArrayList<>();
+    private final List<CoreType> coreTypes = new ArrayList<>();
 
     @Override
     public TypeMatcher.Resolved resolve(ValType valType) {
@@ -64,6 +66,26 @@ final class InstanceTypeSpace implements TypeMatcher.Space {
                     "Instance type index " + index + " out of bounds (size " + slots.size() + ")");
         }
         return slots.get(index);
+    }
+
+    /**
+     * Core types occupy an index space of their own, separate from the value and function types
+     * above, which a {@code core module} export declaration indexes into.
+     */
+    void addCoreType(CoreType coreType) {
+        coreTypes.add(coreType);
+    }
+
+    CoreType coreTypeAt(int index) {
+        if (index < 0 || index >= coreTypes.size()) {
+            throw new LinkageException(
+                    "Instance core type index "
+                            + index
+                            + " out of bounds (size "
+                            + coreTypes.size()
+                            + ")");
+        }
+        return coreTypes.get(index);
     }
 
     /** Appends a type the instance type declares itself, whose indices count in this space. */
