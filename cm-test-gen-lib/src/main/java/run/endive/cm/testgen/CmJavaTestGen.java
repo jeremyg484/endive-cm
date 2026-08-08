@@ -9,7 +9,9 @@ import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.SingleMemberAnnotationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import run.endive.cm.testgen.wast.CmCommand;
 import run.endive.cm.testgen.wast.CmCommandType;
 import run.endive.cm.testgen.wast.CmWast;
@@ -59,22 +61,83 @@ public final class CmJavaTestGen {
                                         new NameExpr("MethodOrderer"), "OrderAnnotation"),
                                 "class")));
 
+        addCurrentInstanceField(classDecl);
         addLoadBytesMethod(classDecl, wasmClasspath);
+        addInstantiateMethod(classDecl);
+        addCurrentInstanceMethod(classDecl);
 
-        String lastComponentFilename = null;
+        // A wast script names its component definitions and instantiates them separately, so
+        // resolve each `module_instance` back to the file its definition was compiled to.
+        var definitionFilenames = new HashMap<String, String>();
         var commands = wast.commands();
         for (var i = 0; i < commands.size(); i++) {
             var command = commands.get(i);
-            var commandType = command.commandType();
-            if (commandType == CmCommandType.MODULE
-                    || commandType == CmCommandType.MODULE_DEFINITION
-                    || commandType == CmCommandType.COMPONENT) {
-                lastComponentFilename = command.filename();
+            if (command.commandType() == CmCommandType.MODULE_DEFINITION
+                    && command.name() != null) {
+                definitionFilenames.put(command.name(), command.filename());
             }
-            addTestMethod(classDecl, testName, command, i, lastComponentFilename);
+            addTestMethod(classDecl, testName, command, i, definitionFilenames);
         }
 
         return cu;
+    }
+
+    /**
+     * The instance later commands act on.
+     *
+     * <p>A wast script is a sequence of commands sharing state: a {@code component} command
+     * instantiates, and every {@code assert_return} or {@code assert_trap} after it invokes
+     * <em>that</em> instance until the next one replaces it. Handle tables, resource
+     * representations and linear memory all persist across those commands, and several tests
+     * turn on exactly that — allocating in one command and freeing in the next. Each command
+     * becomes its own ordered test method, so the instance has to outlive the method that
+     * created it, which means static state.
+     */
+    private void addCurrentInstanceField(
+            com.github.javaparser.ast.body.ClassOrInterfaceDeclaration classDecl) {
+        classDecl
+                .addField(
+                        "ComponentInstance",
+                        "currentInstance",
+                        Modifier.Keyword.PRIVATE,
+                        Modifier.Keyword.STATIC)
+                .setJavadocComment(
+                        "The instance created by the most recent component command, which the"
+                                + " commands after it invoke.");
+    }
+
+    private void addInstantiateMethod(
+            com.github.javaparser.ast.body.ClassOrInterfaceDeclaration classDecl) {
+        var method =
+                classDecl.addMethod(
+                        "instantiate", Modifier.Keyword.PRIVATE, Modifier.Keyword.STATIC);
+        method.setType("ComponentInstance");
+        method.addParameter("String", "resourcePath");
+
+        var body = new BlockStmt();
+        body.addStatement("byte[] bytes = loadBytes(resourcePath);");
+        body.addStatement("ComponentValidate.validate(new ByteArrayInputStream(bytes));");
+        body.addStatement("var parser = ComponentParser.builder().build();");
+        body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
+        body.addStatement("assertNotNull(component);");
+        body.addStatement("var linker = ComponentLinker.builder().build();");
+        body.addStatement("return linker.instantiate(component, SpecTestImports.build());");
+        method.setBody(body);
+    }
+
+    private void addCurrentInstanceMethod(
+            com.github.javaparser.ast.body.ClassOrInterfaceDeclaration classDecl) {
+        var method =
+                classDecl.addMethod(
+                        "currentInstance", Modifier.Keyword.PRIVATE, Modifier.Keyword.STATIC);
+        method.setType("ComponentInstance");
+
+        var body = new BlockStmt();
+        body.addStatement(
+                "assertNotNull(currentInstance, \"no instance is current - the component command"
+                        + " before this one did not run or did not succeed\");");
+        body.addStatement("return currentInstance;");
+        method.setBody(body);
     }
 
     private void addLoadBytesMethod(
@@ -106,7 +169,7 @@ public final class CmJavaTestGen {
             String testName,
             CmCommand command,
             int index,
-            String lastComponentFilename) {
+            Map<String, String> definitionFilenames) {
         var methodName = "test" + index;
         var method = classDecl.addMethod(methodName, Modifier.Keyword.PUBLIC);
         method.addAnnotation("Test");
@@ -143,10 +206,10 @@ public final class CmJavaTestGen {
                 generateAssertInvalidTest(body, command);
                 break;
             case ASSERT_RETURN:
-                generateAssertReturnTest(body, command, lastComponentFilename);
+                generateAssertReturnTest(body, command);
                 break;
             case ASSERT_TRAP:
-                generateAssertTrapTest(body, command, lastComponentFilename);
+                generateAssertTrapTest(body, command);
                 break;
             case ASSERT_UNINSTANTIABLE:
             case ASSERT_UNLINKABLE:
@@ -161,8 +224,7 @@ public final class CmJavaTestGen {
                         body, "register at line " + command.line() + " not yet supported");
                 break;
             case MODULE_INSTANCE:
-                generateUnsupportedTest(
-                        body, "module_instance at line " + command.line() + " not yet supported");
+                generateModuleInstanceTest(body, command, definitionFilenames);
                 break;
             default:
                 throw new UnsupportedOperationException(
@@ -176,40 +238,34 @@ public final class CmJavaTestGen {
         body.addStatement("fail(\"" + failureMessage + "\");");
     }
 
-    private void generateAssertTrapTest(
-            BlockStmt body, CmCommand command, String lastComponentFilename) {
-        if (command.action() == null) {
-            throw new IllegalStateException(
-                    "assert_return at line " + command.line() + " has no action");
-        }
-        if (!"invoke".equals(command.action().type())) {
-            throw new UnsupportedOperationException(
-                    "assert_return at line "
-                            + command.line()
-                            + " has unsupported action type: "
-                            + command.action().type());
-        }
-        if (command.action().field() == null) {
-            throw new IllegalStateException(
-                    "assert_return invoke at line " + command.line() + " has no field");
-        }
-        if (lastComponentFilename == null) {
-            throw new IllegalStateException(
-                    "assert_return at line " + command.line() + " has no preceding component");
-        }
-        body.addStatement("byte[] bytes = loadBytes(\"" + lastComponentFilename + "\");");
-        body.addStatement("var parser = ComponentParser.builder().build();");
-        body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
-        body.addStatement("var linker = ComponentLinker.builder().build();");
-        body.addStatement(
-                "ComponentInstance instance = linker.instantiate(component,"
-                        + " SpecTestImports.build());");
+    private void generateAssertTrapTest(BlockStmt body, CmCommand command) {
+        requireInvokeAction(command);
+        body.addStatement("ComponentInstance instance = currentInstance();");
         body.addStatement(
                 "assertThrows(WasmEngineException.class, () -> instance.export(\""
                         + command.action().field()
                         + "\").apply("
                         + command.action().emitArgs()
                         + "));");
+    }
+
+    private void requireInvokeAction(CmCommand command) {
+        if (command.action() == null) {
+            throw new IllegalStateException(
+                    command.type() + " at line " + command.line() + " has no action");
+        }
+        if (!"invoke".equals(command.action().type())) {
+            throw new UnsupportedOperationException(
+                    command.type()
+                            + " at line "
+                            + command.line()
+                            + " has unsupported action type: "
+                            + command.action().type());
+        }
+        if (command.action().field() == null) {
+            throw new IllegalStateException(
+                    command.type() + " invoke at line " + command.line() + " has no field");
+        }
     }
 
     private void generateAssertUninstantiableTest(BlockStmt body, CmCommand command) {
@@ -240,16 +296,38 @@ public final class CmJavaTestGen {
             throw new IllegalStateException(
                     "module command at line " + command.line() + " has no filename");
         }
-        body.addStatement("byte[] bytes = loadBytes(\"" + command.filename() + "\");");
-        body.addStatement("ComponentValidate.validate(new ByteArrayInputStream(bytes));");
-        body.addStatement("var parser = ComponentParser.builder().build();");
-        body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
-        body.addStatement("assertNotNull(component);");
-        body.addStatement("var linker = ComponentLinker.builder().build();");
-        body.addStatement(
-                "ComponentInstance instance = linker.instantiate(component,"
-                        + " SpecTestImports.build());");
-        body.addStatement("assertNotNull(instance);");
+        generateInstantiation(body, command.filename());
+    }
+
+    /**
+     * Instantiates a named {@code module_definition}, which becomes the instance the following
+     * commands invoke. The same definition may be instantiated more than once, each time
+     * yielding a fresh instance with its own handle table.
+     */
+    private void generateModuleInstanceTest(
+            BlockStmt body, CmCommand command, Map<String, String> definitionFilenames) {
+        if (command.module() == null) {
+            throw new IllegalStateException(
+                    "module_instance at line " + command.line() + " names no definition");
+        }
+        String filename = definitionFilenames.get(command.module());
+        if (filename == null) {
+            throw new IllegalStateException(
+                    "module_instance at line "
+                            + command.line()
+                            + " names definition '"
+                            + command.module()
+                            + "', which was not defined earlier in this script");
+        }
+        generateInstantiation(body, filename);
+    }
+
+    private void generateInstantiation(BlockStmt body, String filename) {
+        // Cleared first so that a failure here leaves no instance current, rather than leaving
+        // the previous command's instance in place for the assertions that follow to invoke.
+        body.addStatement("currentInstance = null;");
+        body.addStatement("currentInstance = instantiate(\"" + filename + "\");");
+        body.addStatement("assertNotNull(currentInstance);");
     }
 
     private void generateModuleDefinitionTest(BlockStmt body, CmCommand command) {
@@ -276,36 +354,10 @@ public final class CmJavaTestGen {
                         + "new ByteArrayInputStream(bytes)));");
     }
 
-    private void generateAssertReturnTest(
-            BlockStmt body, CmCommand command, String lastComponentFilename) {
-        if (command.action() == null) {
-            throw new IllegalStateException(
-                    "assert_return at line " + command.line() + " has no action");
-        }
-        if (!"invoke".equals(command.action().type())) {
-            throw new UnsupportedOperationException(
-                    "assert_return at line "
-                            + command.line()
-                            + " has unsupported action type: "
-                            + command.action().type());
-        }
-        if (command.action().field() == null) {
-            throw new IllegalStateException(
-                    "assert_return invoke at line " + command.line() + " has no field");
-        }
-        if (lastComponentFilename == null) {
-            throw new IllegalStateException(
-                    "assert_return at line " + command.line() + " has no preceding component");
-        }
-        body.addStatement("byte[] bytes = loadBytes(\"" + lastComponentFilename + "\");");
-        body.addStatement("var parser = ComponentParser.builder().build();");
-        body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
-        body.addStatement("var linker = ComponentLinker.builder().build();");
+    private void generateAssertReturnTest(BlockStmt body, CmCommand command) {
+        requireInvokeAction(command);
         body.addStatement(
-                "ComponentInstance instance = linker.instantiate(component,"
-                        + " SpecTestImports.build());");
-        body.addStatement(
-                "Object[] result = instance.export(\""
+                "Object[] result = currentInstance().export(\""
                         + command.action().field()
                         + "\").apply("
                         + command.action().emitArgs()
