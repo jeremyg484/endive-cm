@@ -3,7 +3,6 @@ package run.endive.cm.runtime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -69,6 +68,8 @@ import run.endive.runtime.GlobalInstance;
 import run.endive.runtime.ImportFunction;
 import run.endive.runtime.ImportGlobal;
 import run.endive.runtime.ImportMemory;
+import run.endive.runtime.ImportTable;
+import run.endive.runtime.ImportTag;
 import run.endive.runtime.ImportValues;
 import run.endive.runtime.Machine;
 import run.endive.runtime.Memory;
@@ -81,8 +82,6 @@ import run.endive.wasm.WasmModule;
 import run.endive.wasm.types.FunctionType;
 
 public final class ComponentLinker {
-
-    private final Map<WasmComponent, ComponentStore> stores = new HashMap<>();
 
     private final Function<run.endive.runtime.Instance, Machine> machineFactory;
     private final boolean generateImports;
@@ -122,7 +121,6 @@ public final class ComponentLinker {
             boolean root,
             ComponentStore parent) {
         ComponentStore store = new ComponentStore(component, root, parent);
-        stores.put(component, store);
 
         if (!imports.isEmpty()) {
             store.addImports(imports);
@@ -339,7 +337,7 @@ public final class ComponentLinker {
         if (value instanceof WasmModule) {
             return "module";
         }
-        if (value instanceof WasmComponent) {
+        if (value instanceof ComponentClosure || value instanceof WasmComponent) {
             return "component";
         }
         if (value instanceof Type) {
@@ -384,10 +382,13 @@ public final class ComponentLinker {
                             + "'");
         }
         if (store.hasImport(imp.name())) {
-            var componentImport =
-                    requireImportSort(
-                            imp, store.getImport(imp.name()), WasmComponent.class, "component");
-            store.addComponent(componentImport);
+            Object componentImport = store.getImport(imp.name());
+            if (componentImport instanceof WasmComponent) {
+                // Supplied by the host, so it encloses nothing and closes over nothing.
+                componentImport = new ComponentClosure((WasmComponent) componentImport, null);
+            }
+            store.addComponent(
+                    requireImportSort(imp, componentImport, ComponentClosure.class, "component"));
         } else {
             throw new LinkageException(
                     "Unable to resolve component import "
@@ -454,6 +455,20 @@ public final class ComponentLinker {
                 case EXPORT_DECL:
                     {
                         var externDesc = decl.exportDecl().externDesc();
+                        if (externDesc.kind() == ExternDesc.Kind.TYPE) {
+                            // An `eq` bound already says which type this is, so the supplier
+                            // has nothing to choose; a `sub resource` bound is the opposite —
+                            // naming a type only the supplier can produce.
+                            if (externDesc.typeBound().kind() != TypeBound.Kind.EQ) {
+                                return false;
+                            }
+                            int boundIdx = (int) externDesc.typeBound().typeIdx();
+                            if (boundIdx < 0 || boundIdx >= localTypes.size()) {
+                                return false;
+                            }
+                            localTypes.add(localTypes.get(boundIdx));
+                            break;
+                        }
                         if (externDesc.kind() != ExternDesc.Kind.INSTANCE) {
                             return false;
                         }
@@ -484,14 +499,27 @@ public final class ComponentLinker {
     private ComponentInstance synthesizeEmptyInstance(ComponentStore parent, InstanceType type) {
         var definition = WasmComponent.builder().build();
         var store = new ComponentStore(definition, false, parent);
+        // The stand-in mirrors the declaration's own type index space, so that a type written
+        // in terms of an earlier slot — a record whose field names the type exported above it,
+        // say — still resolves once something looks it up here.
         List<Type> localTypes = new ArrayList<>();
         for (var decl : type.getInstanceDecls()) {
             if (decl.kind() == InstanceDecl.Kind.TYPE) {
                 localTypes.add(decl.type());
+                store.addType(decl.type());
             } else if (decl.kind() == InstanceDecl.Kind.EXPORT_DECL) {
                 var exportDecl = decl.exportDecl();
-                InstanceType nested =
-                        localTypes.get((int) exportDecl.externDesc().typeIdx()).instanceType();
+                var externDesc = exportDecl.externDesc();
+                if (externDesc.kind() == ExternDesc.Kind.TYPE) {
+                    // An `eq` bound fixes which type this is, so the stand-in can export
+                    // exactly that — and must, because an alias may pull it out by name.
+                    Type bound = localTypes.get((int) externDesc.typeBound().typeIdx());
+                    localTypes.add(bound);
+                    store.addType(bound);
+                    store.addExport(exportDecl.name(), bound);
+                    continue;
+                }
+                InstanceType nested = localTypes.get((int) externDesc.typeIdx()).instanceType();
                 store.addExport(exportDecl.name(), synthesizeEmptyInstance(store, nested));
             }
         }
@@ -558,6 +586,15 @@ public final class ComponentLinker {
                             + "' with description "
                             + imp.externDesc());
         }
+        if (outerAlias.sort().kind() == Sort.Kind.CORE
+                && outerAlias.sort().coreSort() == CoreSort.TYPE) {
+            // Core types have an index space of their own, which a `core module` export
+            // declaration indexes into to say what shape of module it wants.
+            space.addCoreType(
+                    resolveOuterAliasStore(declStore, outerAlias)
+                            .getCoreType((int) outerAlias.index()));
+            return;
+        }
         if (outerAlias.sort().kind() == Sort.Kind.TYPE) {
             // An aliased type occupies a slot in the instance type's index space just as a
             // declared one does, so later declarations keep referring to the right thing. It
@@ -612,7 +649,7 @@ public final class ComponentLinker {
                     return;
                 }
             case COMPONENT:
-                requireInstanceExport(export instanceof WasmComponent, imp, name, export);
+                requireInstanceExport(export instanceof ComponentClosure, imp, name, export);
                 return;
             case INSTANCE:
                 requireInstanceExport(export instanceof ComponentInstance, imp, name, export);
@@ -678,12 +715,14 @@ public final class ComponentLinker {
                         throw instanceExportNotFound(imp, name);
                     }
                     Object export = providerStore.getExport(name);
-                    requireInstanceExport(export instanceof Type, imp, name, export);
-                    Type exported = (Type) export;
-                    if (exported.resourceType() == null) {
+                    // Anything that is not a resource type fails the same way, whether it is
+                    // some other kind of type or not a type at all — a function, say, which is
+                    // what an instance is most likely to be offering under the name.
+                    Type exported = export instanceof Type ? (Type) export : null;
+                    if (exported == null || exported.resourceType() == null) {
                         throw new LinkageException(
                                 "instance exports do not match - expected resource found "
-                                        + exported.simpleName());
+                                        + sortOf(export));
                     }
                     space.addForeignType(
                             exported,
@@ -765,22 +804,30 @@ public final class ComponentLinker {
             throw new LinkageException(
                     "Outer alias count 0 could not be resolved for instance outer alias decl");
         }
-        WasmComponent containingComponent = declStore.getComponent();
-        for (int i = 2; i <= alias.count(); i++) {
-            if (containingComponent.parent() == null) {
+        // Inside an instance type declaration a count of one already means the enclosing
+        // component, so the walk starts one level in.
+        return outerScope(declStore, alias, 2);
+    }
+
+    /**
+     * Walks out {@code alias.count()} enclosing scopes.
+     *
+     * <p>Following the chain of stores rather than of definitions is what makes an outer alias
+     * mean the right thing. A component instantiated more than once has one definition but a
+     * store per instantiation, and an alias reaching out of a nested component must land in the
+     * instantiation it was reached through — the same definition instantiated with different
+     * arguments encloses different things.
+     */
+    private ComponentStore outerScope(ComponentStore from, OuterAlias alias, int firstLevel) {
+        ComponentStore scope = from;
+        for (int i = firstLevel; i <= alias.count(); i++) {
+            scope = scope.lexicalScope();
+            if (scope == null) {
                 throw new LinkageException(
                         "Outer alias count " + alias.count() + " failed to resolve");
             }
-            containingComponent = containingComponent.parent();
         }
-        if (!stores.containsKey(containingComponent)) {
-            throw new LinkageException(
-                    "Outer alias count "
-                            + alias.count()
-                            + " failed to resolve to a root component that is associated with a"
-                            + " store");
-        }
-        return stores.get(containingComponent);
+        return scope;
     }
 
     private boolean matchInstanceOuterAliasDecl(
@@ -795,15 +842,22 @@ public final class ComponentLinker {
                                 containingStore.getCoreModule((int) alias.index());
                         return instanceStore.getCoreModules().stream()
                                 .anyMatch(module -> module.equals(declaredModule));
+                    case TYPE:
+                        // Reaching out for a core type only names a shape the declarations
+                        // below will be written against — it asks the provider for nothing, so
+                        // there is nothing here to match. Bringing it into scope is the work,
+                        // and matchInstanceAliasDecl does that.
+                        containingStore.getCoreType((int) alias.index());
+                        return true;
                     default:
                         throw new UnsupportedOperationException(
                                 "Outer alias core sort " + coreSort + " not yet supported");
                 }
             case COMPONENT:
                 WasmComponent declaredComponent =
-                        containingStore.getChildComponent((int) alias.index());
+                        containingStore.getChildComponent((int) alias.index()).definition();
                 return instanceStore.getChildComponents().stream()
-                        .anyMatch(component -> component.equals(declaredComponent));
+                        .anyMatch(component -> component.definition().equals(declaredComponent));
             case TYPE:
                 Type declaredType = containingStore.getType((int) alias.index());
                 return instanceStore.getTypes().stream()
@@ -833,18 +887,26 @@ public final class ComponentLinker {
     private void processTypeImport(ComponentStore store, Import imp) {
         TypeBound typeBound = imp.externDesc().typeBound();
         if (typeBound.kind() == TypeBound.Kind.EQ) {
-            Type typeCheck = store.getType((int) typeBound.typeIdx());
-            var importValue = store.getImport(imp.name());
-            if (!(importValue instanceof Type) || !typeCheck.equals(importValue)) {
+            Type bound = store.getType((int) typeBound.typeIdx());
+            if (!store.hasImport(imp.name())) {
+                // An `eq` bound says which type this is, so there is nothing left for anyone
+                // to decide and nothing to supply. The import resolves to the bound itself.
+                store.addType(bound);
+                return;
+            }
+            // Supplying one anyway is allowed, but then it has to agree.
+            Type supplied = requireImportSort(imp, store.getImport(imp.name()), Type.class, "type");
+            if (!TypeMatcher.typesMatch(
+                    store.asMatcherSpace(), bound, store.asMatcherSpace(), supplied)) {
                 throw new LinkageException(
                         "Type eq bound check failed on import '"
                                 + imp.name()
                                 + "' - expected "
-                                + typeCheck
+                                + bound
                                 + ", got "
-                                + importValue);
+                                + supplied);
             }
-            store.addType((Type) importValue);
+            store.addType(supplied);
         } else if (typeBound.kind() == TypeBound.Kind.SUB_RESOURCE) {
             var importValue = store.getImport(imp.name());
             if (!(importValue instanceof Type) || ((Type) importValue).resourceType() == null) {
@@ -924,7 +986,7 @@ public final class ComponentLinker {
     }
 
     private void instantiateComponent(ComponentStore store, InstantiateInstanceExpr expr) {
-        WasmComponent component = store.getChildComponent((int) expr.componentIdx());
+        ComponentClosure component = store.getChildComponent((int) expr.componentIdx());
         Map<String, Object> imports = new LinkedHashMap<>();
         for (InstantiateArg arg : expr.instantiateArgs()) {
             switch (arg.sortIdx().sort().kind()) {
@@ -958,7 +1020,8 @@ public final class ComponentLinker {
                             "Unknown instantiate arg sort kind: " + arg.sortIdx().sort().kind());
             }
         }
-        store.addChildInstance(instantiate(component, imports, false, store));
+        store.addChildInstance(
+                instantiate(component.definition(), imports, false, component.definingScope()));
     }
 
     public static final class Builder {
@@ -1080,6 +1143,18 @@ public final class ComponentLinker {
                                                         new ImportGlobal(
                                                                 arg.name(), i.name(), global));
                                                 break;
+                                            case TABLE:
+                                                var table =
+                                                        moduleInstance.exports().table(i.name());
+                                                builder.addTable(
+                                                        new ImportTable(
+                                                                arg.name(), i.name(), table));
+                                                break;
+                                            case TAG:
+                                                var tag = moduleInstance.exports().tag(i.name());
+                                                builder.addTag(
+                                                        new ImportTag(arg.name(), i.name(), tag));
+                                                break;
                                             default:
                                                 throw new LinkageException(
                                                         "core instantiate module import of type "
@@ -1093,14 +1168,44 @@ public final class ComponentLinker {
                             .filter(i -> i.module().equals(arg.name()))
                             .forEach(
                                     i -> {
+                                        // An inline instance is a bag of already-resolved
+                                        // exports, so each sort is simply handed straight
+                                        // through to the import it satisfies.
+                                        Object exported = inlineInstance.getExport(i.name());
                                         switch (i.importType()) {
                                             case FUNCTION:
-                                                var exportedFunc =
-                                                        inlineInstance.getExport(i.name());
-                                                CoreFunction<?> func =
-                                                        (CoreFunction<?>) exportedFunc;
                                                 builder.addFunction(
-                                                        func.importFunction(arg.name(), i.name()));
+                                                        ((CoreFunction<?>) exported)
+                                                                .importFunction(
+                                                                        arg.name(), i.name()));
+                                                break;
+                                            case MEMORY:
+                                                builder.addMemory(
+                                                        new ImportMemory(
+                                                                arg.name(),
+                                                                i.name(),
+                                                                (Memory) exported));
+                                                break;
+                                            case GLOBAL:
+                                                builder.addGlobal(
+                                                        new ImportGlobal(
+                                                                arg.name(),
+                                                                i.name(),
+                                                                (GlobalInstance) exported));
+                                                break;
+                                            case TABLE:
+                                                builder.addTable(
+                                                        new ImportTable(
+                                                                arg.name(),
+                                                                i.name(),
+                                                                (TableInstance) exported));
+                                                break;
+                                            case TAG:
+                                                builder.addTag(
+                                                        new ImportTag(
+                                                                arg.name(),
+                                                                i.name(),
+                                                                (TagInstance) exported));
                                                 break;
                                             default:
                                                 throw new LinkageException(
@@ -1158,7 +1263,7 @@ public final class ComponentLinker {
                 store.addFunction((ComponentFunction) linkedStore.getExport(alias.name()));
                 break;
             case COMPONENT:
-                store.addComponent((WasmComponent) linkedStore.getExport(alias.name()));
+                store.addComponent((ComponentClosure) linkedStore.getExport(alias.name()));
                 break;
             case INSTANCE:
                 store.addChildInstance((ComponentInstance) linkedStore.getExport(alias.name()));
@@ -1183,8 +1288,17 @@ public final class ComponentLinker {
         CoreSort coreSort = sort.coreSort();
         int instanceIdx = (int) alias.instanceIdx();
         String name = alias.name();
+        CoreModuleInstance coreInstance = store.getCoreInstance(instanceIdx);
+
+        // A core instance is either a module that was instantiated or a bag of exports gathered
+        // inline, and either can be aliased through. The inline kind already holds resolved
+        // values, so it needs no lookup into an instantiation that never happened.
+        if (coreInstance instanceof CoreInlineInstance) {
+            aliasInlineCoreExport(store, (CoreInlineInstance) coreInstance, coreSort, name);
+            return;
+        }
         run.endive.runtime.Instance instance =
-                ((CoreEndiveInstance) store.getCoreInstance(instanceIdx)).getModuleInstance();
+                ((CoreEndiveInstance) coreInstance).getModuleInstance();
 
         switch (coreSort) {
             case FUNC:
@@ -1214,23 +1328,36 @@ public final class ComponentLinker {
         }
     }
 
+    private void aliasInlineCoreExport(
+            ComponentStore store, CoreInlineInstance instance, CoreSort coreSort, String name) {
+        Object exported = instance.getExport(name);
+        switch (coreSort) {
+            case FUNC:
+                store.addCoreFunction((CoreFunction<?>) exported);
+                return;
+            case MEMORY:
+                store.addCoreMemory((Memory) exported);
+                return;
+            case TABLE:
+                store.addCoreTable((TableInstance) exported);
+                return;
+            case GLOBAL:
+                store.addCoreGlobal((GlobalInstance) exported);
+                return;
+            case TAG:
+                store.addCoreTag((TagInstance) exported);
+                return;
+            case MODULE:
+                store.addCoreModule((WasmModule) exported);
+                return;
+            default:
+                throw new UnsupportedOperationException(
+                        "Core export alias for sort " + coreSort + " not yet supported");
+        }
+    }
+
     private void processOuterAlias(ComponentStore store, OuterAlias alias) {
-        WasmComponent containingComponent = store.getComponent();
-        for (int i = 1; i <= alias.count(); i++) {
-            if (containingComponent.parent() == null) {
-                throw new LinkageException(
-                        "Outer alias count " + alias.count() + " failed to resolve");
-            }
-            containingComponent = containingComponent.parent();
-        }
-        if (!stores.containsKey(containingComponent)) {
-            throw new LinkageException(
-                    "Outer alias count "
-                            + alias.count()
-                            + " failed to resolve to a root component that is associated with a"
-                            + " store");
-        }
-        ComponentStore containingStore = stores.get(containingComponent);
+        ComponentStore containingStore = outerScope(store, alias, 1);
         switch (alias.sort().kind()) {
             case CORE:
                 CoreSort coreSort = alias.sort().coreSort();
@@ -1245,8 +1372,7 @@ public final class ComponentLinker {
                 }
                 break;
             case COMPONENT:
-                WasmComponent component = containingStore.getChildComponent((int) alias.index());
-                store.addComponent(component);
+                store.addComponent(containingStore.getChildComponent((int) alias.index()));
                 break;
             case TYPE:
                 Type type = containingStore.getType((int) alias.index());
@@ -1681,7 +1807,7 @@ public final class ComponentLinker {
                     store.addExport(name, instance);
                     break;
                 case COMPONENT:
-                    WasmComponent component = store.getChildComponent(idx);
+                    ComponentClosure component = store.getChildComponent(idx);
                     store.addComponent(component);
                     store.addExport(name, component);
                     break;
@@ -1693,6 +1819,6 @@ public final class ComponentLinker {
     }
 
     private void processComponentSection(ComponentStore store, ComponentSection section) {
-        store.addComponent(section.component());
+        store.addComponent(new ComponentClosure(section.component(), store));
     }
 }

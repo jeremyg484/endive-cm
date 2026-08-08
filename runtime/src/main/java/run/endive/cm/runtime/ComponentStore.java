@@ -24,6 +24,7 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
 
     private final boolean root;
     private final ComponentInstance rootInstance;
+    private final ComponentStore lexicalScope;
     private final Map<Type, ResourceTypeInstance> resourceTypes;
     private TypeMatcher.Space matcherSpace;
     private final List<WasmModule> coreModules = new ArrayList<>();
@@ -36,7 +37,7 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
     private final List<TagInstance> coreTags = new ArrayList<>();
     private final List<ComponentFunction> functions = new ArrayList<>();
     private final List<Type> types = new ArrayList<>();
-    private final List<WasmComponent> childComponents = new ArrayList<>();
+    private final List<ComponentClosure> childComponents = new ArrayList<>();
     private final List<ComponentInstance> instances = new ArrayList<>();
     private final Map<String, Object> exports = new LinkedHashMap<>();
     private final Map<String, Object> imports = new LinkedHashMap<>();
@@ -46,12 +47,14 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
     }
 
     /**
-     * @param parent the store instantiating this one, whose resource type identities this store
-     *     shares; {@code null} for a store that begins a fresh instantiation
+     * @param parent the store this one was written inside, which its outer aliases resolve
+     *     against and whose resource type identities it shares; {@code null} for a store that
+     *     begins a fresh instantiation
      */
     ComponentStore(WasmComponent component, boolean root, ComponentStore parent) {
         this.rootInstance = new ComponentInstance(this, component);
         this.root = root;
+        this.lexicalScope = parent;
         this.resourceTypes = parent == null ? new IdentityHashMap<>() : parent.resourceTypes;
     }
 
@@ -250,11 +253,16 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
         return types;
     }
 
-    void addComponent(WasmComponent component) {
+    /** The scope this component was written inside; {@code null} at the top of a tree. */
+    ComponentStore lexicalScope() {
+        return lexicalScope;
+    }
+
+    void addComponent(ComponentClosure component) {
         childComponents.add(component);
     }
 
-    WasmComponent getChildComponent(int index) {
+    ComponentClosure getChildComponent(int index) {
         if (index < 0 || index >= childComponents.size()) {
             throw new LinkageException(
                     "Component index "
@@ -266,7 +274,7 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
         return childComponents.get(index);
     }
 
-    List<WasmComponent> getChildComponents() {
+    List<ComponentClosure> getChildComponents() {
         return childComponents;
     }
 

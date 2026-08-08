@@ -21,7 +21,6 @@ import run.endive.cm.types.LabelValType;
 import run.endive.cm.types.OwnType;
 import run.endive.cm.types.PrimValType;
 import run.endive.cm.types.ResourceType;
-import run.endive.cm.types.TupleType;
 import run.endive.cm.types.Type;
 import run.endive.cm.types.ValType;
 import run.endive.cm.types.WasmComponent;
@@ -57,7 +56,6 @@ public final class SpecTestImports {
 
     public static Map<String, Object> build() {
         Map<String, Object> imports = new HashMap<>();
-        imports.put("a", buildA());
         imports.put("host-return-two", buildHostReturnTwo());
         imports.put("foo", buildFoo());
         imports.put("src", buildSrc());
@@ -65,14 +63,6 @@ public final class SpecTestImports {
         imports.put("provider", buildProvider());
         imports.put("host", buildHost());
         return Map.copyOf(imports);
-    }
-
-    private static Type buildA() {
-        return Type.of(
-                TupleType.builder()
-                        .addElementType(ValType.builder().withPrimValType(PrimValType.U32).build())
-                        .addElementType(ValType.builder().withPrimValType(PrimValType.U32).build())
-                        .build());
     }
 
     private static ComponentFunction buildHostReturnTwo() {
@@ -172,11 +162,6 @@ public final class SpecTestImports {
         Type resource2 = hostResourceType();
         types.add(resource2);
 
-        // `return-three` is deliberately not a resource, so that an import declaring it as one
-        // is rejected with "expected resource found func".
-        Type returnThree = Type.of(FuncType.builder().build());
-        types.add(returnThree);
-
         FuncType constructor = func().addParam(param("r", u32())).withResult(ownR1).build();
         FuncType staticAssert =
                 func().addParam(param("r", ownR1)).addParam(param("rep", u32())).build();
@@ -191,7 +176,13 @@ public final class SpecTestImports {
         store.addExport("resource1", resource1);
         store.addExport("resource2", resource2);
         store.addExport("resource1-again", resource1);
-        store.addExport("return-three", returnThree);
+
+        // A function, deliberately not a resource, so that an import declaring it as one is
+        // rejected with "expected resource found func" — and callable, because another test
+        // imports it for what it is and checks that it returns three.
+        store.addExport("return-three", hostFunc(store, u32Getter, args -> new Object[] {3L}));
+        store.addExport("nested", buildNestedHost());
+        store.addExport("simple-module", moduleFromWat(SIMPLE_MODULE_WAT));
 
         store.addExport(
                 "[constructor]resource1",
@@ -229,6 +220,29 @@ public final class SpecTestImports {
 
         return new ComponentInstance(store, definition);
     }
+
+    /**
+     * An instance nested inside {@code host}, so that a component can import an instance that
+     * itself exports one and reach through both to call {@code return-four}.
+     */
+    private static ComponentInstance buildNestedHost() {
+        var definition = WasmComponent.builder().build();
+        var store = new ComponentStore(definition, true);
+        store.addExport(
+                "return-four",
+                hostFunc(store, func().withResult(u32()).build(), args -> new Object[] {4L}));
+        return new ComponentInstance(store, definition);
+    }
+
+    /**
+     * A core module {@code host} hands out whole, for components that instantiate it themselves
+     * rather than calling into it. The two values are what the importing test asserts on.
+     */
+    private static final String SIMPLE_MODULE_WAT =
+            "(module\n"
+                    + "  (func (export \"f\") (result i32) (i32.const 101))\n"
+                    + "  (global (export \"g\") i32 (i32.const 100))\n"
+                    + ")";
 
     /** Drop bookkeeping for {@code resource1}, observable through its static methods. */
     private static final class Resource1State {
