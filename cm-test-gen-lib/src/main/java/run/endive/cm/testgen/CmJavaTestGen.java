@@ -31,6 +31,8 @@ public final class CmJavaTestGen {
 
         cu.addImport("java.io.ByteArrayInputStream");
         cu.addImport("java.io.InputStream");
+        cu.addImport("java.util.LinkedHashMap");
+        cu.addImport("java.util.Map");
         cu.addImport("org.junit.jupiter.api.Disabled");
         cu.addImport("org.junit.jupiter.api.Test");
         cu.addImport("org.junit.jupiter.api.DisplayName");
@@ -62,7 +64,9 @@ public final class CmJavaTestGen {
                                 "class")));
 
         addCurrentInstanceField(classDecl);
+        addRegisteredInstancesField(classDecl);
         addLoadBytesMethod(classDecl, wasmClasspath);
+        addImportsMethod(classDecl);
         addInstantiateMethod(classDecl);
         addCurrentInstanceMethod(classDecl);
 
@@ -106,6 +110,47 @@ public final class CmJavaTestGen {
                                 + " commands after it invoke.");
     }
 
+    /**
+     * The instances a wast script names, which later commands may import.
+     *
+     * <p>Naming a component command — {@code (component $foo ...)} — both instantiates it and
+     * binds the result to that name for the rest of the script, so a later {@code (import "foo"
+     * (instance ...))} resolves to this very instance. That matters beyond convenience: the
+     * importer is type-checked against what the named instance actually exports, and for
+     * resource types it is checked against the identity that instantiation created.
+     */
+    private void addRegisteredInstancesField(
+            com.github.javaparser.ast.body.ClassOrInterfaceDeclaration classDecl) {
+        classDecl
+                .addFieldWithInitializer(
+                        "Map<String, Object>",
+                        "registeredInstances",
+                        com.github.javaparser.StaticJavaParser.parseExpression(
+                                "new LinkedHashMap<>()"),
+                        Modifier.Keyword.PRIVATE,
+                        Modifier.Keyword.STATIC,
+                        Modifier.Keyword.FINAL)
+                .setJavadocComment(
+                        "Instances bound to a name by an earlier command, available to later"
+                                + " commands as imports.");
+    }
+
+    private void addImportsMethod(
+            com.github.javaparser.ast.body.ClassOrInterfaceDeclaration classDecl) {
+        var method =
+                classDecl.addMethod("imports", Modifier.Keyword.PRIVATE, Modifier.Keyword.STATIC);
+        method.setType("Map<String, Object>");
+
+        var body = new BlockStmt();
+        body.addStatement(
+                "Map<String, Object> imports = new LinkedHashMap<>(SpecTestImports.build());");
+        // Anything the script itself defined is the real article, so it wins over the stand-in
+        // the harness supplies for hosts the script expects but does not build.
+        body.addStatement("imports.putAll(registeredInstances);");
+        body.addStatement("return imports;");
+        method.setBody(body);
+    }
+
     private void addInstantiateMethod(
             com.github.javaparser.ast.body.ClassOrInterfaceDeclaration classDecl) {
         var method =
@@ -121,7 +166,7 @@ public final class CmJavaTestGen {
         body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
         body.addStatement("assertNotNull(component);");
         body.addStatement("var linker = ComponentLinker.builder().build();");
-        body.addStatement("return linker.instantiate(component, SpecTestImports.build());");
+        body.addStatement("return linker.instantiate(component, imports());");
         method.setBody(body);
     }
 
@@ -281,7 +326,7 @@ public final class CmJavaTestGen {
         body.addStatement("var linker = ComponentLinker.builder().build();");
         body.addStatement(
                 "var ex = assertThrows(LinkageException.class, () -> linker.instantiate(component,"
-                        + " SpecTestImports.build()));");
+                        + " imports()));");
         body.addStatement(
                 "assertTrue(ex.getMessage().contains(\""
                         + command.text()
@@ -296,7 +341,7 @@ public final class CmJavaTestGen {
             throw new IllegalStateException(
                     "module command at line " + command.line() + " has no filename");
         }
-        generateInstantiation(body, command.filename());
+        generateInstantiation(body, command.filename(), command.name());
     }
 
     /**
@@ -319,15 +364,26 @@ public final class CmJavaTestGen {
                             + command.module()
                             + "', which was not defined earlier in this script");
         }
-        generateInstantiation(body, filename);
+        generateInstantiation(body, filename, command.instance());
     }
 
-    private void generateInstantiation(BlockStmt body, String filename) {
-        // Cleared first so that a failure here leaves no instance current, rather than leaving
-        // the previous command's instance in place for the assertions that follow to invoke.
+    /**
+     * @param name the name this command binds the new instance to, or {@code null} if it is
+     *     anonymous and only becomes current
+     */
+    private void generateInstantiation(BlockStmt body, String filename, String name) {
+        // Cleared first so that a failure here leaves neither an instance current nor a stale
+        // one bound to this name, rather than leaving the previous command's in place for the
+        // commands that follow to pick up.
         body.addStatement("currentInstance = null;");
+        if (name != null) {
+            body.addStatement("registeredInstances.remove(\"" + name + "\");");
+        }
         body.addStatement("currentInstance = instantiate(\"" + filename + "\");");
         body.addStatement("assertNotNull(currentInstance);");
+        if (name != null) {
+            body.addStatement("registeredInstances.put(\"" + name + "\", currentInstance);");
+        }
     }
 
     private void generateModuleDefinitionTest(BlockStmt body, CmCommand command) {

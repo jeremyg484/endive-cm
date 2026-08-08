@@ -304,6 +304,48 @@ public final class ComponentLinker {
         }
     }
 
+    /**
+     * Narrows a supplied import to the sort its declaration calls for.
+     *
+     * <p>Casting straight to the expected type would detect the same mismatch, but only as a
+     * {@link ClassCastException} naming Java classes — which escapes the linker uncaught and
+     * says nothing about which import went wrong. The condition is a linkage failure and reads
+     * as one here.
+     */
+    private static <T> T requireImportSort(
+            Import imp, Object value, Class<T> type, String expectedSort) {
+        if (!type.isInstance(value)) {
+            throw new LinkageException(
+                    "Import \""
+                            + imp.name()
+                            + "\" does not match - expected "
+                            + expectedSort
+                            + " found "
+                            + sortOf(value));
+        }
+        return type.cast(value);
+    }
+
+    /** How the Component Model's linkage diagnostics name the sort of a supplied import. */
+    private static String sortOf(Object value) {
+        if (value instanceof ComponentInstance) {
+            return "instance";
+        }
+        if (value instanceof ComponentFunction) {
+            return "func";
+        }
+        if (value instanceof WasmModule) {
+            return "module";
+        }
+        if (value instanceof WasmComponent) {
+            return "component";
+        }
+        if (value instanceof Type) {
+            return ((Type) value).simpleName();
+        }
+        return value == null ? "nothing" : value.getClass().getSimpleName();
+    }
+
     private void processFunctionImport(ComponentStore store, Import imp) {
         var type = store.getType((int) imp.externDesc().typeIdx());
         if (type.funcType() == null) {
@@ -316,7 +358,9 @@ public final class ComponentLinker {
         }
 
         if (store.hasImport(imp.name())) {
-            var functionImport = (ComponentFunction) store.getImport(imp.name());
+            var functionImport =
+                    requireImportSort(
+                            imp, store.getImport(imp.name()), ComponentFunction.class, "function");
             store.addFunction(functionImport);
         } else {
             throw new LinkageException(
@@ -338,7 +382,9 @@ public final class ComponentLinker {
                             + "'");
         }
         if (store.hasImport(imp.name())) {
-            var componentImport = (WasmComponent) store.getImport(imp.name());
+            var componentImport =
+                    requireImportSort(
+                            imp, store.getImport(imp.name()), WasmComponent.class, "component");
             store.addComponent(componentImport);
         } else {
             throw new LinkageException(
@@ -367,7 +413,9 @@ public final class ComponentLinker {
                             + " with description "
                             + imp.externDesc());
         }
-        var instanceImport = (ComponentInstance) store.getImport(imp.name());
+        var instanceImport =
+                requireImportSort(
+                        imp, store.getImport(imp.name()), ComponentInstance.class, "instance");
         matchInstanceType(store, imp, type.instanceType(), instanceImport);
         store.addChildInstance(instanceImport);
     }
@@ -467,7 +515,10 @@ public final class ComponentLinker {
         Object export = providerStore.getExport(name);
         switch (externDesc.kind()) {
             case CORE_MODULE:
-                requireInstanceExport(export instanceof CoreModuleInstance, imp, name, export);
+                // A core module export is the module itself, not an instance of one --
+                // CoreModuleInstance is what instantiating a module produces, and never
+                // appears among a component's exports.
+                requireInstanceExport(export instanceof WasmModule, imp, name, export);
                 return;
             case COMPONENT:
                 requireInstanceExport(export instanceof WasmComponent, imp, name, export);
@@ -682,7 +733,8 @@ public final class ComponentLinker {
                             + imp.name()
                             + "'");
         }
-        var moduleImport = (WasmModule) store.getImport(imp.name());
+        var moduleImport =
+                requireImportSort(imp, store.getImport(imp.name()), WasmModule.class, "module");
         // Should we use coreType.moduleType() to do a type check here?
         store.addCoreModule(moduleImport);
     }

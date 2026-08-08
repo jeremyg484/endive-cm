@@ -362,7 +362,7 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
 
     Object getImport(String name) {
         if (!imports.containsKey(name)) {
-            throw new LinkageException("Import not found: " + name);
+            throw new LinkageException("Import \"" + name + "\" was not found");
         }
         return imports.get(name);
     }
