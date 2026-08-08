@@ -24,6 +24,7 @@
     <module>parser</module>
     <module>runtime</module>
     <module>types</module>
+    <module>validator</module>
     <module>wasm-tools</module>
   </modules>
 
@@ -122,6 +123,11 @@
       <dependency>
         <groupId>run.endive.cm</groupId>
         <artifactId>types</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>run.endive.cm</groupId>
+        <artifactId>validator</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

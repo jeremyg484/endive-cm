@@ -51,8 +51,8 @@ public final class CmJavaTestGen {
         cu.addImport("run.endive.cm.runtime.ComponentInstance");
         cu.addImport("run.endive.cm.runtime.LinkageException");
         cu.addImport("run.endive.cm.runtime.SpecTestImports");
-        cu.addImport("run.endive.cm.tools.ComponentValidate");
-        cu.addImport("run.endive.cm.tools.ComponentValidateException");
+        cu.addImport("run.endive.cm.validation.ComponentValidationException");
+        cu.addImport("run.endive.cm.validation.ComponentValidator");
 
         var classDecl = cu.addClass(testName, Modifier.Keyword.PUBLIC);
         classDecl.addAnnotation(
@@ -161,7 +161,7 @@ public final class CmJavaTestGen {
 
         var body = new BlockStmt();
         body.addStatement("byte[] bytes = loadBytes(resourcePath);");
-        body.addStatement("ComponentValidate.validate(new ByteArrayInputStream(bytes));");
+        body.addStatement("ComponentValidator.validate(new ByteArrayInputStream(bytes));");
         body.addStatement("var parser = ComponentParser.builder().build();");
         body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
         body.addStatement("assertNotNull(component);");
@@ -319,7 +319,7 @@ public final class CmJavaTestGen {
                     "module command at line " + command.line() + " has no filename");
         }
         body.addStatement("byte[] bytes = loadBytes(\"" + command.filename() + "\");");
-        body.addStatement("ComponentValidate.validate(new ByteArrayInputStream(bytes));");
+        body.addStatement("ComponentValidator.validate(new ByteArrayInputStream(bytes));");
         body.addStatement("var parser = ComponentParser.builder().build();");
         body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
         body.addStatement("assertNotNull(component);");
@@ -392,7 +392,7 @@ public final class CmJavaTestGen {
                     "module command at line " + command.line() + " has no filename");
         }
         body.addStatement("byte[] bytes = loadBytes(\"" + command.filename() + "\");");
-        body.addStatement("ComponentValidate.validate(new ByteArrayInputStream(bytes));");
+        body.addStatement("ComponentValidator.validate(new ByteArrayInputStream(bytes));");
         body.addStatement("var parser = ComponentParser.builder().build();");
         body.addStatement("var component = parser.parse(() -> new ByteArrayInputStream(bytes));");
         body.addStatement("assertNotNull(component);");
@@ -405,8 +405,8 @@ public final class CmJavaTestGen {
         }
         body.addStatement("byte[] bytes = loadBytes(\"" + command.filename() + "\");");
         body.addStatement(
-                "assertThrows(ComponentValidateException.class, () ->"
-                        + " ComponentValidate.validate("
+                "assertThrows(ComponentValidationException.class, () ->"
+                        + " ComponentValidator.validate("
                         + "new ByteArrayInputStream(bytes)));");
     }
 

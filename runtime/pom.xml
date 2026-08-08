@@ -51,6 +51,11 @@
     </dependency>
     <dependency>
       <groupId>run.endive.cm</groupId>
+      <artifactId>validator</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
       <artifactId>wasm-tools</artifactId>
       <scope>test</scope>
     </dependency>

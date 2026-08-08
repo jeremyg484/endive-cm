@@ -1,5 +1,6 @@
 package run.endive.cm.runtime;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -44,6 +45,7 @@ import run.endive.cm.types.ImportSection;
 import run.endive.cm.types.InlineExport;
 import run.endive.cm.types.InlineExportInstanceExpr;
 import run.endive.cm.types.Instance;
+import run.endive.cm.types.InstanceDecl;
 import run.endive.cm.types.InstanceSection;
 import run.endive.cm.types.InstanceType;
 import run.endive.cm.types.InstantiateArg;
@@ -406,18 +408,94 @@ public final class ComponentLinker {
                             + "'");
         }
 
-        if (!store.hasImport(imp.name())) {
+        ComponentInstance instanceImport;
+        if (store.hasImport(imp.name())) {
+            instanceImport =
+                    requireImportSort(
+                            imp, store.getImport(imp.name()), ComponentInstance.class, "instance");
+        } else if (demandsNothing(type.instanceType())) {
+            instanceImport = synthesizeEmptyInstance(store, type.instanceType());
+        } else {
             throw new LinkageException(
                     "Unable to resolve component instance import "
                             + imp.name()
                             + " with description "
                             + imp.externDesc());
         }
-        var instanceImport =
-                requireImportSort(
-                        imp, store.getImport(imp.name()), ComponentInstance.class, "instance");
         matchInstanceType(store, imp, type.instanceType(), instanceImport);
         store.addChildInstance(instanceImport);
+    }
+
+    /**
+     * Whether an instance type asks nothing of whoever supplies it.
+     *
+     * <p>An instance import is a request for something the embedder holds, but an instance type
+     * with no exports describes a value with no observable content — there is nothing a supplier
+     * could put in it and nothing the importer could get out. Requiring one to be passed in
+     * would be ceremony over an empty box, so the Component Model lets it go unsupplied. The
+     * same holds however deeply the emptiness nests: an instance exporting only empty instances
+     * is still empty.
+     *
+     * <p>Declarations that merely <em>define</em> types demand nothing either. It is exports of
+     * any other sort — a function, a module, a type the supplier must choose — that make an
+     * instance something only the embedder can produce.
+     */
+    private static boolean demandsNothing(InstanceType type) {
+        // Only `type` declarations and type-kinded exports occupy this index space, and the
+        // latter are a demand in their own right, so tracking the former alone keeps it aligned.
+        List<Type> localTypes = new ArrayList<>();
+        for (var decl : type.getInstanceDecls()) {
+            switch (decl.kind()) {
+                case CORE_TYPE:
+                    break;
+                case TYPE:
+                    localTypes.add(decl.type());
+                    break;
+                case EXPORT_DECL:
+                    {
+                        var externDesc = decl.exportDecl().externDesc();
+                        if (externDesc.kind() != ExternDesc.Kind.INSTANCE) {
+                            return false;
+                        }
+                        int idx = (int) externDesc.typeIdx();
+                        if (idx < 0 || idx >= localTypes.size()) {
+                            return false;
+                        }
+                        InstanceType nested = localTypes.get(idx).instanceType();
+                        if (nested == null || !demandsNothing(nested)) {
+                            return false;
+                        }
+                        break;
+                    }
+                default:
+                    // An alias reaches outside this declaration for something. Rather than
+                    // guess that it is satisfiable, leave it to the supplier.
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Builds the instance an unsupplied {@link #demandsNothing empty} instance import stands
+     * for, mirroring whatever nesting of empty instances the declaration describes so that
+     * matching it afterwards finds what it expects.
+     */
+    private ComponentInstance synthesizeEmptyInstance(ComponentStore parent, InstanceType type) {
+        var definition = WasmComponent.builder().build();
+        var store = new ComponentStore(definition, false, parent);
+        List<Type> localTypes = new ArrayList<>();
+        for (var decl : type.getInstanceDecls()) {
+            if (decl.kind() == InstanceDecl.Kind.TYPE) {
+                localTypes.add(decl.type());
+            } else if (decl.kind() == InstanceDecl.Kind.EXPORT_DECL) {
+                var exportDecl = decl.exportDecl();
+                InstanceType nested =
+                        localTypes.get((int) exportDecl.externDesc().typeIdx()).instanceType();
+                store.addExport(exportDecl.name(), synthesizeEmptyInstance(store, nested));
+            }
+        }
+        return new ComponentInstance(store, definition);
     }
 
     /**
