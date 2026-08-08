@@ -32,6 +32,7 @@ public final class CmJavaTestGen {
         cu.addImport("java.io.ByteArrayInputStream");
         cu.addImport("java.io.InputStream");
         cu.addImport("java.util.LinkedHashMap");
+        cu.addImport("java.util.List");
         cu.addImport("java.util.Map");
         cu.addImport("org.junit.jupiter.api.Disabled");
         cu.addImport("org.junit.jupiter.api.Test");
@@ -64,6 +65,7 @@ public final class CmJavaTestGen {
                                 "class")));
 
         addCurrentInstanceField(classDecl);
+        addAssertTrapMessageMethod(classDecl);
         addRegisteredInstancesField(classDecl);
         addLoadBytesMethod(classDecl, wasmClasspath);
         addImportsMethod(classDecl);
@@ -108,6 +110,33 @@ public final class CmJavaTestGen {
                 .setJavadocComment(
                         "The instance created by the most recent component command, which the"
                                 + " commands after it invoke.");
+    }
+
+    /**
+     * Checks a trap against the message the script expects.
+     *
+     * <p>The whole cause chain is searched rather than just the top message, because a trap
+     * raised deep in a call is reported through the layers above it — and the spec scripts
+     * quote whichever layer names the cause, not whichever one happens to be outermost.
+     */
+    private void addAssertTrapMessageMethod(
+            com.github.javaparser.ast.body.ClassOrInterfaceDeclaration classDecl) {
+        var method =
+                classDecl.addMethod(
+                        "assertTrapMessage", Modifier.Keyword.PRIVATE, Modifier.Keyword.STATIC);
+        method.addParameter("Throwable", "thrown");
+        method.addParameter("String", "expected");
+
+        var body = new BlockStmt();
+        body.addStatement(
+                com.github.javaparser.StaticJavaParser.parseStatement(
+                        "for (Throwable t = thrown; t != null; t = t.getCause()) { if"
+                                + " (t.getMessage() != null && t.getMessage().contains(expected)) {"
+                                + " return; } }"));
+        body.addStatement(
+                "fail(\"Expected trap message to contain '\" + expected + \"', but was: '\""
+                        + " + thrown.getMessage() + \"'\");");
+        method.setBody(body);
     }
 
     /**
@@ -279,6 +308,11 @@ public final class CmJavaTestGen {
         method.setBody(body);
     }
 
+    /** Escapes a spec-supplied string for embedding in generated Java source. */
+    private static String escape(String text) {
+        return text == null ? "" : text.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
     private void generateUnsupportedTest(BlockStmt body, String failureMessage) {
         body.addStatement("fail(\"" + failureMessage + "\");");
     }
@@ -287,11 +321,12 @@ public final class CmJavaTestGen {
         requireInvokeAction(command);
         body.addStatement("ComponentInstance instance = currentInstance();");
         body.addStatement(
-                "assertThrows(WasmEngineException.class, () -> instance.export(\""
+                "var thrown = assertThrows(WasmEngineException.class, () -> instance.export(\""
                         + command.action().field()
                         + "\").apply("
                         + command.action().emitArgs()
                         + "));");
+        body.addStatement("assertTrapMessage(thrown, \"" + escape(command.text()) + "\");");
     }
 
     private void requireInvokeAction(CmCommand command) {

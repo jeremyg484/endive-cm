@@ -14,7 +14,7 @@ public final class ComponentInstance implements HandleTable {
 
     private final ComponentStore store;
     private final WasmComponent definition;
-    private final Table<Object> handles = new Table<>(new Object());
+    private final Table<Object> handles = new Table<>();
 
     ComponentInstance(ComponentStore store, WasmComponent definition) {
         this.store = store;
@@ -74,8 +74,8 @@ public final class ComponentInstance implements HandleTable {
     }
 
     /**
-     * Index 0 is permanently occupied by a reserved element so that handle indices start at 1
-     * and a zeroed-out {@code i32} never names a live handle.
+     * Index 0 is never handed out, so a zeroed-out {@code i32} names nothing and reads as an
+     * unknown index rather than as some element of the wrong kind.
      *
      * <p>A missing index traps rather than throwing: it is reachable from guest code, which can
      * pass any {@code i32} where a handle is expected.
@@ -86,9 +86,8 @@ public final class ComponentInstance implements HandleTable {
         private final Map<Integer, T> refs = new ConcurrentHashMap<>();
         private final Deque<Integer> freeSlots = new ArrayDeque<>();
 
-        private Table(T reserved) {
-            refs.put(0, reserved);
-        }
+        /** Freed slots are reused before fresh ones, so this only ever grows past reuse. */
+        private int next = 1;
 
         T get(int index) {
             var ref = refs.get(index);
@@ -100,8 +99,8 @@ public final class ComponentInstance implements HandleTable {
 
         int add(T ref) {
             Integer freeSlot = freeSlots.pollFirst();
-            int index = freeSlot != null ? freeSlot : refs.size();
-            if (index != refs.size() && refs.containsKey(index)) {
+            int index = freeSlot != null ? freeSlot : next++;
+            if (refs.containsKey(index)) {
                 throw new IllegalStateException("ref already found at index " + index);
             }
             if (index >= MAX_SIZE) {

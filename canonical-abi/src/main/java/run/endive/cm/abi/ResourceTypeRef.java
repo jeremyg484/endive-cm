@@ -30,6 +30,31 @@ public interface ResourceTypeRef {
     HandleTable impl();
 
     /**
+     * How the spec's diagnostics name this kind of resource type — by who implements it, which
+     * is the only thing distinguishing two otherwise identical resource types to a reader.
+     */
+    default String describe() {
+        return impl() == null ? "host-defined resource" : "guest-defined resource";
+    }
+
+    /**
+     * The clause reporting a handle used against the wrong resource type.
+     *
+     * <p>Two resource types that differ only by identity describe themselves identically, so
+     * saying merely "expected guest-defined resource, found guest-defined resource" would read
+     * as no mismatch at all. Naming the second "a different" one is what makes the report
+     * intelligible.
+     */
+    static String mismatch(ResourceTypeRef expected, ResourceTypeRef found) {
+        String want = expected.describe();
+        if (found == null) {
+            return "expected " + want + " but found a value that is not a resource";
+        }
+        String got = found.describe();
+        return "expected " + want + " but found " + (want.equals(got) ? "a different " : "") + got;
+    }
+
+    /**
      * Resolves the type index carried by an {@code own} or {@code borrow} type against the
      * type index space of the instance doing the lifting or lowering.
      *

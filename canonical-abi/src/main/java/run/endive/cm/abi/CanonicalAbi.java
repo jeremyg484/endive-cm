@@ -689,11 +689,15 @@ public final class CanonicalAbi {
                 Objects.requireNonNull(
                         ctx.realloc(), "storing this value requires a realloc in the context");
         int ptr = realloc.realloc(0, 0, align, size);
-        if (ptr != DefValType.alignTo(ptr, align)) {
-            throw new TrapException("realloc returned unaligned pointer " + ptr);
+        // A realloc result is an i32 address, so it is unsigned: a guest returning -1 to signal
+        // failure means 0xFFFFFFFF, which is past the end of any memory. Reading it as a signed
+        // Java int would put it below zero and slip through the bounds check below.
+        long addr = Integer.toUnsignedLong(ptr);
+        if (addr % align != 0) {
+            throw new TrapException("realloc return: unaligned pointer");
         }
-        if ((long) ptr + size > Memory.bytes(ctx.memory().pages())) {
-            throw new TrapException("realloc returned out-of-bounds pointer " + ptr);
+        if (addr + size > Memory.bytes(ctx.memory().pages())) {
+            throw new TrapException("realloc return: beyond end of memory");
         }
         return ptr;
     }
@@ -1577,7 +1581,10 @@ public final class CanonicalAbi {
     private static void requireResourceType(Handle h, ResourceTypeRef expected, int i) {
         if (h.resourceType() != expected) {
             throw new TrapException(
-                    "handle index " + i + " used with the wrong type, expected " + expected);
+                    "handle index "
+                            + i
+                            + " used with the wrong type, "
+                            + ResourceTypeRef.mismatch(expected, h.resourceType()));
         }
     }
 

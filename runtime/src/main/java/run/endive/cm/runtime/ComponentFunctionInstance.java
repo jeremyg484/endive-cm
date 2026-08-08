@@ -177,6 +177,8 @@ public final class ComponentFunctionInstance implements ComponentFunction {
                     store, EnumHostTypeDescriptor.forClass(hostType), componentType);
         } else if (ResourceHostTypeDescriptor.supports(hostType)) {
             return isTypeCompatible(store, ResourceHostTypeDescriptor.instance(), componentType);
+        } else if (ListHostTypeDescriptor.supports(hostType)) {
+            return isTypeCompatible(store, ListHostTypeDescriptor.instance(), componentType);
         }
         throw new IllegalArgumentException(
                 "host type " + hostType.getName() + " is not yet supported");

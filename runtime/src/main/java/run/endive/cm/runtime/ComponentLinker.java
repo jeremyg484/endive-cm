@@ -1540,10 +1540,8 @@ public final class ComponentLinker {
             throw new TrapException(
                     "handle index "
                             + index
-                            + " used with the wrong type, expected "
-                            + expected
-                            + " but found "
-                            + resourceHandle.resourceType());
+                            + " used with the wrong type, "
+                            + ResourceTypeRef.mismatch(expected, resourceHandle.resourceType()));
         }
         return resourceHandle;
     }

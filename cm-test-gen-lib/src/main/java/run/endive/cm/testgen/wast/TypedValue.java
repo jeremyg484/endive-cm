@@ -53,9 +53,33 @@ public final class TypedValue {
             case "string":
                 return "\"" + value + "\"";
             case "list":
-                return "";
+                return emitList();
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + type);
         }
+    }
+
+    private String emitList() {
+        if (!(value instanceof java.util.List)) {
+            throw new UnsupportedOperationException("list value must be an array, got: " + value);
+        }
+        var elements = (java.util.List<?>) value;
+        var out = new StringBuilder("List.of(");
+        for (int i = 0; i < elements.size(); i++) {
+            if (i > 0) {
+                out.append(", ");
+            }
+            out.append(element(elements.get(i)).emitValue());
+        }
+        return out.append(')').toString();
+    }
+
+    private static TypedValue element(Object element) {
+        if (!(element instanceof java.util.Map)) {
+            throw new UnsupportedOperationException(
+                    "list element must be a typed value, got: " + element);
+        }
+        var map = (java.util.Map<?, ?>) element;
+        return new TypedValue((String) map.get("type"), map.get("value"));
     }
 }
