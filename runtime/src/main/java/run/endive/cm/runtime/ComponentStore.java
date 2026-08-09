@@ -34,6 +34,7 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
     private final List<ComponentFunction> functions = new ArrayList<>();
     private final List<Type> types = new ArrayList<>();
     private final List<ResourceTypeInstance> typeResources = new ArrayList<>();
+    private final List<TypeMatcher.Space> typeOrigins = new ArrayList<>();
     private final List<ComponentClosure> childComponents = new ArrayList<>();
     private final List<ComponentInstance> instances = new ArrayList<>();
     private final Map<String, Object> exports = new LinkedHashMap<>();
@@ -83,9 +84,41 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
     /** This store's type index space and resource identities, for handing to {@link TypeMatcher}. */
     TypeMatcher.Space asMatcherSpace() {
         if (matcherSpace == null) {
-            matcherSpace = TypeMatcher.spaceOf(this, this);
+            matcherSpace = new StoreSpace();
         }
         return matcherSpace;
+    }
+
+    /**
+     * Resolves this store's type indices, handing each type back with the space <em>its</em>
+     * indices count in.
+     *
+     * <p>Usually that is this store, but a type that arrived from somewhere else — imported,
+     * aliased, re-exported — was written against the index space it came from and still means
+     * what it meant there. Following the recorded origin rather than assuming this one is what
+     * lets a record defined in one component be compared against a declaration in another.
+     */
+    private final class StoreSpace implements TypeMatcher.Space {
+
+        @Override
+        public TypeMatcher.Resolved resolve(run.endive.cm.types.ValType valType) {
+            if (valType.primValType() != null) {
+                return new TypeMatcher.Resolved(valType.primValType(), this);
+            }
+            int index = valType.typeIdx();
+            Type type = getType(index);
+            if (type.defValType() == null) {
+                throw new LinkageException(
+                        "Type index " + index + " must resolve to a value type but got " + type);
+            }
+            TypeMatcher.Space origin = typeOrigins.get(index);
+            return new TypeMatcher.Resolved(type.defValType(), origin == null ? this : origin);
+        }
+
+        @Override
+        public ResourceTypeRef resourceType(int typeIdx) {
+            return resourceTypeAt(typeIdx);
+        }
     }
 
     /** The runtime identity of the resource type at {@code typeIdx} in this store's index space. */
@@ -207,7 +240,11 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
     }
 
     void addType(Type type) {
-        addType(type, null);
+        addType(type, null, null);
+    }
+
+    void addType(Type type, ResourceTypeInstance resourceType) {
+        addType(type, resourceType, null);
     }
 
     /**
@@ -215,9 +252,19 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
      * one. Every route a resource type takes into a space — declared here, imported, aliased,
      * re-exported — has to bring its identity along, since that identity is the type.
      */
-    void addType(Type type, ResourceTypeInstance resourceType) {
+    void addType(Type type, ResourceTypeInstance resourceType, TypeMatcher.Space origin) {
         types.add(type);
         typeResources.add(resourceType);
+        typeOrigins.add(origin);
+    }
+
+    /** The space the type at {@code index} resolves in, or {@code null} if it resolves here. */
+    TypeMatcher.Space typeOriginAt(int index) {
+        if (index < 0 || index >= typeOrigins.size()) {
+            throw new LinkageException(
+                    "Type index " + index + " out of bounds (size " + typeOrigins.size() + ")");
+        }
+        return typeOrigins.get(index);
     }
 
     @Override

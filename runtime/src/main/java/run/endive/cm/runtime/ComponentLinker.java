@@ -334,7 +334,24 @@ public final class ComponentLinker {
         if (value instanceof ResourceTypeInstance) {
             return ((ResourceTypeInstance) value).type();
         }
+        if (value instanceof TypeValue) {
+            return ((TypeValue) value).type();
+        }
         return value instanceof Type ? (Type) value : null;
+    }
+
+    /**
+     * The space a type arriving as a value resolves in. A resource type has no indices of its
+     * own to resolve, so only an ordinary type needs to say where it was written.
+     */
+    private static TypeMatcher.Space spaceOf(Object value) {
+        return value instanceof TypeValue ? ((TypeValue) value).space() : null;
+    }
+
+    /** The space the type at {@code index} of {@code store} resolves in. */
+    private static TypeMatcher.Space originOf(ComponentStore store, int index) {
+        TypeMatcher.Space origin = store.typeOriginAt(index);
+        return origin == null ? store.asMatcherSpace() : origin;
     }
 
     /** The resource type a value names, or {@code null} if it names an ordinary type. */
@@ -358,6 +375,9 @@ public final class ComponentLinker {
         }
         if (value instanceof ResourceTypeInstance) {
             return "resource";
+        }
+        if (value instanceof TypeValue) {
+            return ((TypeValue) value).type().simpleName();
         }
         if (value instanceof Type) {
             return ((Type) value).simpleName();
@@ -905,7 +925,9 @@ public final class ComponentLinker {
             if (!store.hasImport(imp.name())) {
                 // An `eq` bound says which type this is, so there is nothing left for anyone
                 // to decide and nothing to supply. The import resolves to the bound itself.
-                store.addType(bound, store.resourceTypeAtOrNull((int) typeBound.typeIdx()));
+                int boundIdx = (int) typeBound.typeIdx();
+                store.addType(
+                        bound, store.resourceTypeAtOrNull(boundIdx), store.typeOriginAt(boundIdx));
                 return;
             }
             // Supplying one anyway is allowed, but then it has to agree.
@@ -918,8 +940,25 @@ public final class ComponentLinker {
                                 + "\" does not match - expected type found "
                                 + sortOf(suppliedValue));
             }
-            if (!TypeMatcher.typesMatch(
-                    store.asMatcherSpace(), bound, store.asMatcherSpace(), supplied)) {
+            // The supplied type was written elsewhere, so its indices count in that space, not
+            // in this one. Comparing both sides against the importer's space would read its
+            // field types against whatever this component happens to have at those indices.
+            TypeMatcher.Space suppliedSpace = spaceOf(suppliedValue);
+            if (suppliedSpace == null) {
+                suppliedSpace = store.asMatcherSpace();
+            }
+            // A resource type is only ever itself: two of them agree when they are the same
+            // runtime type, never because their declarations look alike. Structural comparison
+            // would accept any other `resource (rep i32)` in its place.
+            ResourceTypeInstance boundResource =
+                    store.resourceTypeAtOrNull((int) typeBound.typeIdx());
+            ResourceTypeInstance suppliedResource = resourceOf(suppliedValue);
+            if (boundResource != null || suppliedResource != null) {
+                if (boundResource != suppliedResource) {
+                    throw new LinkageException("mismatched resource types");
+                }
+            } else if (!TypeMatcher.typesMatch(
+                    store.asMatcherSpace(), bound, suppliedSpace, supplied)) {
                 throw new LinkageException(
                         "Type eq bound check failed on import '"
                                 + imp.name()
@@ -928,7 +967,7 @@ public final class ComponentLinker {
                                 + ", got "
                                 + supplied);
             }
-            store.addType(supplied, resourceOf(suppliedValue));
+            store.addType(supplied, resourceOf(suppliedValue), spaceOf(suppliedValue));
         } else if (typeBound.kind() == TypeBound.Kind.SUB_RESOURCE) {
             var importValue = store.getImport(imp.name());
             ResourceTypeInstance resourceType = resourceOf(importValue);
@@ -1041,7 +1080,9 @@ public final class ComponentLinker {
                         ResourceTypeInstance resourceType = store.resourceTypeAtOrNull(idx);
                         imports.put(
                                 arg.name(),
-                                resourceType != null ? resourceType : store.getType(idx));
+                                resourceType != null
+                                        ? resourceType
+                                        : new TypeValue(store.getType(idx), originOf(store, idx)));
                         break;
                     }
                 case INSTANCE:
@@ -1305,7 +1346,8 @@ public final class ComponentLinker {
             case TYPE:
                 {
                     Object exported = linkedStore.getExport(alias.name());
-                    store.addType(typeOf(exported), resourceOf(exported));
+                    store.addType(
+                            typeOf(exported), resourceOf(exported), linkedStore.asMatcherSpace());
                     break;
                 }
             case VALUE:
@@ -1414,7 +1456,8 @@ public final class ComponentLinker {
             case TYPE:
                 store.addType(
                         containingStore.getType((int) alias.index()),
-                        containingStore.resourceTypeAtOrNull((int) alias.index()));
+                        containingStore.resourceTypeAtOrNull((int) alias.index()),
+                        originOf(containingStore, (int) alias.index()));
                 break;
             default:
                 throw new UnsupportedOperationException(
@@ -1834,7 +1877,7 @@ public final class ComponentLinker {
                     {
                         Type type = store.getType(idx);
                         ResourceTypeInstance resourceType = store.resourceTypeAtOrNull(idx);
-                        store.addType(type, resourceType);
+                        store.addType(type, resourceType, store.typeOriginAt(idx));
                         store.addExport(name, resourceType != null ? resourceType : type);
                         break;
                     }

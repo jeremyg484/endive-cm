@@ -1,7 +1,6 @@
 package run.endive.cm.runtime;
 
 import java.util.List;
-import java.util.Objects;
 import run.endive.cm.abi.ResourceTypeRef;
 import run.endive.cm.types.BorrowType;
 import run.endive.cm.types.Case;
@@ -20,7 +19,6 @@ import run.endive.cm.types.ResultType;
 import run.endive.cm.types.StreamType;
 import run.endive.cm.types.TupleType;
 import run.endive.cm.types.Type;
-import run.endive.cm.types.TypeResolver;
 import run.endive.cm.types.ValType;
 import run.endive.cm.types.VariantType;
 
@@ -78,23 +76,6 @@ final class TypeMatcher {
         Space space() {
             return space;
         }
-    }
-
-    /** A space whose types all resolve within it — a component instance's own index space. */
-    static Space spaceOf(TypeResolver types, ResourceTypeRef.Resolver resourceTypes) {
-        Objects.requireNonNull(types, "types");
-        Objects.requireNonNull(resourceTypes, "resourceTypes");
-        return new Space() {
-            @Override
-            public Resolved resolve(ValType valType) {
-                return new Resolved(types.resolveDefValType(valType), this);
-            }
-
-            @Override
-            public ResourceTypeRef resourceType(int typeIdx) {
-                return resourceTypes.resolveResourceType(typeIdx);
-            }
-        };
     }
 
     /**
