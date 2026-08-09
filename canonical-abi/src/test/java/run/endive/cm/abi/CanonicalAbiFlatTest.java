@@ -61,8 +61,9 @@ class CanonicalAbiFlatTest {
     }
 
     private static Object roundTrip(LiftLowerContext ctx, Object v, DefValType t) {
-        long[] flat = CanonicalAbi.lowerFlat(ctx, v, t);
-        return CanonicalAbi.liftFlat(ctx, new CanonicalAbi.CoreValues(flat), t);
+        var grounded = ctx.ground(t);
+        long[] flat = CanonicalAbi.lowerFlat(ctx, v, grounded);
+        return CanonicalAbi.liftFlat(ctx, new CanonicalAbi.CoreValues(flat), grounded);
     }
 
     @Test
@@ -242,7 +243,7 @@ class CanonicalAbiFlatTest {
                                         .withValType(prim(PrimValType.F64))
                                         .build())
                         .build();
-        assertThat(variant.flatten(STUB_RESOLVER, PointerType.I32))
+        assertThat(ctx.ground(variant).flatten(PointerType.I32))
                 .containsExactly(CORE_I32, CORE_I64);
 
         assertThat(roundTrip(ctx, VariantValue.of("a", 4_000_000_000L), variant))
@@ -263,7 +264,8 @@ class CanonicalAbiFlatTest {
                                         .withValType(prim(PrimValType.U32))
                                         .build())
                         .build();
-        long[] lowered = CanonicalAbi.lowerFlat(ctx, VariantValue.of("none", null), variant);
+        long[] lowered =
+                CanonicalAbi.lowerFlat(ctx, VariantValue.of("none", null), ctx.ground(variant));
         assertThat(lowered).containsExactly(0L, 0L);
 
         assertThat(roundTrip(ctx, VariantValue.of("none", null), variant))

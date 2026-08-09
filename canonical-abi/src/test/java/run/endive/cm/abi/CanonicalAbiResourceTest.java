@@ -12,8 +12,10 @@ import run.endive.cm.types.BorrowType;
 import run.endive.cm.types.DefValType;
 import run.endive.cm.types.OwnType;
 import run.endive.cm.types.PointerType;
+import run.endive.cm.types.ResolvedType;
 import run.endive.cm.types.Type;
 import run.endive.cm.types.TypeResolver;
+import run.endive.cm.types.TypeSpace;
 import run.endive.cm.types.ValType;
 import run.endive.runtime.ByteArrayMemory;
 import run.endive.runtime.TrapException;
@@ -214,12 +216,13 @@ class CanonicalAbiResourceTest {
         // A handle index means something only relative to one instance's table, so no byte copy
         // can carry it: canTransfer has to reject these and fall back to lift/lower.
         var f = new Fixture();
-        assertThat(Transferability.isSupported(f.types, f.ownType)).isFalse();
-        assertThat(Transferability.isSupported(f.types, f.borrowType)).isFalse();
-        assertThat(Transferability.isBitwiseCopyable(f.types, PointerType.I32, f.ownType))
-                .isFalse();
-        assertThat(Transferability.isFlatIdentity(f.types, PointerType.I32, f.borrowType))
-                .isFalse();
+        var space = TypeSpace.of(f.types);
+        var own = ResolvedType.of(f.ownType, space);
+        var borrow = ResolvedType.of(f.borrowType, space);
+        assertThat(Transferability.isSupported(own)).isFalse();
+        assertThat(Transferability.isSupported(borrow)).isFalse();
+        assertThat(Transferability.isBitwiseCopyable(PointerType.I32, own)).isFalse();
+        assertThat(Transferability.isFlatIdentity(PointerType.I32, borrow)).isFalse();
     }
 
     @Test

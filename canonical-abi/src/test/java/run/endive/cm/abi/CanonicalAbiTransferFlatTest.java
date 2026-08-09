@@ -300,7 +300,7 @@ class CanonicalAbiTransferFlatTest {
         counting.resetCounts();
         CanonicalAbi.transfer(src, dst, 0, 0, t);
 
-        int elementSize = types.resolveDefValType(elementType).elementSize(types, PointerType.I32);
+        int elementSize = src.ground(elementType).elementSize(PointerType.I32);
         int expectedChunks = Math.max(1, (length * elementSize + 65535) / 65536);
         assertThat(counting.bulkWrites())
                 .as("payload copied in bulk, not per element")

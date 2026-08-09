@@ -27,7 +27,9 @@ import run.endive.cm.types.ListType;
 import run.endive.cm.types.PointerType;
 import run.endive.cm.types.PrimValType;
 import run.endive.cm.types.RecordType;
+import run.endive.cm.types.ResolvedType;
 import run.endive.cm.types.TupleType;
+import run.endive.cm.types.TypeSpace;
 import run.endive.cm.types.VariantType;
 import run.endive.runtime.TrapException;
 
@@ -411,7 +413,7 @@ class CanonicalAbiTransferTest {
                         .addField(field("c", prim(PrimValType.S16)))
                         .build();
 
-        var plan = TransferPlan.compile(types, PointerType.I32, t);
+        var plan = TransferPlan.compile(PointerType.I32, ResolvedType.of(t, TypeSpace.of(types)));
 
         assertThat(plan.stepCount())
                 .as("three integer fields and their padding should collapse to one copy")
@@ -429,7 +431,7 @@ class CanonicalAbiTransferTest {
                         .addField(field("c", prim(PrimValType.U32)))
                         .build();
 
-        var plan = TransferPlan.compile(types, PointerType.I32, t);
+        var plan = TransferPlan.compile(PointerType.I32, ResolvedType.of(t, TypeSpace.of(types)));
 
         // a+b coalesce, the string is its own step, then c.
         assertThat(plan.stepCount()).isEqualTo(3);

@@ -16,20 +16,14 @@ import java.util.Objects;
 import java.util.function.Predicate;
 import run.endive.cm.types.BorrowType;
 import run.endive.cm.types.DefValType;
-import run.endive.cm.types.FlagsType;
 import run.endive.cm.types.FuncType;
-import run.endive.cm.types.FutureType;
 import run.endive.cm.types.LabelValType;
-import run.endive.cm.types.ListType;
-import run.endive.cm.types.MapType;
 import run.endive.cm.types.OwnType;
 import run.endive.cm.types.PointerType;
-import run.endive.cm.types.RecordType;
-import run.endive.cm.types.Specialized;
-import run.endive.cm.types.StreamType;
+import run.endive.cm.types.ResolvedType;
 import run.endive.cm.types.TupleType;
 import run.endive.cm.types.TypeResolver;
-import run.endive.cm.types.VariantType;
+import run.endive.cm.types.TypeSpace;
 import run.endive.runtime.Memory;
 import run.endive.runtime.TrapException;
 import run.endive.runtime.WasmRuntimeException;
@@ -62,92 +56,54 @@ public final class CanonicalAbi {
 
     private CanonicalAbi() {}
 
-    public static DefValType despecialize(DefValType t) {
-        if (t instanceof Specialized<?>) {
-            return ((Specialized<?>) t).despecialize();
-        }
-        return t;
-    }
-
     public static boolean containsBorrow(TypeResolver typeResolver, DefValType t) {
-        return contains(typeResolver, t, u -> u.kind() == DefValType.Kind.BORROW);
+        return contains(
+                ResolvedType.of(t, TypeSpace.of(typeResolver)),
+                u -> u.kind() == DefValType.Kind.BORROW);
     }
 
     public static boolean containsAsyncValue(TypeResolver typeResolver, DefValType t) {
         return contains(
-                typeResolver,
-                t,
+                ResolvedType.of(t, TypeSpace.of(typeResolver)),
                 u -> u.kind() == DefValType.Kind.STREAM || u.kind() == DefValType.Kind.FUTURE);
     }
 
-    public static boolean contains(
-            TypeResolver typeResolver, DefValType t, Predicate<DefValType> p) {
+    /**
+     * Whether {@code p} holds of {@code t} or of any type reachable from it.
+     *
+     * <p>A despecialized {@code map} is reached through its entry record rather than through
+     * the entry's fields directly, so {@code p} additionally sees that record. No predicate
+     * used here can hold of a record that does not already hold of one of its fields.
+     */
+    public static boolean contains(ResolvedType t, Predicate<ResolvedType> p) {
         if (t == null) {
             return false;
         }
-        var d = despecialize(t);
-        switch (d.kind()) {
+        if (p.test(t)) {
+            return true;
+        }
+        switch (t.kind()) {
             case LIST:
-                if (d instanceof ListType) {
-                    var list = (ListType) d;
-                    return p.test(d)
-                            || contains(
-                                    typeResolver,
-                                    typeResolver.resolveDefValType(list.elementType()),
-                                    p);
-                } else if (d instanceof MapType.DespecializedMapType) {
-                    var record = ((MapType.DespecializedMapType) d).recordType();
-                    return p.test(d)
-                            || record.fields().stream()
-                                    .anyMatch(
-                                            f ->
-                                                    contains(
-                                                            typeResolver,
-                                                            typeResolver.resolveDefValType(
-                                                                    f.valType()),
-                                                            p));
-                }
-                throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+            case SIZED_LIST:
             case STREAM:
-                var stream = (StreamType) d;
-                return p.test(d)
-                        || (stream.hasElementType()
-                                && contains(
-                                        typeResolver,
-                                        typeResolver.resolveDefValType(stream.elementType()),
-                                        p));
             case FUTURE:
-                var future = (FutureType) d;
-                return p.test(d)
-                        || (future.hasElementType()
-                                && contains(
-                                        typeResolver,
-                                        typeResolver.resolveDefValType(future.elementType()),
-                                        p));
+                return contains(t.element(), p);
             case RECORD:
-                var record = (RecordType) d;
-                return p.test(d)
-                        || record.fields().stream()
-                                .anyMatch(
-                                        f ->
-                                                contains(
-                                                        typeResolver,
-                                                        typeResolver.resolveDefValType(f.valType()),
-                                                        p));
+                for (ResolvedType.Field f : t.fields()) {
+                    if (contains(f.type(), p)) {
+                        return true;
+                    }
+                }
+                return false;
             case VARIANT:
-                var variant = (VariantType) d;
-                return p.test(d)
-                        || variant.cases().stream()
-                                .anyMatch(
-                                        c ->
-                                                c.hasValType()
-                                                        && contains(
-                                                                typeResolver,
-                                                                typeResolver.resolveDefValType(
-                                                                        c.valType()),
-                                                                p));
+                for (ResolvedType.Case c : t.cases()) {
+                    if (c.hasType() && contains(c.type(), p)) {
+                        return true;
+                    }
+                }
+                return false;
             default:
-                return p.test(d);
+                return false;
         }
     }
 
@@ -165,10 +121,8 @@ public final class CanonicalAbi {
         // lifting unless we need
         // to validate that the signature of the actual core function being lifted matches the
         // expected ABI signature
-        List<ValType> flatParams =
-                new ArrayList<>(flattenParams(ctx.typeResolver(), ctx.ptrType(), ft));
-        List<ValType> flatResults =
-                new ArrayList<>(flattenResult(ctx.typeResolver(), ctx.ptrType(), ft));
+        List<ValType> flatParams = new ArrayList<>(flattenParams(ctx, ft));
+        List<ValType> flatResults = new ArrayList<>(flattenResult(ctx, ft));
         if (!ctx.isAsync()) {
             if (flatParams.size() > MAX_FLAT_PARAMS) {
                 flatParams = new ArrayList<>(List.of(ctx.ptrType().coreValType()));
@@ -210,31 +164,26 @@ public final class CanonicalAbi {
         return FunctionType.of(flatParams, flatResults);
     }
 
-    private static List<ValType> flattenParams(
-            TypeResolver typeResolver, PointerType ptrType, FuncType ft) {
+    private static List<ValType> flattenParams(LiftLowerContext ctx, FuncType ft) {
         List<ValType> flat = new ArrayList<>();
         for (LabelValType p : ft.params()) {
-            flat.addAll(typeResolver.resolveDefValType(p.valType()).flatten(typeResolver, ptrType));
+            flat.addAll(ctx.ground(p.valType()).flatten(ctx.ptrType()));
         }
         return flat;
     }
 
-    private static List<ValType> flattenResult(
-            TypeResolver typeResolver, PointerType ptrType, FuncType ft) {
+    private static List<ValType> flattenResult(LiftLowerContext ctx, FuncType ft) {
         if (!ft.hasResult()) {
             return List.of();
         }
-        return typeResolver.resolveDefValType(ft.result()).flatten(typeResolver, ptrType);
+        return ctx.ground(ft.result()).flatten(ctx.ptrType());
     }
 
     /** Flattens each of {@code ts} in turn and concatenates the results ({@code flatten_types}). */
     static List<ValType> flattenTypes(LiftLowerContext ctx, List<run.endive.cm.types.ValType> ts) {
         List<ValType> flat = new ArrayList<>();
         for (run.endive.cm.types.ValType t : ts) {
-            flat.addAll(
-                    ctx.typeResolver()
-                            .resolveDefValType(t)
-                            .flatten(ctx.typeResolver(), ctx.ptrType()));
+            flat.addAll(ctx.ground(t).flatten(ctx.ptrType()));
         }
         return flat;
     }
@@ -244,6 +193,13 @@ public final class CanonicalAbi {
      * the type used to load/store a whole parameter or result list from a single spill
      * buffer when it is too large to pass as flat core values.
      */
+    static ResolvedType groundedTupleOf(
+            LiftLowerContext ctx, List<run.endive.cm.types.ValType> ts) {
+        // Not routed through ctx.ground: the tuple is built fresh on every call, so caching it
+        // by node identity would grow the context's cache without ever hitting.
+        return ResolvedType.of(tupleTypeOf(ts), ctx.typeSpace());
+    }
+
     static TupleType tupleTypeOf(List<run.endive.cm.types.ValType> ts) {
         var builder = TupleType.builder();
         for (run.endive.cm.types.ValType t : ts) {
@@ -253,26 +209,29 @@ public final class CanonicalAbi {
     }
 
     public static Object load(LiftLowerContext ctx, int ptr, DefValType t) {
-        var d = despecialize(t);
-        switch (d.kind()) {
+        return load(ctx, ptr, ctx.ground(t));
+    }
+
+    public static Object load(LiftLowerContext ctx, int ptr, ResolvedType t) {
+        switch (t.kind()) {
             case BOOL:
                 return convertIntToBool(loadInt(ctx.memory(), ptr, 1, false));
             case U8:
-                return boxUnsigned(d.kind(), loadInt(ctx.memory(), ptr, 1, false));
+                return boxUnsigned(t.kind(), loadInt(ctx.memory(), ptr, 1, false));
             case U16:
-                return boxUnsigned(d.kind(), loadInt(ctx.memory(), ptr, 2, false));
+                return boxUnsigned(t.kind(), loadInt(ctx.memory(), ptr, 2, false));
             case U32:
-                return boxUnsigned(d.kind(), loadInt(ctx.memory(), ptr, 4, false));
+                return boxUnsigned(t.kind(), loadInt(ctx.memory(), ptr, 4, false));
             case U64:
-                return boxUnsigned(d.kind(), loadInt(ctx.memory(), ptr, 8, false));
+                return boxUnsigned(t.kind(), loadInt(ctx.memory(), ptr, 8, false));
             case S8:
-                return boxSigned(d.kind(), loadInt(ctx.memory(), ptr, 1, true));
+                return boxSigned(t.kind(), loadInt(ctx.memory(), ptr, 1, true));
             case S16:
-                return boxSigned(d.kind(), loadInt(ctx.memory(), ptr, 2, true));
+                return boxSigned(t.kind(), loadInt(ctx.memory(), ptr, 2, true));
             case S32:
-                return boxSigned(d.kind(), loadInt(ctx.memory(), ptr, 4, true));
+                return boxSigned(t.kind(), loadInt(ctx.memory(), ptr, 4, true));
             case S64:
-                return boxSigned(d.kind(), loadInt(ctx.memory(), ptr, 8, true));
+                return boxSigned(t.kind(), loadInt(ctx.memory(), ptr, 8, true));
             case F32:
                 return canonicalizeNan32(ctx.memory().readFloat(ptr));
             case F64:
@@ -282,24 +241,25 @@ public final class CanonicalAbi {
             case STRING:
                 return loadString(ctx, ptr);
             case LIST:
-                return loadList(ctx, ptr, d);
+                return loadList(ctx, ptr, t);
             case RECORD:
-                return loadRecord(ctx, ptr, (RecordType) d);
+                return loadRecord(ctx, ptr, t);
             case VARIANT:
-                return loadVariant(ctx, ptr, (VariantType) d);
+                return loadVariant(ctx, ptr, t);
             case FLAGS:
-                return loadFlags(ctx, ptr, (FlagsType) d);
+                return loadFlags(ctx, ptr, t);
             case OWN:
-                return liftOwn(ctx, (int) loadInt(ctx.memory(), ptr, 4, false), (OwnType) d);
+                return liftOwn(ctx, (int) loadInt(ctx.memory(), ptr, 4, false), (OwnType) t.node());
             case BORROW:
-                return liftBorrow(ctx, (int) loadInt(ctx.memory(), ptr, 4, false), (BorrowType) d);
+                return liftBorrow(
+                        ctx, (int) loadInt(ctx.memory(), ptr, 4, false), (BorrowType) t.node());
             case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "loading " + d.kind() + " values is not implemented yet");
+                        "loading " + t.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + d.kind());
+                throw new IllegalStateException("unhandled kind " + t.kind());
         }
     }
 
@@ -340,23 +300,15 @@ public final class CanonicalAbi {
         return (int) i;
     }
 
-    private static List<Object> loadList(LiftLowerContext ctx, int ptr, DefValType d) {
-        if (d instanceof ListType) {
-            var t = (ListType) d;
-            var elemType = ctx.typeResolver().resolveDefValType(t.elementType());
-            if (t.isFixedSize()) {
-                return loadListElements(ctx, ptr, t.size(), elemType);
-            }
-            return loadUnboundedList(ctx, ptr, elemType);
+    private static List<Object> loadList(LiftLowerContext ctx, int ptr, ResolvedType t) {
+        if (t.isFixedSizeList()) {
+            return loadListElements(ctx, ptr, t.fixedSize(), t.element());
         }
-        if (d instanceof MapType.DespecializedMapType) {
-            return loadUnboundedList(ctx, ptr, ((MapType.DespecializedMapType) d).recordType());
-        }
-        throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+        return loadUnboundedList(ctx, ptr, t.element());
     }
 
     private static List<Object> loadUnboundedList(
-            LiftLowerContext ctx, int ptr, DefValType elemType) {
+            LiftLowerContext ctx, int ptr, ResolvedType elemType) {
         int ptrSize = ctx.ptrType().size();
         int begin = (int) loadInt(ctx.memory(), ptr, ptrSize, false);
         int length = (int) loadInt(ctx.memory(), ptr + ptrSize, ptrSize, false);
@@ -364,9 +316,9 @@ public final class CanonicalAbi {
     }
 
     private static List<Object> loadListFromRange(
-            LiftLowerContext ctx, int ptr, int length, DefValType elemType) {
-        int elemSize = elemType.elementSize(ctx.typeResolver(), ctx.ptrType());
-        int elemAlignment = elemType.alignment(ctx.typeResolver(), ctx.ptrType());
+            LiftLowerContext ctx, int ptr, int length, ResolvedType elemType) {
+        int elemSize = elemType.elementSize(ctx.ptrType());
+        int elemAlignment = elemType.alignment(ctx.ptrType());
         if ((long) length * elemSize > MAX_LIST_BYTE_LENGTH) {
             throw new TrapException(
                     "list byte length exceeds the maximum of " + MAX_LIST_BYTE_LENGTH);
@@ -382,8 +334,8 @@ public final class CanonicalAbi {
     }
 
     private static List<Object> loadListElements(
-            LiftLowerContext ctx, int ptr, int length, DefValType elemType) {
-        int elemSize = elemType.elementSize(ctx.typeResolver(), ctx.ptrType());
+            LiftLowerContext ctx, int ptr, int length, ResolvedType elemType) {
+        int elemSize = elemType.elementSize(ctx.ptrType());
         List<Object> result = new ArrayList<>(length);
         for (int i = 0; i < length; i++) {
             result.add(load(ctx, ptr + i * elemSize, elemType));
@@ -391,40 +343,34 @@ public final class CanonicalAbi {
         return result;
     }
 
-    private static Map<String, Object> loadRecord(LiftLowerContext ctx, int ptr, RecordType t) {
+    private static Map<String, Object> loadRecord(LiftLowerContext ctx, int ptr, ResolvedType t) {
         Map<String, Object> record = new LinkedHashMap<>();
         int p = ptr;
-        for (LabelValType f : t.fields()) {
-            var fieldType = ctx.typeResolver().resolveDefValType(f.valType());
-            p = DefValType.alignTo(p, fieldType.alignment(ctx.typeResolver(), ctx.ptrType()));
-            record.put(f.label(), load(ctx, p, fieldType));
-            p += fieldType.elementSize(ctx.typeResolver(), ctx.ptrType());
+        for (ResolvedType.Field f : t.fields()) {
+            p = DefValType.alignTo(p, f.type().alignment(ctx.ptrType()));
+            record.put(f.label(), load(ctx, p, f.type()));
+            p += f.type().elementSize(ctx.ptrType());
         }
         return record;
     }
 
-    private static VariantValue loadVariant(LiftLowerContext ctx, int ptr, VariantType t) {
+    private static VariantValue loadVariant(LiftLowerContext ctx, int ptr, ResolvedType t) {
         var cases = t.cases();
-        int discSize = t.discriminantType().elementSize(ctx.typeResolver(), ctx.ptrType());
+        int discSize = t.discriminantSize();
         long caseIndex = loadInt(ctx.memory(), ptr, discSize, false);
         if (caseIndex >= cases.size()) {
             throw new TrapException("invalid variant discriminant");
         }
         var c = cases.get((int) caseIndex);
-        int payloadPtr =
-                DefValType.alignTo(
-                        ptr + discSize, t.maxCaseAlignment(ctx.typeResolver(), ctx.ptrType()));
-        if (!c.hasValType()) {
+        int payloadPtr = DefValType.alignTo(ptr + discSize, t.maxCaseAlignment(ctx.ptrType()));
+        if (!c.hasType()) {
             return VariantValue.of(c.label(), null);
         }
-        return VariantValue.of(
-                c.label(),
-                load(ctx, payloadPtr, ctx.typeResolver().resolveDefValType(c.valType())));
+        return VariantValue.of(c.label(), load(ctx, payloadPtr, c.type()));
     }
 
-    private static Map<String, Boolean> loadFlags(LiftLowerContext ctx, int ptr, FlagsType t) {
-        long i =
-                loadInt(ctx.memory(), ptr, t.elementSize(ctx.typeResolver(), ctx.ptrType()), false);
+    private static Map<String, Boolean> loadFlags(LiftLowerContext ctx, int ptr, ResolvedType t) {
+        long i = loadInt(ctx.memory(), ptr, t.elementSize(ctx.ptrType()), false);
         return unpackFlagsFromInt(i, t.labels());
     }
 
@@ -540,8 +486,11 @@ public final class CanonicalAbi {
     }
 
     public static void store(LiftLowerContext ctx, Object v, DefValType t, int ptr) {
-        var d = despecialize(t);
-        switch (d.kind()) {
+        store(ctx, v, ctx.ground(t), ptr);
+    }
+
+    public static void store(LiftLowerContext ctx, Object v, ResolvedType t, int ptr) {
+        switch (t.kind()) {
             case BOOL:
                 storeInt(ctx.memory(), (Boolean) v ? 1 : 0, ptr, 1);
                 return;
@@ -553,7 +502,7 @@ public final class CanonicalAbi {
             case S16:
             case S32:
             case S64:
-                storeInt(ctx.memory(), ((Number) v).longValue(), ptr, elemSizeForIntKind(d.kind()));
+                storeInt(ctx.memory(), ((Number) v).longValue(), ptr, elemSizeForIntKind(t.kind()));
                 return;
             case F32:
                 ctx.memory().writeF32(ptr, canonicalizeNan32(((Number) v).floatValue()));
@@ -568,30 +517,35 @@ public final class CanonicalAbi {
                 storeString(ctx, (String) v, ptr);
                 return;
             case LIST:
-                storeList(ctx, (List<?>) v, ptr, d);
+                storeList(ctx, (List<?>) v, ptr, t);
                 return;
             case RECORD:
-                storeRecord(ctx, (Map<?, ?>) v, ptr, (RecordType) d);
+                storeRecord(ctx, (Map<?, ?>) v, ptr, t);
                 return;
             case VARIANT:
-                storeVariant(ctx, (VariantValue) v, ptr, (VariantType) d);
+                storeVariant(ctx, (VariantValue) v, ptr, t);
                 return;
             case FLAGS:
-                storeFlags(ctx, (Map<?, ?>) v, ptr, (FlagsType) d);
+                storeFlags(ctx, (Map<?, ?>) v, ptr, t);
                 return;
             case OWN:
-                storeInt(ctx.memory(), lowerOwn(ctx, (ResourceValue) v, (OwnType) d), ptr, 4);
+                storeInt(
+                        ctx.memory(), lowerOwn(ctx, (ResourceValue) v, (OwnType) t.node()), ptr, 4);
                 return;
             case BORROW:
-                storeInt(ctx.memory(), lowerBorrow(ctx, (ResourceValue) v, (BorrowType) d), ptr, 4);
+                storeInt(
+                        ctx.memory(),
+                        lowerBorrow(ctx, (ResourceValue) v, (BorrowType) t.node()),
+                        ptr,
+                        4);
                 return;
             case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "storing " + d.kind() + " values is not implemented yet");
+                        "storing " + t.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + d.kind());
+                throw new IllegalStateException("unhandled kind " + t.kind());
         }
     }
 
@@ -633,47 +587,37 @@ public final class CanonicalAbi {
         }
     }
 
-    private static void storeList(LiftLowerContext ctx, List<?> v, int ptr, DefValType d) {
-        if (d instanceof ListType) {
-            var t = (ListType) d;
-            var elemType = ctx.typeResolver().resolveDefValType(t.elementType());
-            if (t.isFixedSize()) {
-                if (v.size() != t.size()) {
-                    throw new IllegalArgumentException(
-                            "expected "
-                                    + t.size()
-                                    + " elements for fixed-size list, got "
-                                    + v.size());
-                }
-                storeListElements(ctx, v, ptr, elemType);
-                return;
+    private static void storeList(LiftLowerContext ctx, List<?> v, int ptr, ResolvedType t) {
+        if (t.isFixedSizeList()) {
+            if (v.size() != t.fixedSize()) {
+                throw new IllegalArgumentException(
+                        "expected "
+                                + t.fixedSize()
+                                + " elements for fixed-size list, got "
+                                + v.size());
             }
-            storeUnboundedList(ctx, v, ptr, elemType);
+            storeListElements(ctx, v, ptr, t.element());
             return;
         }
-        if (d instanceof MapType.DespecializedMapType) {
-            storeUnboundedList(ctx, v, ptr, ((MapType.DespecializedMapType) d).recordType());
-            return;
-        }
-        throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+        storeUnboundedList(ctx, v, ptr, t.element());
     }
 
     private static void storeUnboundedList(
-            LiftLowerContext ctx, List<?> v, int ptr, DefValType elemType) {
+            LiftLowerContext ctx, List<?> v, int ptr, ResolvedType elemType) {
         int begin = storeListIntoRange(ctx, v, elemType);
         int ptrSize = ctx.ptrType().size();
         storeInt(ctx.memory(), begin, ptr, ptrSize);
         storeInt(ctx.memory(), v.size(), ptr + ptrSize, ptrSize);
     }
 
-    private static int storeListIntoRange(LiftLowerContext ctx, List<?> v, DefValType elemType) {
-        int elemSize = elemType.elementSize(ctx.typeResolver(), ctx.ptrType());
+    private static int storeListIntoRange(LiftLowerContext ctx, List<?> v, ResolvedType elemType) {
+        int elemSize = elemType.elementSize(ctx.ptrType());
         long byteLength = (long) v.size() * elemSize;
         if (byteLength > MAX_LIST_BYTE_LENGTH) {
             throw new TrapException(
                     "list byte length exceeds the maximum of " + MAX_LIST_BYTE_LENGTH);
         }
-        int align = elemType.alignment(ctx.typeResolver(), ctx.ptrType());
+        int align = elemType.alignment(ctx.ptrType());
         int ptr = allocate(ctx, align, (int) byteLength);
         storeListElements(ctx, v, ptr, elemType);
         return ptr;
@@ -703,8 +647,8 @@ public final class CanonicalAbi {
     }
 
     private static void storeListElements(
-            LiftLowerContext ctx, List<?> v, int ptr, DefValType elemType) {
-        int elemSize = elemType.elementSize(ctx.typeResolver(), ctx.ptrType());
+            LiftLowerContext ctx, List<?> v, int ptr, ResolvedType elemType) {
+        int elemSize = elemType.elementSize(ctx.ptrType());
         int i = 0;
         for (Object e : v) {
             store(ctx, e, elemType, ptr + i * elemSize);
@@ -712,17 +656,17 @@ public final class CanonicalAbi {
         }
     }
 
-    private static void storeRecord(LiftLowerContext ctx, Map<?, ?> v, int ptr, RecordType t) {
+    private static void storeRecord(LiftLowerContext ctx, Map<?, ?> v, int ptr, ResolvedType t) {
         int p = ptr;
-        for (LabelValType f : t.fields()) {
-            var fieldType = ctx.typeResolver().resolveDefValType(f.valType());
-            p = DefValType.alignTo(p, fieldType.alignment(ctx.typeResolver(), ctx.ptrType()));
-            store(ctx, v.get(f.label()), fieldType, p);
-            p += fieldType.elementSize(ctx.typeResolver(), ctx.ptrType());
+        for (ResolvedType.Field f : t.fields()) {
+            p = DefValType.alignTo(p, f.type().alignment(ctx.ptrType()));
+            store(ctx, v.get(f.label()), f.type(), p);
+            p += f.type().elementSize(ctx.ptrType());
         }
     }
 
-    private static void storeVariant(LiftLowerContext ctx, VariantValue v, int ptr, VariantType t) {
+    private static void storeVariant(
+            LiftLowerContext ctx, VariantValue v, int ptr, ResolvedType t) {
         var cases = t.cases();
         int caseIndex = -1;
         for (int i = 0; i < cases.size(); i++) {
@@ -734,20 +678,18 @@ public final class CanonicalAbi {
         if (caseIndex < 0) {
             throw new IllegalArgumentException("no case labeled '" + v.label() + "' in variant");
         }
-        int discSize = t.discriminantType().elementSize(ctx.typeResolver(), ctx.ptrType());
+        int discSize = t.discriminantSize();
         storeInt(ctx.memory(), caseIndex, ptr, discSize);
         var c = cases.get(caseIndex);
-        int payloadPtr =
-                DefValType.alignTo(
-                        ptr + discSize, t.maxCaseAlignment(ctx.typeResolver(), ctx.ptrType()));
-        if (c.hasValType()) {
-            store(ctx, v.value(), ctx.typeResolver().resolveDefValType(c.valType()), payloadPtr);
+        int payloadPtr = DefValType.alignTo(ptr + discSize, t.maxCaseAlignment(ctx.ptrType()));
+        if (c.hasType()) {
+            store(ctx, v.value(), c.type(), payloadPtr);
         }
     }
 
-    private static void storeFlags(LiftLowerContext ctx, Map<?, ?> v, int ptr, FlagsType t) {
+    private static void storeFlags(LiftLowerContext ctx, Map<?, ?> v, int ptr, ResolvedType t) {
         long i = packFlagsIntoInt(v, t.labels());
-        storeInt(ctx.memory(), i, ptr, t.elementSize(ctx.typeResolver(), ctx.ptrType()));
+        storeInt(ctx.memory(), i, ptr, t.elementSize(ctx.ptrType()));
     }
 
     private static long packFlagsIntoInt(Map<?, ?> v, List<String> labels) {
@@ -942,9 +884,9 @@ public final class CanonicalAbi {
             List<run.endive.cm.types.ValType> ts) {
         List<ValType> flatTypes = flattenTypes(ctx, ts);
         if (flatTypes.size() > maxFlat) {
-            var tupleType = tupleTypeOf(ts);
-            int align = tupleType.alignment(ctx.typeResolver(), ctx.ptrType());
-            int size = tupleType.elementSize(ctx.typeResolver(), ctx.ptrType());
+            var tupleType = groundedTupleOf(ctx, ts);
+            int align = tupleType.alignment(ctx.ptrType());
+            int size = tupleType.elementSize(ctx.ptrType());
             int ptr = (int) vi.next();
             if (ptr != DefValType.alignTo(ptr, align)) {
                 throw new TrapException("unaligned pointer");
@@ -957,26 +899,25 @@ public final class CanonicalAbi {
         }
         List<Object> result = new ArrayList<>(ts.size());
         for (run.endive.cm.types.ValType t : ts) {
-            result.add(liftFlat(ctx, vi, ctx.typeResolver().resolveDefValType(t)));
+            result.add(liftFlat(ctx, vi, ctx.ground(t)));
         }
         return result;
     }
 
-    static Object liftFlat(LiftLowerContext ctx, CoreValues vi, DefValType t) {
-        var d = despecialize(t);
-        switch (d.kind()) {
+    static Object liftFlat(LiftLowerContext ctx, CoreValues vi, ResolvedType t) {
+        switch (t.kind()) {
             case BOOL:
                 return convertIntToBool(vi.next() & 0xFFFFFFFFL);
             case U8:
             case U16:
             case U32:
             case U64:
-                return liftFlatUnsigned(vi, d.kind());
+                return liftFlatUnsigned(vi, t.kind());
             case S8:
             case S16:
             case S32:
             case S64:
-                return liftFlatSigned(vi, d.kind());
+                return liftFlatSigned(vi, t.kind());
             case F32:
                 return decodeI32AsFloat(vi.next());
             case F64:
@@ -986,24 +927,24 @@ public final class CanonicalAbi {
             case STRING:
                 return liftFlatString(ctx, vi);
             case LIST:
-                return liftFlatList(ctx, vi, d);
+                return liftFlatList(ctx, vi, t);
             case RECORD:
-                return liftFlatRecord(ctx, vi, (RecordType) d);
+                return liftFlatRecord(ctx, vi, t);
             case VARIANT:
-                return liftFlatVariant(ctx, vi, (VariantType) d);
+                return liftFlatVariant(ctx, vi, t);
             case FLAGS:
-                return liftFlatFlags(vi, (FlagsType) d);
+                return liftFlatFlags(vi, t);
             case OWN:
-                return liftOwn(ctx, (int) vi.next(), (OwnType) d);
+                return liftOwn(ctx, (int) vi.next(), (OwnType) t.node());
             case BORROW:
-                return liftBorrow(ctx, (int) vi.next(), (BorrowType) d);
+                return liftBorrow(ctx, (int) vi.next(), (BorrowType) t.node());
             case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "lifting " + d.kind() + " values is not implemented yet");
+                        "lifting " + t.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + d.kind());
+                throw new IllegalStateException("unhandled kind " + t.kind());
         }
     }
 
@@ -1140,36 +1081,25 @@ public final class CanonicalAbi {
         return loadStringFromRange(ctx, ptr, packedLength);
     }
 
-    private static List<Object> liftFlatList(LiftLowerContext ctx, CoreValues vi, DefValType d) {
-        if (d instanceof ListType) {
-            var t = (ListType) d;
-            var elemType = ctx.typeResolver().resolveDefValType(t.elementType());
-            if (t.isFixedSize()) {
-                List<Object> a = new ArrayList<>(t.size());
-                for (int i = 0; i < t.size(); i++) {
-                    a.add(liftFlat(ctx, vi, elemType));
-                }
-                return a;
+    private static List<Object> liftFlatList(LiftLowerContext ctx, CoreValues vi, ResolvedType t) {
+        var elemType = t.element();
+        if (t.isFixedSizeList()) {
+            List<Object> a = new ArrayList<>(t.fixedSize());
+            for (int i = 0; i < t.fixedSize(); i++) {
+                a.add(liftFlat(ctx, vi, elemType));
             }
-            int ptr = (int) vi.next();
-            int length = (int) vi.next();
-            return loadListFromRange(ctx, ptr, length, elemType);
+            return a;
         }
-        if (d instanceof MapType.DespecializedMapType) {
-            int ptr = (int) vi.next();
-            int length = (int) vi.next();
-            return loadListFromRange(
-                    ctx, ptr, length, ((MapType.DespecializedMapType) d).recordType());
-        }
-        throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+        int ptr = (int) vi.next();
+        int length = (int) vi.next();
+        return loadListFromRange(ctx, ptr, length, elemType);
     }
 
     private static Map<String, Object> liftFlatRecord(
-            LiftLowerContext ctx, CoreValues vi, RecordType t) {
+            LiftLowerContext ctx, CoreValues vi, ResolvedType t) {
         Map<String, Object> record = new LinkedHashMap<>();
-        for (LabelValType f : t.fields()) {
-            var fieldType = ctx.typeResolver().resolveDefValType(f.valType());
-            record.put(f.label(), liftFlat(ctx, vi, fieldType));
+        for (ResolvedType.Field f : t.fields()) {
+            record.put(f.label(), liftFlat(ctx, vi, f.type()));
         }
         return record;
     }
@@ -1185,9 +1115,9 @@ public final class CanonicalAbi {
      * correctly. We only have to skip whatever joined slots the chosen case left unused.
      */
     private static VariantValue liftFlatVariant(
-            LiftLowerContext ctx, CoreValues vi, VariantType t) {
+            LiftLowerContext ctx, CoreValues vi, ResolvedType t) {
         var cases = t.cases();
-        List<ValType> flatTypes = t.flatten(ctx.typeResolver(), ctx.ptrType());
+        List<ValType> flatTypes = t.flatten(ctx.ptrType());
         if (flatTypes.get(0) != ValType.I32) {
             throw new IllegalStateException("variant discriminant flat type must be i32");
         }
@@ -1198,21 +1128,16 @@ public final class CanonicalAbi {
         }
         var c = cases.get((int) caseIndex);
         int payloadStart = vi.position();
-        Object v;
-        if (!c.hasValType()) {
-            v = null;
-        } else {
-            v = liftFlat(ctx, vi, ctx.typeResolver().resolveDefValType(c.valType()));
-        }
+        Object v = c.hasType() ? liftFlat(ctx, vi, c.type()) : null;
         vi.skipTo(payloadStart + payloadSlots);
         return VariantValue.of(c.label(), v);
     }
 
-    private static Map<String, Boolean> liftFlatFlags(CoreValues vi, FlagsType t) {
+    private static Map<String, Boolean> liftFlatFlags(CoreValues vi, ResolvedType t) {
         return unpackFlagsFromInt(vi.next() & 0xFFFFFFFFL, t.labels());
     }
 
-    static long[] lowerFlat(LiftLowerContext ctx, Object v, DefValType t) {
+    static long[] lowerFlat(LiftLowerContext ctx, Object v, ResolvedType t) {
         LongList out = new LongList();
         lowerFlatInto(ctx, v, t, out);
         return out.toArray();
@@ -1272,13 +1197,13 @@ public final class CanonicalAbi {
 
         List<ValType> flatTypes = flattenTypes(ctx, ts);
         if (flatTypes.size() > maxFlat) {
-            var tupleType = tupleTypeOf(ts);
+            var tupleType = groundedTupleOf(ctx, ts);
             Map<String, Object> tupleValue = new LinkedHashMap<>();
             for (int i = 0; i < vs.size(); i++) {
                 tupleValue.put(Integer.toString(i), vs.get(i));
             }
-            int align = tupleType.alignment(ctx.typeResolver(), ctx.ptrType());
-            int size = tupleType.elementSize(ctx.typeResolver(), ctx.ptrType());
+            int align = tupleType.alignment(ctx.ptrType());
+            int size = tupleType.elementSize(ctx.ptrType());
             int ptr;
             long[] flatVals;
             if (outParam == null) {
@@ -1299,14 +1224,14 @@ public final class CanonicalAbi {
         }
         LongList out = new LongList();
         for (int i = 0; i < vs.size(); i++) {
-            lowerFlatInto(ctx, vs.get(i), ctx.typeResolver().resolveDefValType(ts.get(i)), out);
+            lowerFlatInto(ctx, vs.get(i), ctx.ground(ts.get(i)), out);
         }
         return out.toArray();
     }
 
-    private static void lowerFlatInto(LiftLowerContext ctx, Object v, DefValType t, LongList out) {
-        var d = despecialize(t);
-        switch (d.kind()) {
+    private static void lowerFlatInto(
+            LiftLowerContext ctx, Object v, ResolvedType t, LongList out) {
+        switch (t.kind()) {
             case BOOL:
                 out.add((Boolean) v ? 1L : 0L);
                 return;
@@ -1339,32 +1264,34 @@ public final class CanonicalAbi {
                 lowerFlatString(ctx, (String) v, out);
                 return;
             case LIST:
-                lowerFlatList(ctx, v, d, out);
+                lowerFlatList(ctx, v, t, out);
                 return;
             case RECORD:
-                lowerFlatRecord(ctx, (Map<?, ?>) v, (RecordType) d, out);
+                lowerFlatRecord(ctx, (Map<?, ?>) v, t, out);
                 return;
             case VARIANT:
-                lowerFlatVariant(ctx, (VariantValue) v, (VariantType) d, out);
+                lowerFlatVariant(ctx, (VariantValue) v, t, out);
                 return;
             case FLAGS:
-                out.add(packFlagsIntoInt((Map<?, ?>) v, ((FlagsType) d).labels()) & 0xFFFFFFFFL);
+                out.add(packFlagsIntoInt((Map<?, ?>) v, t.labels()) & 0xFFFFFFFFL);
                 return;
             case OWN:
-                out.add(Integer.toUnsignedLong(lowerOwn(ctx, (ResourceValue) v, (OwnType) d)));
+                out.add(
+                        Integer.toUnsignedLong(
+                                lowerOwn(ctx, (ResourceValue) v, (OwnType) t.node())));
                 return;
             case BORROW:
                 out.add(
                         Integer.toUnsignedLong(
-                                lowerBorrow(ctx, (ResourceValue) v, (BorrowType) d)));
+                                lowerBorrow(ctx, (ResourceValue) v, (BorrowType) t.node())));
                 return;
             case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "lowering " + d.kind() + " values is not implemented yet");
+                        "lowering " + t.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + d.kind());
+                throw new IllegalStateException("unhandled kind " + t.kind());
         }
     }
 
@@ -1384,44 +1311,32 @@ public final class CanonicalAbi {
         out.add(result.codeUnits & 0xFFFFFFFFL);
     }
 
-    private static void lowerFlatList(LiftLowerContext ctx, Object v, DefValType d, LongList out) {
+    private static void lowerFlatList(
+            LiftLowerContext ctx, Object v, ResolvedType t, LongList out) {
         var list = (List<?>) v;
-        if (d instanceof ListType) {
-            var t = (ListType) d;
-            var elemType = ctx.typeResolver().resolveDefValType(t.elementType());
-            if (t.isFixedSize()) {
-                if (list.size() != t.size()) {
-                    throw new IllegalArgumentException(
-                            "expected "
-                                    + t.size()
-                                    + " elements for fixed-size list, got "
-                                    + list.size());
-                }
-                for (Object e : list) {
-                    lowerFlatInto(ctx, e, elemType, out);
-                }
-                return;
+        var elemType = t.element();
+        if (t.isFixedSizeList()) {
+            if (list.size() != t.fixedSize()) {
+                throw new IllegalArgumentException(
+                        "expected "
+                                + t.fixedSize()
+                                + " elements for fixed-size list, got "
+                                + list.size());
             }
-            int ptr = storeListIntoRange(ctx, list, elemType);
-            out.add(Integer.toUnsignedLong(ptr));
-            out.add(Integer.toUnsignedLong(list.size()));
+            for (Object e : list) {
+                lowerFlatInto(ctx, e, elemType, out);
+            }
             return;
         }
-        if (d instanceof MapType.DespecializedMapType) {
-            var recordType = ((MapType.DespecializedMapType) d).recordType();
-            int ptr = storeListIntoRange(ctx, list, recordType);
-            out.add(Integer.toUnsignedLong(ptr));
-            out.add(Integer.toUnsignedLong(list.size()));
-            return;
-        }
-        throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+        int ptr = storeListIntoRange(ctx, list, elemType);
+        out.add(Integer.toUnsignedLong(ptr));
+        out.add(Integer.toUnsignedLong(list.size()));
     }
 
     private static void lowerFlatRecord(
-            LiftLowerContext ctx, Map<?, ?> v, RecordType t, LongList out) {
-        for (LabelValType f : t.fields()) {
-            var fieldType = ctx.typeResolver().resolveDefValType(f.valType());
-            lowerFlatInto(ctx, v.get(f.label()), fieldType, out);
+            LiftLowerContext ctx, Map<?, ?> v, ResolvedType t, LongList out) {
+        for (ResolvedType.Field f : t.fields()) {
+            lowerFlatInto(ctx, v.get(f.label()), f.type(), out);
         }
     }
 
@@ -1434,7 +1349,7 @@ public final class CanonicalAbi {
      * fits any wider joined slot. Unused trailing slots are padded with {@code 0}.
      */
     private static void lowerFlatVariant(
-            LiftLowerContext ctx, VariantValue v, VariantType t, LongList out) {
+            LiftLowerContext ctx, VariantValue v, ResolvedType t, LongList out) {
         var cases = t.cases();
         int caseIndex = -1;
         for (int i = 0; i < cases.size(); i++) {
@@ -1446,7 +1361,7 @@ public final class CanonicalAbi {
         if (caseIndex < 0) {
             throw new IllegalArgumentException("no case labeled '" + v.label() + "' in variant");
         }
-        List<ValType> flatTypes = t.flatten(ctx.typeResolver(), ctx.ptrType());
+        List<ValType> flatTypes = t.flatten(ctx.ptrType());
         if (flatTypes.get(0) != ValType.I32) {
             throw new IllegalStateException("variant discriminant flat type must be i32");
         }
@@ -1454,8 +1369,8 @@ public final class CanonicalAbi {
         out.add(Integer.toUnsignedLong(caseIndex));
         var c = cases.get(caseIndex);
         int payloadStart = out.size();
-        if (c.hasValType()) {
-            lowerFlatInto(ctx, v.value(), ctx.typeResolver().resolveDefValType(c.valType()), out);
+        if (c.hasType()) {
+            lowerFlatInto(ctx, v.value(), c.type(), out);
         }
         for (int i = out.size() - payloadStart; i < payloadSlots; i++) {
             out.add(0L);
@@ -1657,16 +1572,15 @@ public final class CanonicalAbi {
         if (caller.ptrType() != callee.ptrType()) {
             return false;
         }
-        var typeResolver = caller.typeResolver();
         List<run.endive.cm.types.ValType> paramTypes = paramValTypes(ft);
         List<run.endive.cm.types.ValType> resultTypes = resultValTypes(ft);
         for (run.endive.cm.types.ValType t : paramTypes) {
-            if (!Transferability.isSupported(typeResolver, typeResolver.resolveDefValType(t))) {
+            if (!Transferability.isSupported(caller.ground(t))) {
                 return false;
             }
         }
         for (run.endive.cm.types.ValType t : resultTypes) {
-            if (!Transferability.isSupported(typeResolver, typeResolver.resolveDefValType(t))) {
+            if (!Transferability.isSupported(caller.ground(t))) {
                 return false;
             }
         }
@@ -1709,18 +1623,12 @@ public final class CanonicalAbi {
             return false;
         }
         for (run.endive.cm.types.ValType t : paramTypes) {
-            if (!Transferability.isFlatIdentity(
-                    caller.typeResolver(),
-                    caller.ptrType(),
-                    caller.typeResolver().resolveDefValType(t))) {
+            if (!Transferability.isFlatIdentity(caller.ptrType(), caller.ground(t))) {
                 return false;
             }
         }
         for (run.endive.cm.types.ValType t : resultTypes) {
-            if (!Transferability.isFlatIdentity(
-                    caller.typeResolver(),
-                    caller.ptrType(),
-                    caller.typeResolver().resolveDefValType(t))) {
+            if (!Transferability.isFlatIdentity(caller.ptrType(), caller.ground(t))) {
                 return false;
             }
         }
@@ -1753,10 +1661,7 @@ public final class CanonicalAbi {
             return true;
         }
         for (run.endive.cm.types.ValType t : ts) {
-            if (contains(
-                    ctx.typeResolver(),
-                    ctx.typeResolver().resolveDefValType(t),
-                    CanonicalAbi::livesBehindPointer)) {
+            if (contains(ctx.ground(t), CanonicalAbi::livesBehindPointer)) {
                 return true;
             }
         }
@@ -1769,14 +1674,14 @@ public final class CanonicalAbi {
      * own; every other {@code list} — including the despecialized form of a {@code map} — is
      * a (pointer, length) pair, as is a {@code string}.
      */
-    private static boolean livesBehindPointer(DefValType d) {
-        if (d.kind() == DefValType.Kind.STRING) {
+    private static boolean livesBehindPointer(ResolvedType t) {
+        if (t.kind() == DefValType.Kind.STRING) {
             return true;
         }
-        if (d.kind() != DefValType.Kind.LIST) {
+        if (t.kind() != DefValType.Kind.LIST && t.kind() != DefValType.Kind.SIZED_LIST) {
             return false;
         }
-        return !(d instanceof ListType) || !((ListType) d).isFixedSize();
+        return !t.isFixedSizeList();
     }
 
     /**
@@ -1806,13 +1711,17 @@ public final class CanonicalAbi {
      */
     public static void transfer(
             LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, DefValType t) {
+        transfer(src, dst, srcPtr, dstPtr, src.ground(t));
+    }
+
+    public static void transfer(
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, ResolvedType t) {
         requireTransferable(src, dst);
-        var d = despecialize(t);
-        if (Transferability.isBitwiseCopyable(src.typeResolver(), src.ptrType(), d)) {
-            copyBytes(src, dst, srcPtr, dstPtr, d.elementSize(src.typeResolver(), src.ptrType()));
+        if (Transferability.isBitwiseCopyable(src.ptrType(), t)) {
+            copyBytes(src, dst, srcPtr, dstPtr, t.elementSize(src.ptrType()));
             return;
         }
-        transferValue(src, dst, srcPtr, dstPtr, d);
+        transferValue(src, dst, srcPtr, dstPtr, t);
     }
 
     /**
@@ -1875,9 +1784,8 @@ public final class CanonicalAbi {
      * the value out identically, so only the base pointers differ.
      */
     static void transferValue(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, DefValType t) {
-        var d = despecialize(t);
-        switch (d.kind()) {
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, ResolvedType t) {
+        switch (t.kind()) {
             case BOOL:
                 transferBool(src, dst, srcPtr, dstPtr);
                 return;
@@ -1906,23 +1814,22 @@ public final class CanonicalAbi {
                 transferString(src, dst, srcPtr, dstPtr);
                 return;
             case LIST:
-                transferList(src, dst, srcPtr, dstPtr, d);
+                transferList(src, dst, srcPtr, dstPtr, t);
                 return;
             case RECORD:
-                transferRecord(src, dst, srcPtr, dstPtr, (RecordType) d);
+                transferRecord(src, dst, srcPtr, dstPtr, t);
                 return;
             case VARIANT:
-                transferVariant(src, dst, srcPtr, dstPtr, (VariantType) d);
+                transferVariant(src, dst, srcPtr, dstPtr, t);
                 return;
             case FLAGS:
-                var flags = (FlagsType) d;
                 transferFlags(
                         src,
                         dst,
                         srcPtr,
                         dstPtr,
-                        flags.elementSize(src.typeResolver(), src.ptrType()),
-                        Transferability.flagsMask(flags));
+                        t.elementSize(src.ptrType()),
+                        Transferability.flagsMask(t));
                 return;
             case ERROR_CONTEXT:
             case OWN:
@@ -1930,9 +1837,9 @@ public final class CanonicalAbi {
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "transferring " + d.kind() + " values is not implemented yet");
+                        "transferring " + t.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + d.kind());
+                throw new IllegalStateException("unhandled kind " + t.kind());
         }
     }
 
@@ -1993,13 +1900,12 @@ public final class CanonicalAbi {
     }
 
     private static void transferRecord(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, RecordType t) {
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, ResolvedType t) {
         int off = 0;
-        for (LabelValType f : t.fields()) {
-            var fieldType = src.typeResolver().resolveDefValType(f.valType());
-            off = DefValType.alignTo(off, fieldType.alignment(src.typeResolver(), src.ptrType()));
-            transferValue(src, dst, srcPtr + off, dstPtr + off, fieldType);
-            off += fieldType.elementSize(src.typeResolver(), src.ptrType());
+        for (ResolvedType.Field f : t.fields()) {
+            off = DefValType.alignTo(off, f.type().alignment(src.ptrType()));
+            transferValue(src, dst, srcPtr + off, dstPtr + off, f.type());
+            off += f.type().elementSize(src.ptrType());
         }
     }
 
@@ -2014,46 +1920,29 @@ public final class CanonicalAbi {
      * and only the relative form keeps the source and destination offsets identical.
      */
     private static void transferVariant(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, VariantType t) {
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, ResolvedType t) {
         var cases = t.cases();
-        int discSize = t.discriminantType().elementSize(src.typeResolver(), src.ptrType());
+        int discSize = t.discriminantSize();
         long caseIndex = loadInt(src.memory(), srcPtr, discSize, false);
         if (caseIndex >= cases.size()) {
             throw new TrapException("invalid variant discriminant");
         }
         storeInt(dst.memory(), caseIndex, dstPtr, discSize);
         var c = cases.get((int) caseIndex);
-        if (!c.hasValType()) {
+        if (!c.hasType()) {
             return;
         }
-        int payloadOff =
-                DefValType.alignTo(discSize, t.maxCaseAlignment(src.typeResolver(), src.ptrType()));
-        transferValue(
-                src,
-                dst,
-                srcPtr + payloadOff,
-                dstPtr + payloadOff,
-                src.typeResolver().resolveDefValType(c.valType()));
+        int payloadOff = DefValType.alignTo(discSize, t.maxCaseAlignment(src.ptrType()));
+        transferValue(src, dst, srcPtr + payloadOff, dstPtr + payloadOff, c.type());
     }
 
     private static void transferList(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, DefValType d) {
-        if (d instanceof ListType) {
-            var t = (ListType) d;
-            var elemType = src.typeResolver().resolveDefValType(t.elementType());
-            if (t.isFixedSize()) {
-                transferListElements(src, dst, srcPtr, dstPtr, t.size(), elemType);
-                return;
-            }
-            transferUnboundedList(src, dst, srcPtr, dstPtr, elemType);
+            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, ResolvedType t) {
+        if (t.isFixedSizeList()) {
+            transferListElements(src, dst, srcPtr, dstPtr, t.fixedSize(), t.element());
             return;
         }
-        if (d instanceof MapType.DespecializedMapType) {
-            transferUnboundedList(
-                    src, dst, srcPtr, dstPtr, ((MapType.DespecializedMapType) d).recordType());
-            return;
-        }
-        throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+        transferUnboundedList(src, dst, srcPtr, dstPtr, t.element());
     }
 
     static void transferUnboundedList(
@@ -2061,7 +1950,7 @@ public final class CanonicalAbi {
             LiftLowerContext dst,
             int srcPtr,
             int dstPtr,
-            DefValType elemType) {
+            ResolvedType elemType) {
         int ptrSize = src.ptrType().size();
         int begin = (int) loadInt(src.memory(), srcPtr, ptrSize, false);
         int length = (int) loadInt(src.memory(), srcPtr + ptrSize, ptrSize, false);
@@ -2083,9 +1972,9 @@ public final class CanonicalAbi {
             LiftLowerContext dst,
             int begin,
             int length,
-            DefValType elemType) {
-        int elemSize = elemType.elementSize(src.typeResolver(), src.ptrType());
-        int elemAlignment = elemType.alignment(src.typeResolver(), src.ptrType());
+            ResolvedType elemType) {
+        int elemSize = elemType.elementSize(src.ptrType());
+        int elemAlignment = elemType.alignment(src.ptrType());
         long byteLength = Integer.toUnsignedLong(length) * elemSize;
         if (byteLength > MAX_LIST_BYTE_LENGTH) {
             throw new TrapException(
@@ -2115,9 +2004,9 @@ public final class CanonicalAbi {
             int srcPtr,
             int dstPtr,
             int length,
-            DefValType elemType) {
-        int elemSize = elemType.elementSize(src.typeResolver(), src.ptrType());
-        if (Transferability.isBitwiseCopyable(src.typeResolver(), src.ptrType(), elemType)) {
+            ResolvedType elemType) {
+        int elemSize = elemType.elementSize(src.ptrType());
+        if (Transferability.isBitwiseCopyable(src.ptrType(), elemType)) {
             copyBytes(src, dst, srcPtr, dstPtr, length * elemSize);
             return;
         }
@@ -2308,19 +2197,19 @@ public final class CanonicalAbi {
         }
         List<ValType> flatTypes = flattenTypes(src, ts);
         if (flatTypes.size() > maxFlat) {
-            var tupleType = tupleTypeOf(ts);
+            var tupleType = groundedTupleOf(src, ts);
             return transferSpilledValues(
                     src,
                     dst,
                     vi,
-                    tupleType.alignment(src.typeResolver(), src.ptrType()),
-                    tupleType.elementSize(src.typeResolver(), src.ptrType()),
+                    tupleType.alignment(src.ptrType()),
+                    tupleType.elementSize(src.ptrType()),
                     outParam,
                     (s, d, srcPtr, dstPtr) -> transfer(s, d, srcPtr, dstPtr, tupleType));
         }
         LongList out = new LongList();
         for (run.endive.cm.types.ValType t : ts) {
-            transferFlat(src, dst, vi, out, src.typeResolver().resolveDefValType(t));
+            transferFlat(src, dst, vi, out, src.ground(t));
         }
         return out.toArray();
     }
@@ -2376,9 +2265,12 @@ public final class CanonicalAbi {
      * and {@code f32}/{@code f64} keep their exact bit pattern.
      */
     static void transferFlat(
-            LiftLowerContext src, LiftLowerContext dst, CoreValues vi, LongList out, DefValType t) {
-        var d = despecialize(t);
-        switch (d.kind()) {
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            CoreValues vi,
+            LongList out,
+            ResolvedType t) {
+        switch (t.kind()) {
             case BOOL:
                 out.add((vi.next() & 0xFFFFFFFFL) != 0 ? 1L : 0L);
                 return;
@@ -2411,19 +2303,18 @@ public final class CanonicalAbi {
                 transferFlatString(src, dst, vi, out);
                 return;
             case LIST:
-                transferFlatList(src, dst, vi, out, d);
+                transferFlatList(src, dst, vi, out, t);
                 return;
             case RECORD:
-                for (LabelValType f : ((RecordType) d).fields()) {
-                    transferFlat(
-                            src, dst, vi, out, src.typeResolver().resolveDefValType(f.valType()));
+                for (ResolvedType.Field f : t.fields()) {
+                    transferFlat(src, dst, vi, out, f.type());
                 }
                 return;
             case VARIANT:
-                transferFlatVariant(src, dst, vi, out, (VariantType) d);
+                transferFlatVariant(src, dst, vi, out, t);
                 return;
             case FLAGS:
-                out.add(vi.next() & Transferability.flagsMask((FlagsType) d) & 0xFFFFFFFFL);
+                out.add(vi.next() & Transferability.flagsMask(t) & 0xFFFFFFFFL);
                 return;
             case ERROR_CONTEXT:
             case OWN:
@@ -2431,9 +2322,9 @@ public final class CanonicalAbi {
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "transferring " + d.kind() + " values is not implemented yet");
+                        "transferring " + t.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + d.kind());
+                throw new IllegalStateException("unhandled kind " + t.kind());
         }
     }
 
@@ -2447,25 +2338,19 @@ public final class CanonicalAbi {
     }
 
     private static void transferFlatList(
-            LiftLowerContext src, LiftLowerContext dst, CoreValues vi, LongList out, DefValType d) {
-        if (d instanceof ListType) {
-            var t = (ListType) d;
-            var elemType = src.typeResolver().resolveDefValType(t.elementType());
-            if (t.isFixedSize()) {
-                for (int i = 0; i < t.size(); i++) {
-                    transferFlat(src, dst, vi, out, elemType);
-                }
-                return;
+            LiftLowerContext src,
+            LiftLowerContext dst,
+            CoreValues vi,
+            LongList out,
+            ResolvedType t) {
+        var elemType = t.element();
+        if (t.isFixedSizeList()) {
+            for (int i = 0; i < t.fixedSize(); i++) {
+                transferFlat(src, dst, vi, out, elemType);
             }
-            transferFlatUnboundedList(src, dst, vi, out, elemType);
             return;
         }
-        if (d instanceof MapType.DespecializedMapType) {
-            transferFlatUnboundedList(
-                    src, dst, vi, out, ((MapType.DespecializedMapType) d).recordType());
-            return;
-        }
-        throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+        transferFlatUnboundedList(src, dst, vi, out, elemType);
     }
 
     static void transferFlatUnboundedList(
@@ -2473,7 +2358,7 @@ public final class CanonicalAbi {
             LiftLowerContext dst,
             CoreValues vi,
             LongList out,
-            DefValType elemType) {
+            ResolvedType elemType) {
         int ptr = (int) vi.next();
         int length = (int) vi.next();
         int dstPtr = transferListIntoRange(src, dst, ptr, length, elemType);
@@ -2492,9 +2377,9 @@ public final class CanonicalAbi {
             LiftLowerContext dst,
             CoreValues vi,
             LongList out,
-            VariantType t) {
+            ResolvedType t) {
         var cases = t.cases();
-        List<ValType> flatTypes = t.flatten(src.typeResolver(), src.ptrType());
+        List<ValType> flatTypes = t.flatten(src.ptrType());
         if (flatTypes.get(0) != ValType.I32) {
             throw new IllegalStateException("variant discriminant flat type must be i32");
         }
@@ -2507,8 +2392,8 @@ public final class CanonicalAbi {
         var c = cases.get((int) caseIndex);
         int srcPayloadStart = vi.position();
         int dstPayloadStart = out.size();
-        if (c.hasValType()) {
-            transferFlat(src, dst, vi, out, src.typeResolver().resolveDefValType(c.valType()));
+        if (c.hasType()) {
+            transferFlat(src, dst, vi, out, c.type());
         }
         vi.skipTo(srcPayloadStart + payloadSlots);
         for (int i = out.size() - dstPayloadStart; i < payloadSlots; i++) {

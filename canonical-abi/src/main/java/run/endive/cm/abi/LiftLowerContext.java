@@ -2,8 +2,13 @@ package run.endive.cm.abi;
 
 import static java.util.Objects.requireNonNull;
 
+import java.util.IdentityHashMap;
+import java.util.Map;
+import run.endive.cm.types.DefValType;
 import run.endive.cm.types.PointerType;
+import run.endive.cm.types.ResolvedType;
 import run.endive.cm.types.TypeResolver;
+import run.endive.cm.types.TypeSpace;
 import run.endive.runtime.Memory;
 
 public final class LiftLowerContext {
@@ -12,6 +17,19 @@ public final class LiftLowerContext {
     private final PointerType ptrType;
     private final StringEncoding stringEncoding;
     private final TypeResolver typeResolver;
+    private final TypeSpace typeSpace;
+
+    /**
+     * Grounded forms of the types this context has been asked about, keyed by the syntax node
+     * they came from.
+     *
+     * <p>Sound because a context resolves against exactly one space, so a node can only ground
+     * one way here. Shared with the per-call copies {@link #withBorrowScope} makes, since the
+     * grounding does not depend on the borrow scope and re-doing it per call would defeat the
+     * point of caching it at all.
+     */
+    private final Map<DefValType, ResolvedType> grounded;
+
     private final PostReturn postReturn;
     private final Realloc realloc;
     private final boolean async;
@@ -25,6 +43,8 @@ public final class LiftLowerContext {
             PointerType ptrType,
             StringEncoding stringEncoding,
             TypeResolver typeResolver,
+            TypeSpace typeSpace,
+            Map<DefValType, ResolvedType> grounded,
             PostReturn postReturn,
             Realloc realloc,
             boolean async,
@@ -36,6 +56,10 @@ public final class LiftLowerContext {
         this.ptrType = ptrType == null ? PointerType.I32 : ptrType;
         this.stringEncoding = stringEncoding == null ? StringEncoding.UTF8 : stringEncoding;
         this.typeResolver = requireNonNull(typeResolver, "typeResolver");
+        // A context that was given no space of its own resolves everything locally, which is
+        // what a component's own definitions do and what a hand-built table in a test does.
+        this.typeSpace = typeSpace == null ? TypeSpace.of(this.typeResolver) : typeSpace;
+        this.grounded = grounded == null ? new IdentityHashMap<>() : grounded;
         this.postReturn = postReturn;
         this.realloc = realloc;
         this.async = async;
@@ -59,6 +83,32 @@ public final class LiftLowerContext {
 
     public TypeResolver typeResolver() {
         return typeResolver;
+    }
+
+    /** The index space this context's type indices count in. */
+    public TypeSpace typeSpace() {
+        return typeSpace;
+    }
+
+    /**
+     * Grounds {@code t} against this context's space, following every type index once so the
+     * result can be laid out and walked without a resolver.
+     */
+    public ResolvedType ground(DefValType t) {
+        if (t == null) {
+            return null;
+        }
+        return grounded.computeIfAbsent(t, node -> ResolvedType.of(node, typeSpace));
+    }
+
+    /** Grounds the type {@code valType} names, which counts in this context's space. */
+    public ResolvedType ground(run.endive.cm.types.ValType valType) {
+        TypeSpace.Resolved resolved = typeSpace.resolve(valType);
+        // Only a type that resolved here can go in the cache; one that came from another space
+        // is a different type despite sharing a node, which is the whole reason spaces exist.
+        return resolved.space() == typeSpace
+                ? ground(resolved.type())
+                : ResolvedType.of(resolved.type(), resolved.space());
     }
 
     public PostReturn postReturn() {
@@ -109,6 +159,8 @@ public final class LiftLowerContext {
                 ptrType,
                 stringEncoding,
                 typeResolver,
+                typeSpace,
+                grounded,
                 postReturn,
                 realloc,
                 async,
@@ -127,6 +179,7 @@ public final class LiftLowerContext {
         private PointerType ptrType;
         private StringEncoding stringEncoding;
         private TypeResolver typeResolver;
+        private TypeSpace typeSpace;
         private PostReturn postReturn;
         private Realloc realloc;
         private boolean async;
@@ -154,6 +207,16 @@ public final class LiftLowerContext {
 
         public Builder withTypeResolver(TypeResolver typeResolver) {
             this.typeResolver = typeResolver;
+            return this;
+        }
+
+        /**
+         * The index space this context's types count in. Optional: without one every type
+         * resolves through {@code typeResolver} locally, which is right only where nothing was
+         * written in another component.
+         */
+        public Builder withTypeSpace(TypeSpace typeSpace) {
+            this.typeSpace = typeSpace;
             return this;
         }
 
@@ -198,6 +261,8 @@ public final class LiftLowerContext {
                     ptrType,
                     stringEncoding,
                     typeResolver,
+                    typeSpace,
+                    null,
                     postReturn,
                     realloc,
                     async,

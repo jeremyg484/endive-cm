@@ -19,6 +19,7 @@ import run.endive.cm.types.ResultType;
 import run.endive.cm.types.StreamType;
 import run.endive.cm.types.TupleType;
 import run.endive.cm.types.Type;
+import run.endive.cm.types.TypeSpace;
 import run.endive.cm.types.ValType;
 import run.endive.cm.types.VariantType;
 
@@ -51,31 +52,9 @@ final class TypeMatcher {
      * component's space, so a walk that reached it through the alias has to switch spaces to
      * carry on correctly.
      */
-    interface Space {
-
-        Resolved resolve(ValType valType);
+    interface Space extends TypeSpace {
 
         ResourceTypeRef resourceType(int typeIdx);
-    }
-
-    /** A resolved type together with the space its own type indices belong to. */
-    static final class Resolved {
-
-        private final DefValType type;
-        private final Space space;
-
-        Resolved(DefValType type, Space space) {
-            this.type = type;
-            this.space = space;
-        }
-
-        DefValType type() {
-            return type;
-        }
-
-        Space space() {
-            return space;
-        }
     }
 
     /**
@@ -127,9 +106,12 @@ final class TypeMatcher {
         if (expected == null || actual == null) {
             return expected == actual;
         }
-        Resolved e = expectedSpace.resolve(expected);
-        Resolved a = actualSpace.resolve(actual);
-        return defValTypesMatch(e.space(), e.type(), a.space(), a.type());
+        TypeSpace.Resolved e = expectedSpace.resolve(expected);
+        TypeSpace.Resolved a = actualSpace.resolve(actual);
+        // Every space reachable from a Space is one, since only the linker builds them; the
+        // resolved form is shared with the Canonical ABI, which has no use for resource identity
+        // and so does not carry it in the interface.
+        return defValTypesMatch((Space) e.space(), e.type(), (Space) a.space(), a.type());
     }
 
     /**

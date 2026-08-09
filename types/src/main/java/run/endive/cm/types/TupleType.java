@@ -35,22 +35,6 @@ public final class TupleType extends DefValType implements Specialized<RecordTyp
         return builder.build();
     }
 
-    @Override
-    public int alignment(TypeResolver typeResolver, PointerType ptrType) {
-        return despecialize().alignment(typeResolver, ptrType);
-    }
-
-    @Override
-    public int elementSize(TypeResolver typeResolver, PointerType ptrType) {
-        return despecialize().elementSize(typeResolver, ptrType);
-    }
-
-    @Override
-    public List<run.endive.wasm.types.ValType> flatten(
-            TypeResolver typeResolver, PointerType ptrType) {
-        return despecialize().flatten(typeResolver, ptrType);
-    }
-
     public static final class Builder {
         private final List<ValType> elementTypes = new ArrayList<>();
 

@@ -118,7 +118,7 @@ final class TransferTestSupport {
 
         CanonicalAbi.store(src, v, t, 0);
         CanonicalAbi.transfer(src, interpreted, 0, 0, t);
-        TransferPlan.compile(types, PointerType.I32, t).run(src, compiled, 0, 0);
+        TransferPlan.compile(PointerType.I32, src.ground(t)).run(src, compiled, 0, 0);
 
         assertMemoryEquals(compiled.memory(), interpreted.memory());
     }

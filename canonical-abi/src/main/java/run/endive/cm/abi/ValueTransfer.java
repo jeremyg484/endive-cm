@@ -83,21 +83,13 @@ public final class ValueTransfer {
         List<ValType> paramTypes =
                 ft.params().stream().map(LabelValType::valType).collect(Collectors.toList());
         FlatTransferPlan paramPlan =
-                FlatTransferPlan.compile(
-                        caller.typeResolver(),
-                        caller.ptrType(),
-                        paramTypes,
-                        CanonicalAbi.MAX_FLAT_PARAMS);
+                FlatTransferPlan.compile(caller, paramTypes, CanonicalAbi.MAX_FLAT_PARAMS);
         FlatTransferPlan resultPlan = null;
         if (ft.hasResult()) {
             List<ValType> resultTypes = new ArrayList<>();
             resultTypes.add(ft.result());
             resultPlan =
-                    FlatTransferPlan.compile(
-                            caller.typeResolver(),
-                            caller.ptrType(),
-                            resultTypes,
-                            CanonicalAbi.MAX_FLAT_RESULTS);
+                    FlatTransferPlan.compile(caller, resultTypes, CanonicalAbi.MAX_FLAT_RESULTS);
         }
         return new ValueTransfer(caller, callee, paramPlan, resultPlan);
     }

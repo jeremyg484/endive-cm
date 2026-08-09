@@ -1,6 +1,5 @@
 package run.endive.cm.types;
 
-import java.util.List;
 import java.util.Objects;
 
 public final class ResultType extends DefValType implements Specialized<VariantType> {
@@ -45,22 +44,6 @@ public final class ResultType extends DefValType implements Specialized<VariantT
             errorCase.withValType(error);
         }
         return VariantType.builder().addCase(okCase.build()).addCase(errorCase.build()).build();
-    }
-
-    @Override
-    public int alignment(TypeResolver typeResolver, PointerType ptrType) {
-        return despecialize().alignment(typeResolver, ptrType);
-    }
-
-    @Override
-    public int elementSize(TypeResolver typeResolver, PointerType ptrType) {
-        return despecialize().elementSize(typeResolver, ptrType);
-    }
-
-    @Override
-    public List<run.endive.wasm.types.ValType> flatten(
-            TypeResolver typeResolver, PointerType ptrType) {
-        return despecialize().flatten(typeResolver, ptrType);
     }
 
     public static final class Builder {

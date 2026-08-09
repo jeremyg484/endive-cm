@@ -4,17 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import run.endive.cm.abi.CanonicalAbi.CoreValues;
 import run.endive.cm.abi.CanonicalAbi.LongList;
-import run.endive.cm.types.Case;
-import run.endive.cm.types.DefValType;
-import run.endive.cm.types.FlagsType;
-import run.endive.cm.types.LabelValType;
-import run.endive.cm.types.ListType;
-import run.endive.cm.types.MapType;
 import run.endive.cm.types.PointerType;
-import run.endive.cm.types.RecordType;
-import run.endive.cm.types.TupleType;
-import run.endive.cm.types.TypeResolver;
-import run.endive.cm.types.VariantType;
+import run.endive.cm.types.ResolvedType;
 import run.endive.runtime.TrapException;
 import run.endive.wasm.types.ValType;
 
@@ -48,25 +39,23 @@ final class FlatTransferPlan {
     }
 
     static FlatTransferPlan compile(
-            TypeResolver typeResolver,
-            PointerType ptrType,
-            List<run.endive.cm.types.ValType> ts,
-            int maxFlat) {
+            LiftLowerContext ctx, List<run.endive.cm.types.ValType> ts, int maxFlat) {
+        PointerType ptrType = ctx.ptrType();
         List<ValType> flatTypes = new ArrayList<>();
         for (run.endive.cm.types.ValType t : ts) {
-            flatTypes.addAll(typeResolver.resolveDefValType(t).flatten(typeResolver, ptrType));
+            flatTypes.addAll(ctx.ground(t).flatten(ptrType));
         }
         if (flatTypes.size() > maxFlat) {
-            TupleType tupleType = CanonicalAbi.tupleTypeOf(ts);
+            ResolvedType tupleType = CanonicalAbi.groundedTupleOf(ctx, ts);
             return new FlatTransferPlan(
                     null,
-                    TransferPlan.compile(typeResolver, ptrType, tupleType),
-                    tupleType.alignment(typeResolver, ptrType),
-                    tupleType.elementSize(typeResolver, ptrType));
+                    TransferPlan.compile(ptrType, tupleType),
+                    tupleType.alignment(ptrType),
+                    tupleType.elementSize(ptrType));
         }
-        var builder = new Builder(typeResolver, ptrType);
+        var builder = new Builder(ptrType);
         for (run.endive.cm.types.ValType t : ts) {
-            builder.append(typeResolver.resolveDefValType(t));
+            builder.append(ctx.ground(t));
         }
         return new FlatTransferPlan(builder.build(), null, 0, 0);
     }
@@ -92,12 +81,10 @@ final class FlatTransferPlan {
     /** Builds the per-value step list for the direct (non-spilled) case. */
     private static final class Builder {
 
-        private final TypeResolver typeResolver;
         private final PointerType ptrType;
         private final List<Step> steps = new ArrayList<>();
 
-        Builder(TypeResolver typeResolver, PointerType ptrType) {
-            this.typeResolver = typeResolver;
+        Builder(PointerType ptrType) {
             this.ptrType = ptrType;
         }
 
@@ -111,9 +98,8 @@ final class FlatTransferPlan {
          * {@code bool} collapsed, {@code char} validated, {@code flags} stripped of slack
          * bits — but resolved to a concrete mask here instead of re-dispatched per call.
          */
-        void append(DefValType t) {
-            var d = CanonicalAbi.despecialize(t);
-            switch (d.kind()) {
+        void append(ResolvedType t) {
+            switch (t.kind()) {
                 case BOOL:
                     steps.add(
                             (src, dst, vi, out) ->
@@ -153,22 +139,23 @@ final class FlatTransferPlan {
                                                     vi.next() & 0xFFFFFFFFL)));
                     return;
                 case FLAGS:
-                    long mask = Transferability.flagsMask((FlagsType) d);
+                    long mask = Transferability.flagsMask(t);
                     steps.add((src, dst, vi, out) -> out.add(vi.next() & mask & 0xFFFFFFFFL));
                     return;
                 case STRING:
                     steps.add(CanonicalAbi::transferFlatString);
                     return;
                 case RECORD:
-                    for (LabelValType f : ((RecordType) d).fields()) {
-                        append(typeResolver.resolveDefValType(f.valType()));
+                    for (ResolvedType.Field f : t.fields()) {
+                        append(f.type());
                     }
                     return;
                 case VARIANT:
-                    appendVariant((VariantType) d);
+                    appendVariant(t);
                     return;
                 case LIST:
-                    appendList(d);
+                case SIZED_LIST:
+                    appendList(t);
                     return;
                 case ERROR_CONTEXT:
                 case OWN:
@@ -176,33 +163,23 @@ final class FlatTransferPlan {
                 case STREAM:
                 case FUTURE:
                     throw new UnsupportedOperationException(
-                            "transferring " + d.kind() + " values is not implemented yet");
+                            "transferring " + t.kind() + " values is not implemented yet");
                 default:
-                    throw new IllegalStateException("unhandled kind " + d.kind());
+                    throw new IllegalStateException("unhandled kind " + t.kind());
             }
         }
 
-        private void appendList(DefValType d) {
-            if (d instanceof ListType) {
-                var t = (ListType) d;
-                var elemType = typeResolver.resolveDefValType(t.elementType());
-                if (t.isFixedSize()) {
-                    for (int i = 0; i < t.size(); i++) {
-                        append(elemType);
-                    }
-                    return;
+        private void appendList(ResolvedType t) {
+            if (t.isFixedSizeList()) {
+                for (int i = 0; i < t.fixedSize(); i++) {
+                    append(t.element());
                 }
-                appendUnboundedList(elemType);
                 return;
             }
-            if (d instanceof MapType.DespecializedMapType) {
-                appendUnboundedList(((MapType.DespecializedMapType) d).recordType());
-                return;
-            }
-            throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+            appendUnboundedList(t.element());
         }
 
-        private void appendUnboundedList(DefValType elemType) {
+        private void appendUnboundedList(ResolvedType elemType) {
             steps.add(
                     (src, dst, vi, out) ->
                             CanonicalAbi.transferFlatUnboundedList(src, dst, vi, out, elemType));
@@ -213,21 +190,21 @@ final class FlatTransferPlan {
          * joined payload slots the chosen case leaves unused are skipped on the source cursor
          * and zero-padded on the destination, exactly as the interpreted path does.
          */
-        private void appendVariant(VariantType t) {
+        private void appendVariant(ResolvedType t) {
             var cases = t.cases();
-            List<ValType> flatTypes = t.flatten(typeResolver, ptrType);
+            List<ValType> flatTypes = t.flatten(ptrType);
             if (flatTypes.get(0) != ValType.I32) {
                 throw new IllegalStateException("variant discriminant flat type must be i32");
             }
             int payloadSlots = flatTypes.size() - 1;
             FlatTransferPlan[] casePlans = new FlatTransferPlan[cases.size()];
             for (int i = 0; i < cases.size(); i++) {
-                Case c = cases.get(i);
-                if (!c.hasValType()) {
+                ResolvedType.Case c = cases.get(i);
+                if (!c.hasType()) {
                     continue;
                 }
-                var caseBuilder = new Builder(typeResolver, ptrType);
-                caseBuilder.append(typeResolver.resolveDefValType(c.valType()));
+                var caseBuilder = new Builder(ptrType);
+                caseBuilder.append(c.type());
                 casePlans[i] = new FlatTransferPlan(caseBuilder.build(), null, 0, 0);
             }
             steps.add(

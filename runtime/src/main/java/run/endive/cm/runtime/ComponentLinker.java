@@ -57,6 +57,7 @@ import run.endive.cm.types.Type;
 import run.endive.cm.types.TypeBound;
 import run.endive.cm.types.TypeResolver;
 import run.endive.cm.types.TypeSection;
+import run.endive.cm.types.TypeSpace;
 import run.endive.cm.types.ValType;
 import run.endive.cm.types.WasmComponent;
 import run.endive.cm.types.canon.Canon;
@@ -925,9 +926,7 @@ public final class ComponentLinker {
             if (!store.hasImport(imp.name())) {
                 // An `eq` bound says which type this is, so there is nothing left for anyone
                 // to decide and nothing to supply. The import resolves to the bound itself.
-                int boundIdx = (int) typeBound.typeIdx();
-                store.addType(
-                        bound, store.resourceTypeAtOrNull(boundIdx), store.typeOriginAt(boundIdx));
+                store.addType(store.slotAt((int) typeBound.typeIdx()));
                 return;
             }
             // Supplying one anyway is allowed, but then it has to agree.
@@ -1597,11 +1596,25 @@ public final class ComponentLinker {
         return coreFunc;
     }
 
+    /**
+     * The index space {@code typeResolver} stands for.
+     *
+     * <p>A store knows where each of its slots was written, so a type it hands back that came
+     * from somewhere else keeps resolving there. Anything else can only resolve locally, which
+     * is all a hand-built resolver ever has to do.
+     */
+    private static TypeSpace typeSpaceOf(TypeResolver typeResolver) {
+        return typeResolver instanceof ComponentStore
+                ? ((ComponentStore) typeResolver).asMatcherSpace()
+                : TypeSpace.of(typeResolver);
+    }
+
     private static LiftLowerContext processCanonOpts(
             ComponentStore store, TypeResolver typeResolver, List<CanonOpt> opts) {
         var contextBuilder =
                 LiftLowerContext.builder()
                         .withTypeResolver(typeResolver)
+                        .withTypeSpace(typeSpaceOf(typeResolver))
                         // A handle is an index into the table of the instance this canonical
                         // definition belongs to, so the table comes from this store. The
                         // resource type an `own` or `borrow` names, though, is an index into
@@ -1875,10 +1888,11 @@ public final class ComponentLinker {
                     break;
                 case TYPE:
                     {
-                        Type type = store.getType(idx);
-                        ResourceTypeInstance resourceType = store.resourceTypeAtOrNull(idx);
-                        store.addType(type, resourceType, store.typeOriginAt(idx));
-                        store.addExport(name, resourceType != null ? resourceType : type);
+                        ComponentStore.TypeSlot slot = store.slotAt(idx);
+                        store.addType(slot);
+                        store.addExport(
+                                name,
+                                slot.resourceType() != null ? slot.resourceType() : slot.type());
                         break;
                     }
                 case INSTANCE:

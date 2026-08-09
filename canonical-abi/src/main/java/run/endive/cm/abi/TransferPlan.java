@@ -2,16 +2,9 @@ package run.endive.cm.abi;
 
 import java.util.ArrayList;
 import java.util.List;
-import run.endive.cm.types.Case;
 import run.endive.cm.types.DefValType;
-import run.endive.cm.types.FlagsType;
-import run.endive.cm.types.LabelValType;
-import run.endive.cm.types.ListType;
-import run.endive.cm.types.MapType;
 import run.endive.cm.types.PointerType;
-import run.endive.cm.types.RecordType;
-import run.endive.cm.types.TypeResolver;
-import run.endive.cm.types.VariantType;
+import run.endive.cm.types.ResolvedType;
 import run.endive.runtime.TrapException;
 
 /**
@@ -55,8 +48,8 @@ final class TransferPlan {
         return steps.length;
     }
 
-    static TransferPlan compile(TypeResolver typeResolver, PointerType ptrType, DefValType t) {
-        var builder = new Builder(typeResolver, ptrType);
+    static TransferPlan compile(PointerType ptrType, ResolvedType t) {
+        var builder = new Builder(ptrType);
         builder.append(t, 0);
         return builder.build();
     }
@@ -64,7 +57,6 @@ final class TransferPlan {
     /** Accumulates steps, merging adjacent verbatim copies as they are appended. */
     private static final class Builder {
 
-        private final TypeResolver typeResolver;
         private final PointerType ptrType;
         private final List<Step> steps = new ArrayList<>();
         private int pendingStart = NO_PENDING;
@@ -72,8 +64,7 @@ final class TransferPlan {
 
         private static final int NO_PENDING = -1;
 
-        Builder(TypeResolver typeResolver, PointerType ptrType) {
-            this.typeResolver = typeResolver;
+        Builder(PointerType ptrType) {
             this.ptrType = ptrType;
         }
 
@@ -121,21 +112,20 @@ final class TransferPlan {
                             CanonicalAbi.copyBytes(src, dst, srcPtr + off, dstPtr + off, length));
         }
 
-        private int sizeOf(DefValType t) {
-            return t.elementSize(typeResolver, ptrType);
+        private int sizeOf(ResolvedType t) {
+            return t.elementSize(ptrType);
         }
 
-        private int alignmentOf(DefValType t) {
-            return t.alignment(typeResolver, ptrType);
+        private int alignmentOf(ResolvedType t) {
+            return t.alignment(ptrType);
         }
 
-        void append(DefValType t, int off) {
-            var d = CanonicalAbi.despecialize(t);
-            if (Transferability.isBitwiseCopyable(typeResolver, ptrType, d)) {
-                copy(off, sizeOf(d));
+        void append(ResolvedType t, int off) {
+            if (Transferability.isBitwiseCopyable(ptrType, t)) {
+                copy(off, sizeOf(t));
                 return;
             }
-            switch (d.kind()) {
+            switch (t.kind()) {
                 case BOOL:
                     step(
                             (src, dst, srcPtr, dstPtr) ->
@@ -149,7 +139,7 @@ final class TransferPlan {
                                             src, dst, srcPtr + off, dstPtr + off));
                     return;
                 case FLAGS:
-                    appendFlags((FlagsType) d, off);
+                    appendFlags(t, off);
                     return;
                 case STRING:
                     step(
@@ -158,13 +148,14 @@ final class TransferPlan {
                                             src, dst, srcPtr + off, dstPtr + off));
                     return;
                 case RECORD:
-                    appendRecord((RecordType) d, off);
+                    appendRecord(t, off);
                     return;
                 case VARIANT:
-                    appendVariant((VariantType) d, off);
+                    appendVariant(t, off);
                     return;
                 case LIST:
-                    appendList(d, off);
+                case SIZED_LIST:
+                    appendList(t, off);
                     return;
                 case ERROR_CONTEXT:
                 case OWN:
@@ -172,13 +163,13 @@ final class TransferPlan {
                 case STREAM:
                 case FUTURE:
                     throw new UnsupportedOperationException(
-                            "transferring " + d.kind() + " values is not implemented yet");
+                            "transferring " + t.kind() + " values is not implemented yet");
                 default:
-                    throw new IllegalStateException("unhandled kind " + d.kind());
+                    throw new IllegalStateException("unhandled kind " + t.kind());
             }
         }
 
-        private void appendFlags(FlagsType t, int off) {
+        private void appendFlags(ResolvedType t, int off) {
             int size = sizeOf(t);
             long mask = Transferability.flagsMask(t);
             step(
@@ -187,13 +178,12 @@ final class TransferPlan {
                                     src, dst, srcPtr + off, dstPtr + off, size, mask));
         }
 
-        private void appendRecord(RecordType t, int off) {
+        private void appendRecord(ResolvedType t, int off) {
             int fieldOff = off;
-            for (LabelValType f : t.fields()) {
-                var fieldType = typeResolver.resolveDefValType(f.valType());
-                fieldOff = DefValType.alignTo(fieldOff, alignmentOf(fieldType));
-                append(fieldType, fieldOff);
-                fieldOff += sizeOf(fieldType);
+            for (ResolvedType.Field f : t.fields()) {
+                fieldOff = DefValType.alignTo(fieldOff, alignmentOf(f.type()));
+                append(f.type(), fieldOff);
+                fieldOff += sizeOf(f.type());
             }
         }
 
@@ -202,21 +192,14 @@ final class TransferPlan {
          * CanonicalAbi#transferValue} on why the payload offset is computed relative to the
          * variant's own base.
          */
-        private void appendVariant(VariantType t, int off) {
+        private void appendVariant(ResolvedType t, int off) {
             var cases = t.cases();
-            int discSize = sizeOf(t.discriminantType());
-            int payloadOff =
-                    off + DefValType.alignTo(discSize, t.maxCaseAlignment(typeResolver, ptrType));
+            int discSize = t.discriminantSize();
+            int payloadOff = off + DefValType.alignTo(discSize, t.maxCaseAlignment(ptrType));
             TransferPlan[] casePlans = new TransferPlan[cases.size()];
             for (int i = 0; i < cases.size(); i++) {
-                Case c = cases.get(i);
-                casePlans[i] =
-                        c.hasValType()
-                                ? compile(
-                                        typeResolver,
-                                        ptrType,
-                                        typeResolver.resolveDefValType(c.valType()))
-                                : null;
+                ResolvedType.Case c = cases.get(i);
+                casePlans[i] = c.hasType() ? compile(ptrType, c.type()) : null;
             }
             step(
                     (src, dst, srcPtr, dstPtr) -> {
@@ -233,30 +216,20 @@ final class TransferPlan {
                     });
         }
 
-        private void appendList(DefValType d, int off) {
-            if (d instanceof ListType) {
-                var t = (ListType) d;
-                var elemType = typeResolver.resolveDefValType(t.elementType());
-                if (t.isFixedSize()) {
-                    // A fixed-size list of copyable elements is itself copyable and was
-                    // handled by the caller, so this loop only ever walks elements that
-                    // genuinely need work.
-                    appendFixedSizeList(elemType, t.size(), off);
-                    return;
-                }
-                appendUnboundedList(elemType, off);
+        private void appendList(ResolvedType t, int off) {
+            if (t.isFixedSizeList()) {
+                // A fixed-size list of copyable elements is itself copyable and was
+                // handled by the caller, so this loop only ever walks elements that
+                // genuinely need work.
+                appendFixedSizeList(t.element(), t.fixedSize(), off);
                 return;
             }
-            if (d instanceof MapType.DespecializedMapType) {
-                appendUnboundedList(((MapType.DespecializedMapType) d).recordType(), off);
-                return;
-            }
-            throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+            appendUnboundedList(t.element(), off);
         }
 
-        private void appendFixedSizeList(DefValType elemType, int length, int off) {
+        private void appendFixedSizeList(ResolvedType elemType, int length, int off) {
             int elemSize = sizeOf(elemType);
-            TransferPlan elemPlan = compile(typeResolver, ptrType, elemType);
+            TransferPlan elemPlan = compile(ptrType, elemType);
             step(
                     (src, dst, srcPtr, dstPtr) -> {
                         for (int i = 0; i < length; i++) {
@@ -266,7 +239,7 @@ final class TransferPlan {
                     });
         }
 
-        private void appendUnboundedList(DefValType elemType, int off) {
+        private void appendUnboundedList(ResolvedType elemType, int off) {
             step(
                     (src, dst, srcPtr, dstPtr) ->
                             CanonicalAbi.transferUnboundedList(

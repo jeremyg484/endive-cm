@@ -5,7 +5,6 @@ import static java.util.Objects.requireNonNull;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import run.endive.wasm.types.ValType;
 
 public final class EnumType extends DefValType implements Specialized<VariantType> {
 
@@ -31,21 +30,6 @@ public final class EnumType extends DefValType implements Specialized<VariantTyp
             builder.addCase(Case.builder().withLabel(label).build());
         }
         return builder.build();
-    }
-
-    @Override
-    public int alignment(TypeResolver typeResolver, PointerType ptrType) {
-        return despecialize().alignment(typeResolver, ptrType);
-    }
-
-    @Override
-    public int elementSize(TypeResolver typeResolver, PointerType ptrType) {
-        return despecialize().elementSize(typeResolver, ptrType);
-    }
-
-    @Override
-    public List<ValType> flatten(TypeResolver typeResolver, PointerType ptrType) {
-        return despecialize().flatten(typeResolver, ptrType);
     }
 
     public static final class Builder {

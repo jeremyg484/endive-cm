@@ -5,10 +5,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.IntConsumer;
+import java.util.stream.Collectors;
 import run.endive.cm.abi.ResourceTypeRef;
 import run.endive.cm.types.CoreType;
 import run.endive.cm.types.Type;
 import run.endive.cm.types.TypeResolver;
+import run.endive.cm.types.TypeSpace;
 import run.endive.cm.types.WasmComponent;
 import run.endive.runtime.GlobalInstance;
 import run.endive.runtime.Memory;
@@ -32,9 +34,7 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
     private final List<GlobalInstance> coreGlobals = new ArrayList<>();
     private final List<TagInstance> coreTags = new ArrayList<>();
     private final List<ComponentFunction> functions = new ArrayList<>();
-    private final List<Type> types = new ArrayList<>();
-    private final List<ResourceTypeInstance> typeResources = new ArrayList<>();
-    private final List<TypeMatcher.Space> typeOrigins = new ArrayList<>();
+    private final List<TypeSlot> typeSlots = new ArrayList<>();
     private final List<ComponentClosure> childComponents = new ArrayList<>();
     private final List<ComponentInstance> instances = new ArrayList<>();
     private final Map<String, Object> exports = new LinkedHashMap<>();
@@ -101,18 +101,21 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
     private final class StoreSpace implements TypeMatcher.Space {
 
         @Override
-        public TypeMatcher.Resolved resolve(run.endive.cm.types.ValType valType) {
+        public TypeSpace.Resolved resolve(run.endive.cm.types.ValType valType) {
             if (valType.primValType() != null) {
-                return new TypeMatcher.Resolved(valType.primValType(), this);
+                return new TypeSpace.Resolved(valType.primValType(), this);
             }
             int index = valType.typeIdx();
-            Type type = getType(index);
-            if (type.defValType() == null) {
+            TypeSlot slot = slotAt(index);
+            if (slot.type.defValType() == null) {
                 throw new LinkageException(
-                        "Type index " + index + " must resolve to a value type but got " + type);
+                        "Type index "
+                                + index
+                                + " must resolve to a value type but got "
+                                + slot.type);
             }
-            TypeMatcher.Space origin = typeOrigins.get(index);
-            return new TypeMatcher.Resolved(type.defValType(), origin == null ? this : origin);
+            return new TypeSpace.Resolved(
+                    slot.type.defValType(), slot.origin == null ? this : slot.origin);
         }
 
         @Override
@@ -140,11 +143,50 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
      * that.
      */
     ResourceTypeInstance resourceTypeAtOrNull(int typeIdx) {
-        if (typeIdx < 0 || typeIdx >= typeResources.size()) {
-            throw new LinkageException(
-                    "Type index " + typeIdx + " out of bounds (size " + typeResources.size() + ")");
+        return slotAt(typeIdx).resourceType;
+    }
+
+    /**
+     * One numbered slot of the type index space: the type it holds, the runtime resource identity
+     * it names if it names one, and the space its own type indices count in.
+     *
+     * <p>The three travel together because they only mean anything together, and because copying
+     * a type from one index space into another has to bring all three along. Keeping them in one
+     * object is what makes that a single move rather than three that can drift apart.
+     */
+    static final class TypeSlot {
+
+        private final Type type;
+        private final ResourceTypeInstance resourceType;
+        private final TypeMatcher.Space origin;
+
+        private TypeSlot(Type type, ResourceTypeInstance resourceType, TypeMatcher.Space origin) {
+            this.type = type;
+            this.resourceType = resourceType;
+            this.origin = origin;
         }
-        return typeResources.get(typeIdx);
+
+        Type type() {
+            return type;
+        }
+
+        /** The resource type this slot names, or {@code null} if it holds an ordinary type. */
+        ResourceTypeInstance resourceType() {
+            return resourceType;
+        }
+
+        /** The space {@link #type}'s own indices belong to, or {@code null} for the owning store. */
+        TypeMatcher.Space origin() {
+            return origin;
+        }
+    }
+
+    TypeSlot slotAt(int index) {
+        if (index < 0 || index >= typeSlots.size()) {
+            throw new LinkageException(
+                    "Type index " + index + " out of bounds (size " + typeSlots.size() + ")");
+        }
+        return typeSlots.get(index);
     }
 
     boolean isRoot() {
@@ -253,31 +295,29 @@ public final class ComponentStore implements TypeResolver, ResourceTypeRef.Resol
      * re-exported — has to bring its identity along, since that identity is the type.
      */
     void addType(Type type, ResourceTypeInstance resourceType, TypeMatcher.Space origin) {
-        types.add(type);
-        typeResources.add(resourceType);
-        typeOrigins.add(origin);
+        typeSlots.add(new TypeSlot(type, resourceType, origin));
+    }
+
+    /**
+     * Appends a slot taken from an index space whole, which is what re-exporting a type or
+     * resolving an {@code eq} bound to its own bound amounts to.
+     */
+    void addType(TypeSlot slot) {
+        typeSlots.add(slot);
     }
 
     /** The space the type at {@code index} resolves in, or {@code null} if it resolves here. */
     TypeMatcher.Space typeOriginAt(int index) {
-        if (index < 0 || index >= typeOrigins.size()) {
-            throw new LinkageException(
-                    "Type index " + index + " out of bounds (size " + typeOrigins.size() + ")");
-        }
-        return typeOrigins.get(index);
+        return slotAt(index).origin;
     }
 
     @Override
     public Type getType(int index) {
-        if (index < 0 || index >= types.size()) {
-            throw new LinkageException(
-                    "Type index " + index + " out of bounds (size " + types.size() + ")");
-        }
-        return types.get(index);
+        return slotAt(index).type;
     }
 
     public List<Type> getTypes() {
-        return types;
+        return typeSlots.stream().map(TypeSlot::type).collect(Collectors.toUnmodifiableList());
     }
 
     /** The scope this component was written inside; {@code null} at the top of a tree. */

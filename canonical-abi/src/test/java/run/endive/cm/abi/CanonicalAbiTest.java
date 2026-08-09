@@ -15,7 +15,6 @@ import run.endive.cm.types.StreamType;
 import run.endive.cm.types.TupleType;
 import run.endive.cm.types.TypeResolver;
 import run.endive.cm.types.ValType;
-import run.endive.cm.types.VariantType;
 
 class CanonicalAbiTest {
 
@@ -32,7 +31,7 @@ class CanonicalAbiTest {
                         .addElementType(prim(PrimValType.U8))
                         .addElementType(prim(PrimValType.U32))
                         .build();
-        var record = (RecordType) CanonicalAbi.despecialize(tuple);
+        var record = tuple.despecialize();
         assertThat(record.fields()).extracting(LabelValType::label).containsExactly("0", "1");
     }
 
@@ -40,7 +39,7 @@ class CanonicalAbiTest {
     void enumDespecializesToVariantOfPayloadlessCases() {
         var enumType =
                 EnumType.builder().addLabel("red").addLabel("green").addLabel("blue").build();
-        var variant = (VariantType) CanonicalAbi.despecialize(enumType);
+        var variant = enumType.despecialize();
         assertThat(variant.cases()).extracting(Case::label).containsExactly("red", "green", "blue");
         assertThat(variant.cases()).allMatch(c -> !c.hasValType());
     }
@@ -48,14 +47,14 @@ class CanonicalAbiTest {
     @Test
     void optionDespecializesToNoneSomeVariant() {
         var option = OptionType.builder().withValType(prim(PrimValType.U32)).build();
-        var variant = (VariantType) CanonicalAbi.despecialize(option);
+        var variant = option.despecialize();
         assertThat(variant.cases()).extracting(Case::label).containsExactly("none", "some");
     }
 
     @Test
     void resultDespecializesToOkErrorVariant() {
         var result = ResultType.builder().withOk(prim(PrimValType.U32)).build();
-        var variant = (VariantType) CanonicalAbi.despecialize(result);
+        var variant = result.despecialize();
         assertThat(variant.cases()).extracting(Case::label).containsExactly("ok", "error");
         assertThat(variant.cases().get(0).hasValType()).isTrue();
         assertThat(variant.cases().get(1).hasValType()).isFalse();

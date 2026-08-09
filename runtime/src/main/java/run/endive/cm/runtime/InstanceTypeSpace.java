@@ -5,6 +5,7 @@ import java.util.List;
 import run.endive.cm.abi.ResourceTypeRef;
 import run.endive.cm.types.CoreType;
 import run.endive.cm.types.Type;
+import run.endive.cm.types.TypeSpace;
 import run.endive.cm.types.ValType;
 
 /**
@@ -35,9 +36,9 @@ final class InstanceTypeSpace implements TypeMatcher.Space {
     private final List<CoreType> coreTypes = new ArrayList<>();
 
     @Override
-    public TypeMatcher.Resolved resolve(ValType valType) {
+    public TypeSpace.Resolved resolve(ValType valType) {
         if (valType.primValType() != null) {
-            return new TypeMatcher.Resolved(valType.primValType(), this);
+            return new TypeSpace.Resolved(valType.primValType(), this);
         }
         Slot slot = slotAt(valType.typeIdx());
         if (slot.type.defValType() == null) {
@@ -47,7 +48,7 @@ final class InstanceTypeSpace implements TypeMatcher.Space {
                             + " must resolve to a value type but got "
                             + slot.type);
         }
-        return new TypeMatcher.Resolved(slot.type.defValType(), slot.space);
+        return new TypeSpace.Resolved(slot.type.defValType(), slot.space);
     }
 
     @Override

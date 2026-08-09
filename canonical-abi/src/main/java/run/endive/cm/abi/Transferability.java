@@ -2,14 +2,8 @@ package run.endive.cm.abi;
 
 import java.util.IdentityHashMap;
 import java.util.Map;
-import run.endive.cm.types.DefValType;
-import run.endive.cm.types.FlagsType;
-import run.endive.cm.types.LabelValType;
-import run.endive.cm.types.ListType;
-import run.endive.cm.types.MapType;
 import run.endive.cm.types.PointerType;
-import run.endive.cm.types.RecordType;
-import run.endive.cm.types.TypeResolver;
+import run.endive.cm.types.ResolvedType;
 
 /**
  * Static analysis backing the direct memory-to-memory transfer path: decides which
@@ -62,31 +56,24 @@ final class Transferability {
      * Whether a value of {@code t} occupies the same bytes in both memories and can be moved
      * with a single verbatim copy, with no inspection, validation or normalization.
      */
-    static boolean isBitwiseCopyable(TypeResolver typeResolver, PointerType ptrType, DefValType t) {
-        return isBitwiseCopyable(typeResolver, ptrType, t, new IdentityHashMap<>());
+    static boolean isBitwiseCopyable(PointerType ptrType, ResolvedType t) {
+        return isBitwiseCopyable(ptrType, t, new IdentityHashMap<>());
     }
 
     private static boolean isBitwiseCopyable(
-            TypeResolver typeResolver,
-            PointerType ptrType,
-            DefValType t,
-            Map<DefValType, Boolean> cache) {
-        var d = CanonicalAbi.despecialize(t);
-        Boolean cached = cache.get(d);
+            PointerType ptrType, ResolvedType t, Map<ResolvedType, Boolean> cache) {
+        Boolean cached = cache.get(t);
         if (cached != null) {
             return cached;
         }
-        boolean result = computeBitwiseCopyable(typeResolver, ptrType, d, cache);
-        cache.put(d, result);
+        boolean result = computeBitwiseCopyable(ptrType, t, cache);
+        cache.put(t, result);
         return result;
     }
 
     private static boolean computeBitwiseCopyable(
-            TypeResolver typeResolver,
-            PointerType ptrType,
-            DefValType d,
-            Map<DefValType, Boolean> cache) {
-        switch (d.kind()) {
+            PointerType ptrType, ResolvedType t, Map<ResolvedType, Boolean> cache) {
+        switch (t.kind()) {
             case U8:
             case U16:
             case U32:
@@ -109,37 +96,22 @@ final class Transferability {
             case FUTURE:
                 return false;
             case FLAGS:
-                return flagsFillWidth(typeResolver, ptrType, (FlagsType) d);
+                return flagsFillWidth(ptrType, t);
             case RECORD:
-                for (LabelValType f : ((RecordType) d).fields()) {
-                    if (!isBitwiseCopyable(
-                            typeResolver,
-                            ptrType,
-                            typeResolver.resolveDefValType(f.valType()),
-                            cache)) {
+                for (ResolvedType.Field f : t.fields()) {
+                    if (!isBitwiseCopyable(ptrType, f.type(), cache)) {
                         return false;
                     }
                 }
                 return true;
             case LIST:
-                // Only a fixed-size list is stored inline; an unbounded one is a
-                // (pointer, length) pair whose payload must be re-allocated in the
-                // destination.
-                if (d instanceof ListType) {
-                    var list = (ListType) d;
-                    return list.isFixedSize()
-                            && isBitwiseCopyable(
-                                    typeResolver,
-                                    ptrType,
-                                    typeResolver.resolveDefValType(list.elementType()),
-                                    cache);
-                }
-                if (d instanceof MapType.DespecializedMapType) {
-                    return false;
-                }
-                throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+            case SIZED_LIST:
+                // Only a fixed-size list is stored inline; an unbounded one — including a
+                // despecialized map — is a (pointer, length) pair whose payload must be
+                // re-allocated in the destination.
+                return t.isFixedSizeList() && isBitwiseCopyable(ptrType, t.element(), cache);
             default:
-                throw new IllegalStateException("unhandled kind " + d.kind());
+                throw new IllegalStateException("unhandled kind " + t.kind());
         }
     }
 
@@ -163,31 +135,24 @@ final class Transferability {
      * {@code i32} slot narrows to the low 32 bits first, so that difference is unobservable;
      * a consumer that reads such a slot as a full 64-bit value would see it.
      */
-    static boolean isFlatIdentity(TypeResolver typeResolver, PointerType ptrType, DefValType t) {
-        return isFlatIdentity(typeResolver, ptrType, t, new IdentityHashMap<>());
+    static boolean isFlatIdentity(PointerType ptrType, ResolvedType t) {
+        return isFlatIdentity(ptrType, t, new IdentityHashMap<>());
     }
 
     private static boolean isFlatIdentity(
-            TypeResolver typeResolver,
-            PointerType ptrType,
-            DefValType t,
-            Map<DefValType, Boolean> cache) {
-        var d = CanonicalAbi.despecialize(t);
-        Boolean cached = cache.get(d);
+            PointerType ptrType, ResolvedType t, Map<ResolvedType, Boolean> cache) {
+        Boolean cached = cache.get(t);
         if (cached != null) {
             return cached;
         }
-        boolean result = computeFlatIdentity(typeResolver, ptrType, d, cache);
-        cache.put(d, result);
+        boolean result = computeFlatIdentity(ptrType, t, cache);
+        cache.put(t, result);
         return result;
     }
 
     private static boolean computeFlatIdentity(
-            TypeResolver typeResolver,
-            PointerType ptrType,
-            DefValType d,
-            Map<DefValType, Boolean> cache) {
-        switch (d.kind()) {
+            PointerType ptrType, ResolvedType t, Map<ResolvedType, Boolean> cache) {
+        switch (t.kind()) {
             case U32:
             case S32:
             case U64:
@@ -213,36 +178,21 @@ final class Transferability {
                 // validated and its unused joined slots zero-padded.
                 return false;
             case FLAGS:
-                return flagsFillFlatSlot((FlagsType) d);
+                return flagsFillFlatSlot(t);
             case RECORD:
-                for (LabelValType f : ((RecordType) d).fields()) {
-                    if (!isFlatIdentity(
-                            typeResolver,
-                            ptrType,
-                            typeResolver.resolveDefValType(f.valType()),
-                            cache)) {
+                for (ResolvedType.Field f : t.fields()) {
+                    if (!isFlatIdentity(ptrType, f.type(), cache)) {
                         return false;
                     }
                 }
                 return true;
             case LIST:
+            case SIZED_LIST:
                 // A fixed-size list flattens to its elements laid end to end; an unbounded
                 // one is a (pointer, length) pair whose payload has to be re-allocated.
-                if (d instanceof ListType) {
-                    var list = (ListType) d;
-                    return list.isFixedSize()
-                            && isFlatIdentity(
-                                    typeResolver,
-                                    ptrType,
-                                    typeResolver.resolveDefValType(list.elementType()),
-                                    cache);
-                }
-                if (d instanceof MapType.DespecializedMapType) {
-                    return false;
-                }
-                throw new IllegalStateException("unhandled LIST-kind type " + d.getClass());
+                return t.isFixedSizeList() && isFlatIdentity(ptrType, t.element(), cache);
             default:
-                throw new IllegalStateException("unhandled kind " + d.kind());
+                throw new IllegalStateException("unhandled kind " + t.kind());
         }
     }
 
@@ -258,12 +208,12 @@ final class Transferability {
      * siblings do that work. The async value types are rejected because they are not modeled
      * here yet.
      */
-    static boolean isSupported(TypeResolver typeResolver, DefValType t) {
-        return !CanonicalAbi.contains(typeResolver, t, Transferability::isUnsupportedKind);
+    static boolean isSupported(ResolvedType t) {
+        return !CanonicalAbi.contains(t, Transferability::isUnsupportedKind);
     }
 
-    private static boolean isUnsupportedKind(DefValType d) {
-        switch (d.kind()) {
+    private static boolean isUnsupportedKind(ResolvedType t) {
+        switch (t.kind()) {
             case ERROR_CONTEXT:
             case OWN:
             case BORROW:
@@ -276,7 +226,7 @@ final class Transferability {
     }
 
     /** The bit mask lifting a {@code flags} value applies, i.e. one bit per label. */
-    static long flagsMask(FlagsType t) {
+    static long flagsMask(ResolvedType t) {
         int n = t.labels().size();
         return n >= Long.SIZE ? -1L : (1L << n) - 1;
     }
@@ -286,8 +236,8 @@ final class Transferability {
      * no slack bits for lifting to drop and lowering to re-zero. That width is as narrow as
      * one byte, so eight labels are enough.
      */
-    static boolean flagsFillWidth(TypeResolver typeResolver, PointerType ptrType, FlagsType t) {
-        return t.labels().size() >= t.elementSize(typeResolver, ptrType) * Byte.SIZE;
+    static boolean flagsFillWidth(PointerType ptrType, ResolvedType t) {
+        return t.labels().size() >= t.elementSize(ptrType) * Byte.SIZE;
     }
 
     /**
@@ -295,7 +245,7 @@ final class Transferability {
      * {@code i32} regardless of how few labels there are — so this needs a full 32 of them,
      * where {@link #flagsFillWidth} is satisfied by 8.
      */
-    static boolean flagsFillFlatSlot(FlagsType t) {
+    static boolean flagsFillFlatSlot(ResolvedType t) {
         return t.labels().size() >= Integer.SIZE;
     }
 }
