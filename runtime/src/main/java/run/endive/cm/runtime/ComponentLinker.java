@@ -122,6 +122,9 @@ public final class ComponentLinker {
             boolean root,
             ComponentStore parent) {
         ComponentStore store = new ComponentStore(component, root, parent);
+        // Nothing may enter the instance until it is fully built. A core `start` function runs
+        // part-way through the loop below and can reach back in through a lowered function.
+        store.getInstance().setMayEnter(false);
 
         if (!imports.isEmpty()) {
             store.addImports(imports);
@@ -155,6 +158,7 @@ public final class ComponentLinker {
             }
         }
 
+        store.getInstance().setMayEnter(true);
         return store.getInstance();
     }
 
@@ -1686,6 +1690,19 @@ public final class ComponentLinker {
         return type.funcType();
     }
 
+    /**
+     * Traps if a call is not allowed to enter {@code instance} yet.
+     *
+     * <p>Checked on the lowering side rather than on lifting, which is where entering
+     * conceptually happens, because the fused paths below hand the callee's core function
+     * straight to the caller and so never run the lift trampoline at all.
+     */
+    private static void requireMayEnter(ComponentInstance instance) {
+        if (instance != null && !instance.mayEnter()) {
+            throw new TrapException("cannot enter component instance");
+        }
+    }
+
     private void processCanonLower(ComponentStore store, CanonLower lower) {
         int funcIdx = (int) lower.funcIdx().idx();
         ComponentFunction func = store.getFunction(funcIdx);
@@ -1699,6 +1716,9 @@ public final class ComponentLinker {
         FunctionType coreFuncType =
                 CanonicalAbi.flattenFuncType(callerContext, componentFuncType, Direction.LOWER);
 
+        // The instance a call through this lowered function ends up inside.
+        ComponentInstance target = func.definingInstance();
+
         // Direct call path
         if (func.isLifted()
                 && ValueTransfer.isIdentityTransfer(
@@ -1707,13 +1727,22 @@ public final class ComponentLinker {
             CoreFunction<?> callee = func.liftedFunction();
             PostReturn postReturn = func.context().postReturn();
             if (postReturn == null) {
-                store.addCoreFunction(callee);
+                // Even with nothing to translate, the call still crosses into another instance,
+                // so it cannot be the bare callee — the crossing itself has to be guarded.
+                store.addCoreFunction(
+                        new CoreImportFunction(
+                                coreFuncType,
+                                (instance, args) -> {
+                                    requireMayEnter(target);
+                                    return callee.apply(args);
+                                }));
                 return;
             }
             store.addCoreFunction(
                     new CoreImportFunction(
                             coreFuncType,
                             (instance, args) -> {
+                                requireMayEnter(target);
                                 long[] results = callee.apply(args);
                                 postReturn.call(results != null ? results : EMPTY_CORE_VALUES);
                                 return results;
@@ -1730,6 +1759,7 @@ public final class ComponentLinker {
             coreFuncHandle =
                     (instance, args) -> {
                         // Memory copy path
+                        requireMayEnter(target);
                         long[] calleeArgs = transfer.transferParams(args);
                         long[] calleeResults = func.liftedFunction().apply(calleeArgs);
 
@@ -1755,6 +1785,7 @@ public final class ComponentLinker {
             coreFuncHandle =
                     (instance, args) -> {
                         // Full trampoline path
+                        requireMayEnter(target);
                         Subtask subtask = scopesBorrows ? new Subtask() : null;
                         LiftLowerContext callContext =
                                 subtask == null

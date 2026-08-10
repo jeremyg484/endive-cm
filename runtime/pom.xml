@@ -69,6 +69,16 @@
         <configuration>
           <testSuiteRepoRef>706074c96bc14cfc58469e1bdc452bb4d91921c7</testSuiteRepoRef>
           <includedWasts>
+            <wast>linking/link-time-virtualization.wast</wast>
+            <wast>linking/shared-everything-dynamic-linking.wast</wast>
+            <wast>linking/unit.wast</wast>
+            <wast>resources/multiple-resources.wast</wast>
+            <wast>validation/abi.wast</wast>
+            <wast>validation/attributes.wast</wast>
+            <wast>validation/external-visibility.wast</wast>
+            <wast>validation/kebab.wast</wast>
+            <wast>validation/outer-alias.wast</wast>
+            <wast>validation/resources.wast</wast>
             <wast>wasm-tools/adapt.wast</wast>
             <wast>wasm-tools/alias.wast</wast>
             <wast>wasm-tools/big.wast</wast>
@@ -114,20 +124,6 @@
             <wast>wasmtime/strings.wast</wast>
             <wast>wasmtime/tags.wast</wast>
             <wast>wasmtime/types.wast</wast>
-
-            <wast>linking/link-time-virtualization.wast</wast>
-            <wast>linking/shared-everything-dynamic-linking.wast</wast>
-            <wast>linking/unit.wast</wast>
-
-            <wast>resources/multiple-resources.wast</wast>
-
-            <wast>validation/abi.wast</wast>
-            <wast>validation/attributes.wast</wast>
-            <wast>validation/external-visibility.wast</wast>
-            <wast>validation/kebab.wast</wast>
-            <wast>validation/outer-alias.wast</wast>
-            <wast>validation/resources.wast</wast>
-
           </includedWasts>
           <excludedWasts>
             <wast>async/async-calls-sync.wast</wast>
@@ -167,12 +163,6 @@
 
           </excludedWasts>
           <excludedTests>
-            <test>CmSpecWasmtimeTypesTest.test20</test>
-            <test>CmSpecWasmtimeAdapterTest.test5</test>
-            <test>CmSpecWasmtimeInstanceTest.test5</test>
-            <test>CmSpecWasmtimeSimpleTest.test4</test>
-            <test>CmSpecWasmtimeSimpleTest.test5</test>
-
             <!-- These require 64-bit memory support, not yet implemented in Endive for core Wasm -->
             <test>CmSpecWasmToolsMemory64Test.test2</test>
             <test>CmSpecWasmToolsMemory64Test.test3</test>

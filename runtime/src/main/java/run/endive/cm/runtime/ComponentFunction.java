@@ -32,6 +32,18 @@ public interface ComponentFunction {
         return false;
     }
 
+    /**
+     * The component instance a call to this function enters, or {@code null} if calling it
+     * enters no component at all.
+     *
+     * <p>Used to decide whether entering is allowed right now — see {@link
+     * ComponentInstance#mayEnter()}. A function the embedder supplied reports the instance it was
+     * registered against, which is never mid-instantiation, so host imports are never blocked.
+     */
+    default ComponentInstance definingInstance() {
+        return null;
+    }
+
     ComponentFunction typed(
             HostTypeDescriptor resultDescriptor, HostTypeDescriptor... paramDescriptors);
 }

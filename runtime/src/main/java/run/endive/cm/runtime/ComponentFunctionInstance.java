@@ -147,6 +147,11 @@ public final class ComponentFunctionInstance implements ComponentFunction {
     }
 
     @Override
+    public ComponentInstance definingInstance() {
+        return store.getInstance();
+    }
+
+    @Override
     public boolean isLifted() {
         return liftLowerContext != null;
     }
@@ -268,6 +273,11 @@ public final class ComponentFunctionInstance implements ComponentFunction {
         @Override
         public TypeResolver typeResolver() {
             return typeResolver;
+        }
+
+        @Override
+        public ComponentInstance definingInstance() {
+            return store.getInstance();
         }
 
         @Override
