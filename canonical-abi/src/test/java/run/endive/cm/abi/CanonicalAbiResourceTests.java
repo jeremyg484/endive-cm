@@ -21,14 +21,7 @@ import run.endive.runtime.ByteArrayMemory;
 import run.endive.runtime.TrapException;
 import run.endive.wasm.types.MemoryLimits;
 
-/**
- * Lifting and lowering of {@code own} and {@code borrow} handles.
- *
- * <p>Unlike the other value types, a handle's meaning lives in a table rather than in its bytes,
- * so these tests are as much about what happens to the table as about the value produced: which
- * entries a lift consumes, which a lower creates, and which of the borrow counters move.
- */
-class CanonicalAbiResourceTest {
+class CanonicalAbiResourceTests {
 
     private static final int REP = 42;
 
@@ -48,8 +41,6 @@ class CanonicalAbiResourceTest {
 
     @Test
     void liftingAnOwnHandleTransfersItOutOfTheTable() {
-        // Ownership moves to the lowering side, so the index must stop naming anything here —
-        // otherwise both components would believe they own the resource.
         var f = new Fixture();
         int index = f.handles.add(f.rt, REP, true, null);
 
@@ -64,7 +55,7 @@ class CanonicalAbiResourceTest {
     @Test
     void liftingAnOwnHandleTrapsWhenTheHandleIsOnlyBorrowed() {
         var f = new Fixture();
-        int index = f.handles.add(f.rt, REP, false, new FakeTask());
+        int index = f.handles.add(f.rt, REP, false, new StubTask());
 
         assertThatThrownBy(() -> CanonicalAbi.liftOwn(f.ctx, index, f.ownType))
                 .isInstanceOf(TrapException.class)
@@ -73,8 +64,6 @@ class CanonicalAbiResourceTest {
 
     @Test
     void liftingAnOwnHandleTrapsWhileItIsLentOut() {
-        // Giving the resource away while a callee still holds a borrow of it would leave that
-        // borrow dangling, so the transfer is refused until the lend is returned.
         var f = new Fixture();
         int index = f.handles.add(f.rt, REP, true, null);
         f.handles.handleAt(index).lend();
@@ -86,10 +75,8 @@ class CanonicalAbiResourceTest {
 
     @Test
     void liftingTrapsWhenTheHandleBelongsToADifferentResourceType() {
-        // Two resource types with identical declarations are still distinct types; only
-        // reference identity decides, so a handle from one cannot be used against the other.
         var f = new Fixture();
-        var other = new FakeResourceType();
+        var other = new StubResourceType();
         int index = f.handles.add(other, REP, true, null);
 
         assertThatThrownBy(() -> CanonicalAbi.liftOwn(f.ctx, index, f.ownType))
@@ -127,8 +114,6 @@ class CanonicalAbiResourceTest {
 
     @Test
     void resolvingTheCallReturnsEveryHandleItBorrowed() {
-        // Two borrows of the same handle in one call both have to come back, which is why the
-        // count is a count rather than a flag.
         var f = new Fixture();
         int index = f.handles.add(f.rt, REP, true, null);
         var subtask = new FakeSubtask();
@@ -141,7 +126,7 @@ class CanonicalAbiResourceTest {
         subtask.releaseLenders();
 
         assertThat(f.handles.handleAt(index).numLends()).isZero();
-        // ...and only now may the resource be given away.
+
         assertThat(CanonicalAbi.liftOwn(f.ctx, index, f.ownType))
                 .isEqualTo(ResourceValue.owned(f.rt, REP));
     }
@@ -149,7 +134,7 @@ class CanonicalAbiResourceTest {
     @Test
     void loweringABorrowMintsAHandleAndChargesItToTheCall() {
         var f = new Fixture();
-        var task = new FakeTask();
+        var task = new StubTask();
 
         int index =
                 CanonicalAbi.lowerBorrow(
@@ -166,12 +151,9 @@ class CanonicalAbiResourceTest {
 
     @Test
     void loweringABorrowIntoTheImplementingComponentPassesTheRepItself() {
-        // The one case where the value crossing the boundary is not a table index: the
-        // component that implements the resource type is handed the representation directly,
-        // so there is no handle to mint and nothing to charge.
         var f = new Fixture();
         f.rt.impl = f.handles;
-        var task = new FakeTask();
+        var task = new StubTask();
 
         int lowered =
                 CanonicalAbi.lowerBorrow(
@@ -193,7 +175,7 @@ class CanonicalAbiResourceTest {
         var f = new Fixture();
         CanonicalAbi.store(f.ctx, ResourceValue.owned(f.rt, REP), f.ownType, 0);
 
-        // Only the table index reaches memory; the rep stays behind.
+        // Only the table index reaches memory and the rep stays behind.
         assertThat(f.ctx.memory().readInt(0)).isEqualTo(1);
         assertThat(CanonicalAbi.load(f.ctx, 0, f.ownType))
                 .isEqualTo(ResourceValue.owned(f.rt, REP));
@@ -214,7 +196,7 @@ class CanonicalAbiResourceTest {
     @Test
     void handlesAreNeverMovedByTheDirectTransferPath() {
         // A handle index means something only relative to one instance's table, so no byte copy
-        // can carry it: canTransfer has to reject these and fall back to lift/lower.
+        // can carry it. canTransfer has to reject these and fall back to lift/lower.
         var f = new Fixture();
         var space = TypeSpace.of(f.types);
         var own = ResolvedType.of(f.ownType, space);
@@ -227,7 +209,7 @@ class CanonicalAbiResourceTest {
 
     @Test
     void loweringABorrowWithoutACallToChargeItToIsARuntimeError() {
-        // Not a trap: a context whose types contain a borrow but which was given no scope is a
+        // A context whose types contain a borrow but which was given no scope is a
         // wiring mistake in the embedder, not something guest code can provoke.
         var f = new Fixture();
         assertThatThrownBy(
@@ -244,8 +226,8 @@ class CanonicalAbiResourceTest {
 
     /** A single resource type at type index 0, with an empty handle table and no borrow scope. */
     private static final class Fixture {
-        final FakeResourceType rt = new FakeResourceType();
-        final FakeHandles handles = new FakeHandles();
+        final StubResourceType rt = new StubResourceType();
+        final StubHanleTable handles = new StubHanleTable();
         final OwnType ownType = OwnType.builder().withTypeIdx(0).build();
         final BorrowType borrowType = BorrowType.builder().withTypeIdx(1).build();
         final Types types = new Types();
@@ -282,22 +264,22 @@ class CanonicalAbiResourceTest {
         }
     }
 
-    private static final class FakeResourceType implements ResourceTypeRef {
+    private static final class StubResourceType implements ResourceTypeRef {
         private HandleTable impl;
 
         @Override
-        public HandleTable impl() {
+        public HandleTable handleTable() {
             return impl;
         }
     }
 
-    private static final class FakeHandles implements HandleTable {
+    private static final class StubHanleTable implements HandleTable {
         private final Map<Integer, Object> entries = new LinkedHashMap<>();
         private int next = 1;
 
         @Override
-        public int add(ResourceTypeRef rt, int rep, boolean own, BorrowScope.Task borrowScope) {
-            return put(new FakeHandle(rt, rep, own, borrowScope));
+        public int add(ResourceTypeRef rt, int rep, boolean own, BorrowScope.Callee borrowScope) {
+            return put(new StubHandle(rt, rep, own, borrowScope));
         }
 
         @Override
@@ -330,20 +312,23 @@ class CanonicalAbiResourceTest {
             return entries.size();
         }
 
-        FakeHandle handleAt(int index) {
-            return (FakeHandle) entries.get(index);
+        StubHandle handleAt(int index) {
+            return (StubHandle) entries.get(index);
         }
     }
 
-    private static final class FakeHandle implements Handle {
+    private static final class StubHandle implements ResourceState {
         private final ResourceTypeRef resourceType;
         private final int rep;
         private final boolean own;
-        private final BorrowScope.Task borrowScope;
+        private final BorrowScope.Callee borrowScope;
         private int numLends;
 
-        FakeHandle(
-                ResourceTypeRef resourceType, int rep, boolean own, BorrowScope.Task borrowScope) {
+        StubHandle(
+                ResourceTypeRef resourceType,
+                int rep,
+                boolean own,
+                BorrowScope.Callee borrowScope) {
             this.resourceType = resourceType;
             this.rep = rep;
             this.own = own;
@@ -366,7 +351,7 @@ class CanonicalAbiResourceTest {
         }
 
         @Override
-        public BorrowScope.Task borrowScope() {
+        public BorrowScope.Callee borrowScope() {
             return borrowScope;
         }
 
@@ -386,7 +371,7 @@ class CanonicalAbiResourceTest {
         }
     }
 
-    private static final class FakeTask implements BorrowScope.Task {
+    private static final class StubTask implements BorrowScope.Callee {
         private int numBorrows;
 
         @Override
@@ -405,18 +390,18 @@ class CanonicalAbiResourceTest {
         }
     }
 
-    private static final class FakeSubtask implements BorrowScope.Subtask {
-        private final List<Handle> lenders = new ArrayList<>();
+    private static final class FakeSubtask implements BorrowScope.Caller {
+        private final List<ResourceState> lenders = new ArrayList<>();
 
         @Override
-        public void addLender(Handle handle) {
+        public void addLender(ResourceState handle) {
             handle.lend();
             lenders.add(handle);
         }
 
         @Override
         public void releaseLenders() {
-            lenders.forEach(Handle::returnLend);
+            lenders.forEach(ResourceState::returnLend);
             lenders.clear();
         }
     }

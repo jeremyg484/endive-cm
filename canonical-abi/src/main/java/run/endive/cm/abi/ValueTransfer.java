@@ -8,21 +8,15 @@ import run.endive.cm.types.LabelValType;
 import run.endive.cm.types.ValType;
 
 /**
- * A component function's argument and result transfer, compiled once against a fixed source
+ * A component function's direct argument and result transfer, compiled once against a fixed source
  * and destination context.
  *
- * <p>This is the form the direct transfer path is meant to be used in when two core modules
- * are wired together: the contexts come from a pair of {@code canon lift} and {@code canon
- * lower} definitions and never change, so the type walk, the flat-versus-spilled decision,
- * the copy-span coalescing and the string strategy can all be settled at link time and
- * replayed per call.
+ * <p>This is meant to be used as an optimization in lifting and lowering when two core modules
+ * are wired together for a component-to-component call. The contexts come from a pair of
+ * {@code canon lift} and {@code canon lower} definitions and never change, so operations may be
+ * determined at link time and replayed per call if {@link #canTransfer} returns true.
  *
- * <p>{@link CanonicalAbi#transferFlatParams} and {@link CanonicalAbi#transferFlatResults}
- * compute the same results by re-deriving everything on each call. They are the readable
- * definition of what a plan means, and the two are cross-checked against each other in the
- * tests.
- *
- * <p>Compile only after {@link #canTransfer} accepts the same three arguments; otherwise
+ * <p>Compile only after {@link #canTransfer} accepts the same three arguments, otherwise
  * compilation may throw for a function the lift/lower path would have handled.
  */
 public final class ValueTransfer {
@@ -44,9 +38,8 @@ public final class ValueTransfer {
     }
 
     /**
-     * Whether {@code ft}'s values can move directly between the two contexts. A {@code false}
-     * result means the caller should keep using the lift/lower pair; it is never wrong, only
-     * slower. The check is symmetric, so the order of the two contexts does not matter here.
+     * Whether function type {@code ft}'s values can move directly between the two contexts.
+     * A {@code false} result means the caller should keep using the full lift/lower trampoline.
      *
      * @see CanonicalAbi#canTransfer
      */
@@ -56,10 +49,10 @@ public final class ValueTransfer {
     }
 
     /**
-     * Whether {@code ft} needs no adapter at all: the caller's flat core arguments can go
-     * straight to the callee's core function and its results straight back. When this holds
-     * and the callee has no {@code post_return}, there is nothing to compile — register the
-     * callee's core function as the caller's import.
+     * Whether function type {@code ft} needs no adapter at all and the caller's flat core
+     * arguments can go straight to the callee's core function and its results straight back.
+     * When this holds and the callee has no {@code post_return}, there is nothing to compile
+     * and the callee's core function can be registered as the caller's import.
      *
      * @see CanonicalAbi#isIdentityTransfer
      */
@@ -69,11 +62,11 @@ public final class ValueTransfer {
     }
 
     /**
-     * Compiles the transfer of {@code ft}'s parameters and result.
+     * Compiles the transfer of function type {@code ft}'s parameters and result.
      *
-     * @param caller the context the call arrives from — the {@code canon lower} side, whose
+     * @param caller the context the call arrives from, the {@code canon lower} side, whose
      *     memory holds the arguments and receives the results
-     * @param callee the context the call is dispatched into — the {@code canon lift} side,
+     * @param callee the context the call is dispatched into, the {@code canon lift} side,
      *     whose memory receives the arguments and produces the results
      * @param ft the component-level function type both sides agree on
      */
@@ -96,7 +89,7 @@ public final class ValueTransfer {
 
     /**
      * Transfers the caller's flat core arguments into the callee's, allocating in the callee
-     * whatever the values need. Call this on the way in, and pass the result to the callee's
+     * whatever the values need. Call this on the way in and pass the result to the callee's
      * core function.
      */
     public long[] transferParams(long[] flatArgs) {
@@ -104,12 +97,12 @@ public final class ValueTransfer {
     }
 
     /**
-     * Transfers the callee's flat core results back into the caller — note the direction is
+     * Transfers the callee's flat core results back into the caller. The direction is
      * the reverse of {@link #transferParams}, so this allocates in the <em>caller</em>.
      *
      * <p>When the results spill into linear memory, {@code outParam}'s first element is the
      * caller-provided spill pointer (the extra out-pointer argument {@code flattenFuncType}
-     * appends in the {@link Direction#LOWER} direction) and no flat values are returned; when
+     * appends in the {@link Direction#LOWER} direction) and no flat values are returned. When
      * it is null, caller storage is freshly allocated and the returned list is the spill
      * pointer.
      *

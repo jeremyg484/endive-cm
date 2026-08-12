@@ -24,7 +24,7 @@ import run.endive.runtime.Memory;
 import run.endive.runtime.TrapException;
 import run.endive.wasm.types.MemoryLimits;
 
-class CanonicalAbiLoadStoreTest {
+class CanonicalAbiLoadStoreTests {
 
     private static final TypeResolver STUB_RESOLVER = index -> null;
 

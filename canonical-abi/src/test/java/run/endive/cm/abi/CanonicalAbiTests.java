@@ -16,7 +16,7 @@ import run.endive.cm.types.TupleType;
 import run.endive.cm.types.TypeResolver;
 import run.endive.cm.types.ValType;
 
-class CanonicalAbiTest {
+class CanonicalAbiTests {
 
     private static ValType prim(PrimValType t) {
         return ValType.builder().withPrimValType(t).build();

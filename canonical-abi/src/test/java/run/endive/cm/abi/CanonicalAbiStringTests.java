@@ -13,7 +13,7 @@ import run.endive.runtime.Memory;
 import run.endive.runtime.TrapException;
 import run.endive.wasm.types.MemoryLimits;
 
-class CanonicalAbiStringTest {
+class CanonicalAbiStringTests {
 
     private static final TypeResolver STUB_RESOLVER = index -> null;
 

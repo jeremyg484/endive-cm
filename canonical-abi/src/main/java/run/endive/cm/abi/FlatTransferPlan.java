@@ -3,7 +3,7 @@ package run.endive.cm.abi;
 import java.util.ArrayList;
 import java.util.List;
 import run.endive.cm.abi.CanonicalAbi.CoreValues;
-import run.endive.cm.abi.CanonicalAbi.LongList;
+import run.endive.cm.abi.CanonicalAbi.LongBuffer;
 import run.endive.cm.types.PointerType;
 import run.endive.cm.types.ResolvedType;
 import run.endive.runtime.TrapException;
@@ -23,7 +23,7 @@ final class FlatTransferPlan {
 
     /** One step of a compiled flat transfer, reading from {@code vi} and writing to {@code out}. */
     interface Step {
-        void run(LiftLowerContext src, LiftLowerContext dst, CoreValues vi, LongList out);
+        void run(LiftLowerContext src, LiftLowerContext dst, CoreValues vi, LongBuffer out);
     }
 
     private final Step[] steps;
@@ -43,10 +43,10 @@ final class FlatTransferPlan {
         PointerType ptrType = ctx.ptrType();
         List<ValType> flatTypes = new ArrayList<>();
         for (run.endive.cm.types.ValType t : ts) {
-            flatTypes.addAll(ctx.ground(t).flatten(ptrType));
+            flatTypes.addAll(ctx.resolve(t).flatten(ptrType));
         }
         if (flatTypes.size() > maxFlat) {
-            ResolvedType tupleType = CanonicalAbi.groundedTupleOf(ctx, ts);
+            ResolvedType tupleType = CanonicalAbi.resolvedTupleOf(ctx, ts);
             return new FlatTransferPlan(
                     null,
                     TransferPlan.compile(ptrType, tupleType),
@@ -55,7 +55,7 @@ final class FlatTransferPlan {
         }
         var builder = new Builder(ptrType);
         for (run.endive.cm.types.ValType t : ts) {
-            builder.append(ctx.ground(t));
+            builder.append(ctx.resolve(t));
         }
         return new FlatTransferPlan(builder.build(), null, 0, 0);
     }
@@ -66,7 +66,7 @@ final class FlatTransferPlan {
             return CanonicalAbi.transferSpilledValues(
                     src, dst, vi, spillAlign, spillSize, outParam, spillPlan::run);
         }
-        LongList out = new LongList();
+        LongBuffer out = new LongBuffer();
         for (Step step : steps) {
             step.run(src, dst, vi, out);
         }

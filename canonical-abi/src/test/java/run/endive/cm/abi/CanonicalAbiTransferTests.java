@@ -33,12 +33,7 @@ import run.endive.cm.types.TypeSpace;
 import run.endive.cm.types.VariantType;
 import run.endive.runtime.TrapException;
 
-/**
- * Holds the memory-to-memory transfer path to the lift/lower pair it stands in for. Most
- * cases assert the full destination memory, not just the value read back, so a transfer that
- * happens to produce an equal value by different means still fails.
- */
-class CanonicalAbiTransferTest {
+class CanonicalAbiTransferTests {
 
     private static final List<String> FIVE_LABELS = List.of("a", "b", "c", "d", "e");
     private static final List<String> EIGHT_LABELS =
@@ -229,7 +224,7 @@ class CanonicalAbiTransferTest {
         var types = new TransferTestSupport.Types();
         var src = newContext(types);
         var dst = newContext(types);
-        // A signalling NaN with a payload the load/store path would canonicalize away.
+        // A signaling NaN with a payload the load/store path would canonicalize away.
         int nonCanonicalBits = 0x7f800001;
         src.memory().writeI32(0, nonCanonicalBits);
 
@@ -261,9 +256,9 @@ class CanonicalAbiTransferTest {
 
         CanonicalAbi.transfer(src, dst, 0, 0, t);
 
-        // The fields agree, which is all the Canonical ABI defines...
+        // The fields agree, which is all the Canonical ABI defines
         assertThat(CanonicalAbi.load(dst, 0, t)).isEqualTo(CanonicalAbi.load(src, 0, t));
-        // ...but the padding rode along, because coalescing copies the whole record at once.
+        // The padding rode along because coalescing copies the whole record at once.
         assertThat(dst.memory().read(1)).isEqualTo((byte) 0xAA);
     }
 
@@ -346,9 +341,6 @@ class CanonicalAbiTransferTest {
         src.memory().writeI32(0, 0);
         src.memory().writeI32(4, 0x80000000); // 2^31 elements, negative as a signed int
 
-        // The transfer path measures the length as unsigned, so this exceeds the maximum
-        // byte length. loadListFromRange computes the same product signed and lets it
-        // through as an empty list instead.
         assertThatThrownBy(() -> CanonicalAbi.transfer(src, dst, 0, 0, t))
                 .isInstanceOf(TrapException.class);
     }
@@ -437,12 +429,6 @@ class CanonicalAbiTransferTest {
         assertThat(plan.stepCount()).isEqualTo(3);
     }
 
-    /**
-     * Sweeps a corpus of types across every source/destination encoding pair, checking both
-     * halves of the contract at once: the interpreted transfer must agree with lift/lower, and
-     * the compiled plan must agree with the interpreted transfer. Coalescing is the part most
-     * likely to drift, so this is the test that keeps it honest across shapes.
-     */
     @ParameterizedTest(name = "{0}: {1} -> {2}")
     @MethodSource("corpusAcrossEncodings")
     void everySampleAgreesAcrossBothPathsAndEncodings(

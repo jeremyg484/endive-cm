@@ -1,13 +1,13 @@
 package run.endive.cm.abi;
 
 /**
- * A component's exported {@code cabi_realloc} function, used by {@link CanonicalAbi} to
- * allocate destination memory when storing variable-length values (unbounded lists,
- * strings). Mirrors the Python reference's {@code cx.opts.realloc(old_ptr, old_size,
- * align, new_size) -> new_ptr}.
+ * A function specified via canon opts that is used in the Canonical ABI both
+ * to allocate (passing 0 for the first two parameters) and reallocate. If the
+ * Canonical ABI needs realloc, validation requires this option to be present
+ * (there is no default).
  */
 @FunctionalInterface
 public interface Realloc {
 
-    int realloc(int oldPtr, int oldSize, int align, int newSize);
+    int apply(int oldPtr, int oldSize, int align, int newSize);
 }

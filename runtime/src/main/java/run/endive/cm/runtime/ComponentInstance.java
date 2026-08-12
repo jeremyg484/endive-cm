@@ -41,11 +41,11 @@ public final class ComponentInstance implements HandleTable {
     /**
      * Whether a call may enter this instance right now.
      *
-     * <p>False only while the instance is being instantiated. A core {@code start} function runs
-     * during instantiation and can reach a lowered function whose callee is lifted out of the
-     * very instance being built — at which point the component's state is not yet in place, so
-     * the Component Model traps rather than letting the call through. See Component Invariant #2
-     * in the Explainer and {@code ComponentInstance.may_enter} in the Canonical ABI.
+     * <p>Currently false only while the instance is being instantiated. A core {@code start}
+     * function runs during instantiation and can reach a lowered function whose callee is lifted out of the
+     * very instance being built. The component's state is not yet in place at that point, so
+     * the instance traps rather than letting the call through. See Component Invariant #2
+     * in the Explainer.
      *
      * <p>Deliberately simpler than the specification's model, which tracks the caller and its
      * ancestors so that a parent may re-enter a child it wraps. This flag flips once, at the end
@@ -70,7 +70,7 @@ public final class ComponentInstance implements HandleTable {
 
     @Override
     public int add(
-            ResourceTypeRef resourceType, int rep, boolean own, BorrowScope.Task borrowScope) {
+            ResourceTypeRef resourceType, int rep, boolean own, BorrowScope.Callee borrowScope) {
         return handles.add(new ResourceHandle(resourceType, rep, own, borrowScope));
     }
 

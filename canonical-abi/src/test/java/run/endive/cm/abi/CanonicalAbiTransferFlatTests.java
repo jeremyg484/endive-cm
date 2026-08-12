@@ -28,10 +28,10 @@ import run.endive.wasm.types.MemoryLimits;
 
 /**
  * Covers the flat (core value) side of the transfer path, where the normalizations differ
- * from the in-memory ones: a core value can carry bits above its component type's width, and
+ * from the in-memory ones. A core value can carry bits above its component type's width, and
  * lifting would have masked or sign-extended them before lowering re-encoded them.
  */
-class CanonicalAbiTransferFlatTest {
+class CanonicalAbiTransferFlatTests {
 
     @Test
     void transfersDirectParamsIdenticallyToLiftLower() {
@@ -149,8 +149,8 @@ class CanonicalAbiTransferFlatTest {
                         .build();
         List<ValType> ts = List.of(types.add(variant));
 
-        // The u8 case leaves the joined i64 payload slot narrower than the wide case does;
-        // the source's stray high bits must not survive, and the slot must still be emitted.
+        // The u8 case leaves the joined i64 payload slot narrower than the wide case does.
+        // The source's stray high bits must not survive, and the slot must still be emitted.
         assertFlatParamsMatchLiftLower(types, ts, new long[] {1L, 0x1FFL});
         assertFlatParamsMatchLiftLower(types, ts, new long[] {0L, 0L});
         assertFlatParamsMatchLiftLower(types, ts, new long[] {2L, -5L});
@@ -300,7 +300,7 @@ class CanonicalAbiTransferFlatTest {
         counting.resetCounts();
         CanonicalAbi.transfer(src, dst, 0, 0, t);
 
-        int elementSize = src.ground(elementType).elementSize(PointerType.I32);
+        int elementSize = src.resolve(elementType).elementSize(PointerType.I32);
         int expectedChunks = Math.max(1, (length * elementSize + 65535) / 65536);
         assertThat(counting.bulkWrites())
                 .as("payload copied in bulk, not per element")
@@ -374,8 +374,7 @@ class CanonicalAbiTransferFlatTest {
                         .addParam(param("x", prim(PrimValType.U32)))
                         .withResult(prim(PrimValType.U32))
                         .build();
-        // Results flow callee -> caller, the reverse of parameters, so the compiled
-        // transfer must move them into the *caller* context it was compiled with.
+
         var callee = newContext(types);
         long[] flatResults = {0xDEADBEEFL};
 
@@ -401,8 +400,6 @@ class CanonicalAbiTransferFlatTest {
                         .addParam(param("x", prim(PrimValType.U32)))
                         .withResult(prim(PrimValType.STRING))
                         .build();
-        // A string flattens to two core values, one more than MAX_FLAT_RESULTS, so the
-        // callee returns a pointer to a tuple holding the (ptr, code_units) pair.
         var callee = newContext(types);
         int spillPtr = 32;
         CanonicalAbi.store(callee, "result", PrimValType.STRING, spillPtr);
@@ -424,12 +421,6 @@ class CanonicalAbiTransferFlatTest {
                 .isEqualTo("result");
     }
 
-    /**
-     * A full fused call across two contexts that disagree on string encoding. Parameters must
-     * land in the callee re-encoded as UTF-16 and results must come back to the caller as
-     * UTF-8, which pins the direction of each half: running either one the wrong way round
-     * would leave the string in the wrong encoding, in the wrong memory, or both.
-     */
     @Test
     void movesParamsAndResultsInOppositeDirectionsAcrossEncodings() {
         var types = new TransferTestSupport.Types();
@@ -464,7 +455,8 @@ class CanonicalAbiTransferFlatTest {
         assertThat(callerResults).hasSize(1);
         assertThat(CanonicalAbi.load(caller, (int) callerResults[0], PrimValType.STRING))
                 .isEqualTo(value);
-        // ...and back in the caller's memory it is UTF-8 again.
+
+        // Back in the caller's memory it is UTF-8 again.
         int callerStringPtr = caller.memory().readInt((int) callerResults[0]);
         long callerByteLength = caller.memory().readU32((int) callerResults[0] + 4);
         assertThat(caller.memory().readBytes(callerStringPtr, (int) callerByteLength))
@@ -533,10 +525,6 @@ class CanonicalAbiTransferFlatTest {
         assertThat(ValueTransfer.canTransfer(newContext(types), newContext(types), ft)).isFalse();
     }
 
-    /**
-     * A context declared with no {@code memory} canonopt — the shape {@code canon lift} and
-     * {@code canon lower} take when written with no options at all.
-     */
     private static LiftLowerContext memorylessContext(TransferTestSupport.Types types) {
         return LiftLowerContext.builder().withTypeResolver(types).build();
     }
@@ -559,7 +547,6 @@ class CanonicalAbiTransferFlatTest {
 
     @Test
     void canTransferAcceptsMemorylessContextsForAFixedSizeListOfScalars() {
-        // A fixed-size list is stored inline, so it needs no allocation of its own.
         var types = new TransferTestSupport.Types();
         var list =
                 ListType.builder().withElementType(prim(PrimValType.U32)).withFixedSize(2).build();
@@ -614,7 +601,6 @@ class CanonicalAbiTransferFlatTest {
 
     @Test
     void canTransferRejectsASpilledResultWithoutMemory() {
-        // A record of two u32s flattens to two core values, one more than MAX_FLAT_RESULTS.
         var types = new TransferTestSupport.Types();
         var wide =
                 RecordType.builder()
@@ -644,12 +630,6 @@ class CanonicalAbiTransferFlatTest {
         assertThat(ValueTransfer.canTransfer(noRealloc, newContext(types), ft)).isTrue();
     }
 
-    /**
-     * The shape at {@code fused.wast:672}: a payload-free {@code variant} lifted and lowered
-     * with no canonopts on either side. It flattens to a single {@code i32}, so nothing ever
-     * reaches memory — but the discriminant still has to be range-checked, which is why this
-     * needs the transfer path rather than a straight pass-through.
-     */
     @Test
     void transfersAPayloadFreeVariantBetweenMemorylessContexts() {
         var types = new TransferTestSupport.Types();

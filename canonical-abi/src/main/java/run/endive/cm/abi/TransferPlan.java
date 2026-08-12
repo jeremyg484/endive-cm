@@ -12,17 +12,16 @@ import run.endive.runtime.TrapException;
  * CanonicalAbi#transfer} performs per call, flattened once into a straight-line list of
  * steps at fixed offsets.
  *
- * <p>Beyond skipping the repeated type walk, compiling enables the optimization the
- * interpreted path cannot easily reach — <em>span coalescing</em>. Neighboring fields that
+ * <p>Beyond skipping the repeated type walk, compiling enables the <em>span coalescing</em>
+ * optimization the interpreted path cannot easily reach. Neighboring fields that
  * copy verbatim merge into a single {@code memcpy}, and merging continues across the padding
  * between them, so a {@code record { a: u8, b: u32 }} becomes one eight-byte copy rather
- * than two field copies. A run of copies is only broken by a field that needs real work: a
- * string to transcode, a list pointer to re-allocate, a discriminant to validate.
+ * than two field copies. A run of copies is only broken by a field that needs real work, such
+ * as a string to be transcoded, a list pointer to be re-allocated, or a discriminant to be validated.
  *
- * <p>A plan is bound to the type, its {@link TypeResolver} and a {@link PointerType}, but
- * not to any pair of contexts — the same plan runs for any source and destination that agree
- * on those. Offsets are shared between the two sides, which holds because a matching pointer
- * width gives the value an identical layout in both memories.
+ * <p>A plan is bound to its {@link ResolvedType} and a {@link PointerType}, but not to any pair of contexts.
+ * The same plan runs for any source and destination that agree on those. Offsets are shared between the two
+ * sides, which holds because a matching pointer width gives the value an identical layout in both memories.
  */
 final class TransferPlan {
 
@@ -43,7 +42,7 @@ final class TransferPlan {
         }
     }
 
-    /** The number of steps left after coalescing; exposed so tests can assert on the shape. */
+    /** The number of steps left after coalescing, exposed for test assertions. */
     int stepCount() {
         return steps.length;
     }
@@ -73,11 +72,6 @@ final class TransferPlan {
             return new TransferPlan(steps.toArray(new Step[0]));
         }
 
-        /**
-         * Extends the open copy run to cover {@code [off, off + length)}. Any gap between the
-         * previous run and this one is absorbed, which is what lets a record's interior
-         * padding travel with its fields.
-         */
         private void copy(int off, int length) {
             if (length == 0) {
                 return;
@@ -187,11 +181,6 @@ final class TransferPlan {
             }
         }
 
-        /**
-         * Compiles a plan per case and selects between them at run time. See {@link
-         * CanonicalAbi#transferValue} on why the payload offset is computed relative to the
-         * variant's own base.
-         */
         private void appendVariant(ResolvedType t, int off) {
             var cases = t.cases();
             int discSize = t.discriminantSize();

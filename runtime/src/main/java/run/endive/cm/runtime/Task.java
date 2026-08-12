@@ -7,11 +7,10 @@ import run.endive.runtime.TrapException;
  * One invocation of a lifted component function, from the callee's side.
  *
  * <p>Its job here is to hold the borrows lowered into the call to account: every {@code borrow}
- * handed to the callee is counted on the way in and uncounted when the callee drops it, and the
- * call is not allowed to return while any remain. That check is what stops a borrowed handle
- * from outliving the call it was lent for.
+ * handed to the callee is counted on the way in and decremented when the callee drops it. The
+ * call is not allowed to return while any borrows remain.
  */
-public final class Task implements BorrowScope.Task {
+public final class Task implements BorrowScope.Callee {
 
     private int numBorrows;
 
@@ -30,7 +29,9 @@ public final class Task implements BorrowScope.Task {
         return numBorrows;
     }
 
-    /** Traps unless every borrow lowered into this call has since been dropped. */
+    /**
+     * Checks that every borrow lowered into this call has since been dropped, throwing a TrapException if not.
+     */
     void requireBorrowsReleased() {
         if (numBorrows > 0) {
             throw new TrapException(

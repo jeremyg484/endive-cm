@@ -26,16 +26,7 @@ import run.endive.cm.types.VariantType;
 import run.endive.runtime.ByteArrayMemory;
 import run.endive.wasm.types.MemoryLimits;
 
-/**
- * Covers the predicate behind the no-adapter fast path: a function whose values need no
- * masking, validation or memory access at all, so the caller's core arguments can be handed
- * to the callee untouched.
- *
- * <p>The important test here is {@link #acceptedFunctionsReallyTransferUnchanged}, which
- * refuses to take the predicate's word for it and checks that the compiled transfer actually
- * is the identity on every function it accepts.
- */
-class CanonicalAbiIdentityTransferTest {
+class CanonicalAbiIdentityTransferTests {
 
     private static LiftLowerContext memoryless(TransferTestSupport.Types types) {
         return LiftLowerContext.builder().withTypeResolver(types).build();
@@ -68,7 +59,7 @@ class CanonicalAbiIdentityTransferTest {
 
     /**
      * Each entry is a function the predicate must accept, paired with flat core arguments in
-     * the canonical (zero-extended) form the Canonical ABI itself produces.
+     * the canonical (zero-extended) form that the Canonical ABI produces.
      */
     private static Map<String, Supplier<Accepted>> accepted() {
         Map<String, Supplier<Accepted>> cases = new LinkedHashMap<>();
@@ -172,11 +163,6 @@ class CanonicalAbiIdentityTransferTest {
                 .isTrue();
     }
 
-    /**
-     * The predicate's whole claim is that the adapter would be a no-op, so check that it is:
-     * compiling the transfer and running it must hand back exactly the arguments it was
-     * given. If this ever fails, skipping the adapter would silently change values.
-     */
     @ParameterizedTest(name = "{0}")
     @MethodSource("acceptedCases")
     void acceptedFunctionsReallyTransferUnchanged(String name, Accepted sample) {
@@ -229,7 +215,6 @@ class CanonicalAbiIdentityTransferTest {
                 .isTrue();
     }
 
-    /** The {@code fused.wast:672} shape: transferable, but the discriminant must be checked. */
     @Test
     void rejectsVariantsBecauseTheDiscriminantMustBeValidated() {
         var types = new TransferTestSupport.Types();
@@ -302,12 +287,6 @@ class CanonicalAbiIdentityTransferTest {
         assertThat(ValueTransfer.isIdentityTransfer(memoryless(types), wide, ft)).isFalse();
     }
 
-    /**
-     * The one caveat on "unchanged": endive carries an {@code i32} in a {@code long} without
-     * fixing how the upper bits are extended, while the adapter zero-extends. A direct call
-     * would forward the caller's own bit pattern instead. Both agree on the low 32 bits,
-     * which is all any consumer of an {@code i32} slot reads.
-     */
     @Test
     void identityHoldsOnlyToTheWidthOfAnI32Slot() {
         var types = new TransferTestSupport.Types();

@@ -4,8 +4,8 @@ import run.endive.wasm.types.ValType;
 
 /**
  * Endive's {@code Memory} is addressed with a plain {@code int} today, so only {@link
- * #I32} is in use; {@link #I64} exists so alignment/size computations won't need
- * reshaping once memory64 support lands.
+ * #I32} is currently in use; {@link #I64} exists so alignment/size computations won't
+ * need reshaping once memory64 support is available.
  */
 public enum PointerType {
     I32(4),

@@ -33,9 +33,8 @@ import run.endive.wasm.types.ValType;
 public final class CanonicalAbi {
 
     /**
-     * The Component Model caps individual lists at this many bytes so that {@code 2 *
-     * length} can never overflow the {@code i32} realloc arguments used to allocate
-     * them.
+     * List size is capped so that {@code 2 * length} can never
+     * overflow the {@code i32} realloc arguments used to allocate them.
      */
     private static final int MAX_LIST_BYTE_LENGTH = (1 << 28) - 1;
 
@@ -56,48 +55,32 @@ public final class CanonicalAbi {
 
     private CanonicalAbi() {}
 
-    public static boolean containsBorrow(TypeResolver typeResolver, DefValType t) {
-        return contains(
-                ResolvedType.of(t, TypeSpace.of(typeResolver)),
-                u -> u.kind() == DefValType.Kind.BORROW);
-    }
-
-    public static boolean containsAsyncValue(TypeResolver typeResolver, DefValType t) {
-        return contains(
-                ResolvedType.of(t, TypeSpace.of(typeResolver)),
-                u -> u.kind() == DefValType.Kind.STREAM || u.kind() == DefValType.Kind.FUTURE);
-    }
-
     /**
-     * Whether {@code p} holds of {@code t} or of any type reachable from it.
-     *
-     * <p>A despecialized {@code map} is reached through its entry record rather than through
-     * the entry's fields directly, so {@code p} additionally sees that record. No predicate
-     * used here can hold of a record that does not already hold of one of its fields.
+     * Whether resolved type {@code type}, or of any type reachable from it, matches the resolved type predicate {@code typeMatch}.
      */
-    public static boolean contains(ResolvedType t, Predicate<ResolvedType> p) {
-        if (t == null) {
+    public static boolean contains(ResolvedType type, Predicate<ResolvedType> typeMatch) {
+        if (type == null) {
             return false;
         }
-        if (p.test(t)) {
+        if (typeMatch.test(type)) {
             return true;
         }
-        switch (t.kind()) {
+        switch (type.kind()) {
             case LIST:
             case SIZED_LIST:
             case STREAM:
             case FUTURE:
-                return contains(t.element(), p);
+                return contains(type.element(), typeMatch);
             case RECORD:
-                for (ResolvedType.Field f : t.fields()) {
-                    if (contains(f.type(), p)) {
+                for (ResolvedType.Field f : type.fields()) {
+                    if (contains(f.type(), typeMatch)) {
                         return true;
                     }
                 }
                 return false;
             case VARIANT:
-                for (ResolvedType.Case c : t.cases()) {
-                    if (c.hasType() && contains(c.type(), p)) {
+                for (ResolvedType.Case c : type.cases()) {
+                    if (c.hasType() && contains(c.type(), typeMatch)) {
                         return true;
                     }
                 }
@@ -107,33 +90,39 @@ public final class CanonicalAbi {
         }
     }
 
+    public static boolean containsBorrow(TypeResolver typeResolver, DefValType type) {
+        return contains(
+                ResolvedType.of(type, TypeSpace.of(typeResolver)),
+                u -> u.kind() == DefValType.Kind.BORROW);
+    }
+
+    public static boolean containsAsyncValue(TypeResolver typeResolver, DefValType type) {
+        return contains(
+                ResolvedType.of(type, TypeSpace.of(typeResolver)),
+                u -> u.kind() == DefValType.Kind.STREAM || u.kind() == DefValType.Kind.FUTURE);
+    }
+
     /**
-     * The flattened core Wasm signature a component-level function type compiles down
-     * to. When the flat parameter/result list would be too large to pass in
-     * registers/stack, it collapses to a single pointer (the caller/callee agree to
-     * pass/receive the value(s) via memory instead) — where that pointer goes differs
-     * between lifting a core function into a component function ({@link Direction#LIFT})
-     * and lowering a component function into a core function ({@link Direction#LOWER}).
+     * The flattened core Wasm signature to which a component-level function type lowers.
+     * When the flat parameter/result list exceeds the max size defined by the spec, it
+     * collapses to a single pointer and the caller/callee agree to pass/receive the value(s)
+     * via memory instead.
      */
     public static FunctionType flattenFuncType(
-            LiftLowerContext ctx, FuncType ft, Direction direction) {
-        // TODO - Might be able to remove direction - not sure we ever actually need this during
-        // lifting unless we need
-        // to validate that the signature of the actual core function being lifted matches the
-        // expected ABI signature
-        List<ValType> flatParams = new ArrayList<>(flattenParams(ctx, ft));
-        List<ValType> flatResults = new ArrayList<>(flattenResult(ctx, ft));
-        if (!ctx.isAsync()) {
+            LiftLowerContext context, FuncType funcType, Direction direction) {
+        List<ValType> flatParams = new ArrayList<>(flattenParams(context, funcType));
+        List<ValType> flatResults = new ArrayList<>(flattenResult(context, funcType));
+        if (!context.isAsync()) {
             if (flatParams.size() > MAX_FLAT_PARAMS) {
-                flatParams = new ArrayList<>(List.of(ctx.ptrType().coreValType()));
+                flatParams = new ArrayList<>(List.of(context.ptrType().coreValType()));
             }
             if (flatResults.size() > MAX_FLAT_RESULTS) {
                 switch (direction) {
                     case LIFT:
-                        flatResults = new ArrayList<>(List.of(ctx.ptrType().coreValType()));
+                        flatResults = new ArrayList<>(List.of(context.ptrType().coreValType()));
                         break;
                     case LOWER:
-                        flatParams.add(ctx.ptrType().coreValType());
+                        flatParams.add(context.ptrType().coreValType());
                         flatResults = new ArrayList<>();
                         break;
                     default:
@@ -145,16 +134,16 @@ public final class CanonicalAbi {
         switch (direction) {
             case LIFT:
                 if (flatParams.size() > MAX_FLAT_PARAMS) {
-                    flatParams = new ArrayList<>(List.of(ctx.ptrType().coreValType()));
+                    flatParams = new ArrayList<>(List.of(context.ptrType().coreValType()));
                 }
                 flatResults = new ArrayList<>(List.of(ValType.I32));
                 break;
             case LOWER:
                 if (flatParams.size() > MAX_FLAT_ASYNC_PARAMS) {
-                    flatParams = new ArrayList<>(List.of(ctx.ptrType().coreValType()));
+                    flatParams = new ArrayList<>(List.of(context.ptrType().coreValType()));
                 }
                 if (!flatResults.isEmpty()) {
-                    flatParams.add(ctx.ptrType().coreValType());
+                    flatParams.add(context.ptrType().coreValType());
                 }
                 flatResults = new ArrayList<>(List.of(ValType.I32));
                 break;
@@ -164,117 +153,126 @@ public final class CanonicalAbi {
         return FunctionType.of(flatParams, flatResults);
     }
 
-    private static List<ValType> flattenParams(LiftLowerContext ctx, FuncType ft) {
+    private static List<ValType> flattenParams(LiftLowerContext context, FuncType funcType) {
         List<ValType> flat = new ArrayList<>();
-        for (LabelValType p : ft.params()) {
-            flat.addAll(ctx.ground(p.valType()).flatten(ctx.ptrType()));
+        for (LabelValType p : funcType.params()) {
+            flat.addAll(context.resolve(p.valType()).flatten(context.ptrType()));
         }
         return flat;
     }
 
-    private static List<ValType> flattenResult(LiftLowerContext ctx, FuncType ft) {
-        if (!ft.hasResult()) {
+    private static List<ValType> flattenResult(LiftLowerContext context, FuncType funcType) {
+        if (!funcType.hasResult()) {
             return List.of();
         }
-        return ctx.ground(ft.result()).flatten(ctx.ptrType());
+        return context.resolve(funcType.result()).flatten(context.ptrType());
     }
 
-    /** Flattens each of {@code ts} in turn and concatenates the results ({@code flatten_types}). */
-    static List<ValType> flattenTypes(LiftLowerContext ctx, List<run.endive.cm.types.ValType> ts) {
+    /**
+     * Flattens each of the component model types of {@code types} into core types and
+     * concatenates the results.
+     */
+    static List<ValType> flattenTypes(
+            LiftLowerContext context, List<run.endive.cm.types.ValType> types) {
         List<ValType> flat = new ArrayList<>();
-        for (run.endive.cm.types.ValType t : ts) {
-            flat.addAll(ctx.ground(t).flatten(ctx.ptrType()));
+        for (run.endive.cm.types.ValType t : types) {
+            flat.addAll(context.resolve(t).flatten(context.ptrType()));
         }
         return flat;
     }
 
     /**
-     * Bundles {@code ts} into a {@link TupleType} ({@code "0"}, {@code "1"}, … fields),
-     * the type used to load/store a whole parameter or result list from a single spill
-     * buffer when it is too large to pass as flat core values.
+     * Bundles component model types of {@code types} into a {@link TupleType} with
+     * fully resolved element types. This can be used to load/store a whole parameter
+     * or result list from a single spill buffer when it is too large to pass as flat
+     * core values.
      */
-    static ResolvedType groundedTupleOf(
-            LiftLowerContext ctx, List<run.endive.cm.types.ValType> ts) {
-        // Not routed through ctx.ground: the tuple is built fresh on every call, so caching it
-        // by node identity would grow the context's cache without ever hitting.
-        return ResolvedType.of(tupleTypeOf(ts), ctx.typeSpace());
+    static ResolvedType resolvedTupleOf(
+            LiftLowerContext context, List<run.endive.cm.types.ValType> types) {
+        return ResolvedType.of(tupleTypeOf(types), context.typeSpace());
     }
 
-    static TupleType tupleTypeOf(List<run.endive.cm.types.ValType> ts) {
+    static TupleType tupleTypeOf(List<run.endive.cm.types.ValType> types) {
         var builder = TupleType.builder();
-        for (run.endive.cm.types.ValType t : ts) {
+        for (run.endive.cm.types.ValType t : types) {
             builder.addElementType(t);
         }
         return builder.build();
     }
 
-    public static Object load(LiftLowerContext ctx, int ptr, DefValType t) {
-        return load(ctx, ptr, ctx.ground(t));
+    public static Object load(LiftLowerContext context, int pointer, DefValType type) {
+        return load(context, pointer, context.resolve(type));
     }
 
-    public static Object load(LiftLowerContext ctx, int ptr, ResolvedType t) {
-        switch (t.kind()) {
+    public static Object load(LiftLowerContext context, int pointer, ResolvedType type) {
+        switch (type.kind()) {
             case BOOL:
-                return convertIntToBool(loadInt(ctx.memory(), ptr, 1, false));
+                return convertIntToBool(loadInt(context.memory(), pointer, 1, false));
             case U8:
-                return boxUnsigned(t.kind(), loadInt(ctx.memory(), ptr, 1, false));
+                return boxUnsigned(type.kind(), loadInt(context.memory(), pointer, 1, false));
             case U16:
-                return boxUnsigned(t.kind(), loadInt(ctx.memory(), ptr, 2, false));
+                return boxUnsigned(type.kind(), loadInt(context.memory(), pointer, 2, false));
             case U32:
-                return boxUnsigned(t.kind(), loadInt(ctx.memory(), ptr, 4, false));
+                return boxUnsigned(type.kind(), loadInt(context.memory(), pointer, 4, false));
             case U64:
-                return boxUnsigned(t.kind(), loadInt(ctx.memory(), ptr, 8, false));
+                return boxUnsigned(type.kind(), loadInt(context.memory(), pointer, 8, false));
             case S8:
-                return boxSigned(t.kind(), loadInt(ctx.memory(), ptr, 1, true));
+                return boxSigned(type.kind(), loadInt(context.memory(), pointer, 1, true));
             case S16:
-                return boxSigned(t.kind(), loadInt(ctx.memory(), ptr, 2, true));
+                return boxSigned(type.kind(), loadInt(context.memory(), pointer, 2, true));
             case S32:
-                return boxSigned(t.kind(), loadInt(ctx.memory(), ptr, 4, true));
+                return boxSigned(type.kind(), loadInt(context.memory(), pointer, 4, true));
             case S64:
-                return boxSigned(t.kind(), loadInt(ctx.memory(), ptr, 8, true));
+                return boxSigned(type.kind(), loadInt(context.memory(), pointer, 8, true));
             case F32:
-                return canonicalizeNan32(ctx.memory().readFloat(ptr));
+                return canonicalizeNan32(context.memory().readFloat(pointer));
             case F64:
-                return canonicalizeNan64(ctx.memory().readDouble(ptr));
+                return canonicalizeNan64(context.memory().readDouble(pointer));
             case CHAR:
-                return CharValue.of(convertI32ToChar(loadInt(ctx.memory(), ptr, 4, false)));
+                return CharValue.of(convertI32ToChar(loadInt(context.memory(), pointer, 4, false)));
             case STRING:
-                return loadString(ctx, ptr);
+                return loadString(context, pointer);
             case LIST:
-                return loadList(ctx, ptr, t);
+            case SIZED_LIST:
+                return loadList(context, pointer, type);
             case RECORD:
-                return loadRecord(ctx, ptr, t);
+                return loadRecord(context, pointer, type);
             case VARIANT:
-                return loadVariant(ctx, ptr, t);
+                return loadVariant(context, pointer, type);
             case FLAGS:
-                return loadFlags(ctx, ptr, t);
+                return loadFlags(context, pointer, type);
             case OWN:
-                return liftOwn(ctx, (int) loadInt(ctx.memory(), ptr, 4, false), (OwnType) t.node());
+                return liftOwn(
+                        context,
+                        (int) loadInt(context.memory(), pointer, 4, false),
+                        (OwnType) type.node());
             case BORROW:
                 return liftBorrow(
-                        ctx, (int) loadInt(ctx.memory(), ptr, 4, false), (BorrowType) t.node());
+                        context,
+                        (int) loadInt(context.memory(), pointer, 4, false),
+                        (BorrowType) type.node());
             case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "loading " + t.kind() + " values is not implemented yet");
+                        "loading " + type.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + t.kind());
+                throw new IllegalStateException("unhandled kind " + type.kind());
         }
     }
 
-    static long loadInt(Memory memory, int ptr, int nbytes, boolean signed) {
-        switch (nbytes) {
+    static long loadInt(Memory memory, int pointer, int numBytes, boolean signed) {
+        switch (numBytes) {
             case 1:
-                return signed ? memory.read(ptr) : memory.readU8(ptr);
+                return signed ? memory.read(pointer) : memory.readU8(pointer);
             case 2:
-                return signed ? memory.readShort(ptr) : memory.readU16(ptr);
+                return signed ? memory.readShort(pointer) : memory.readU16(pointer);
             case 4:
-                return signed ? memory.readInt(ptr) : memory.readU32(ptr);
+                return signed ? memory.readInt(pointer) : memory.readU32(pointer);
             case 8:
-                return memory.readLong(ptr);
+                return memory.readLong(pointer);
             default:
-                throw new IllegalArgumentException("unsupported int width " + nbytes);
+                throw new IllegalArgumentException("unsupported int width " + numBytes);
         }
     }
 
@@ -300,78 +298,83 @@ public final class CanonicalAbi {
         return (int) i;
     }
 
-    private static List<Object> loadList(LiftLowerContext ctx, int ptr, ResolvedType t) {
-        if (t.isFixedSizeList()) {
-            return loadListElements(ctx, ptr, t.fixedSize(), t.element());
+    private static List<Object> loadList(LiftLowerContext context, int pointer, ResolvedType type) {
+        if (type.isFixedSizeList()) {
+            return loadListElements(context, pointer, type.fixedSize(), type.element());
         }
-        return loadUnboundedList(ctx, ptr, t.element());
+        return loadUnboundedList(context, pointer, type.element());
     }
 
     private static List<Object> loadUnboundedList(
-            LiftLowerContext ctx, int ptr, ResolvedType elemType) {
-        int ptrSize = ctx.ptrType().size();
-        int begin = (int) loadInt(ctx.memory(), ptr, ptrSize, false);
-        int length = (int) loadInt(ctx.memory(), ptr + ptrSize, ptrSize, false);
-        return loadListFromRange(ctx, begin, length, elemType);
+            LiftLowerContext context, int pointer, ResolvedType elementType) {
+        int ptrSize = context.ptrType().size();
+        int begin = (int) loadInt(context.memory(), pointer, ptrSize, false);
+        int length = (int) loadInt(context.memory(), pointer + ptrSize, ptrSize, false);
+        return loadListFromRange(context, begin, length, elementType);
     }
 
     private static List<Object> loadListFromRange(
-            LiftLowerContext ctx, int ptr, int length, ResolvedType elemType) {
-        int elemSize = elemType.elementSize(ctx.ptrType());
-        int elemAlignment = elemType.alignment(ctx.ptrType());
+            LiftLowerContext context, int pointer, int length, ResolvedType elementType) {
+        int elemSize = elementType.elementSize(context.ptrType());
+        int elemAlignment = elementType.alignment(context.ptrType());
         if ((long) length * elemSize > MAX_LIST_BYTE_LENGTH) {
             throw new TrapException(
                     "list byte length exceeds the maximum of " + MAX_LIST_BYTE_LENGTH);
         }
-        if (ptr != DefValType.alignTo(ptr, elemAlignment)) {
-            throw new TrapException("list pointer " + ptr + " is not aligned to " + elemAlignment);
-        }
-        if ((long) ptr + (long) length * elemSize > Memory.bytes(ctx.memory().pages())) {
+        if (pointer != DefValType.alignTo(pointer, elemAlignment)) {
             throw new TrapException(
-                    "list of length " + length + " at " + ptr + " is out of bounds");
+                    "list pointer " + pointer + " is not aligned to " + elemAlignment);
         }
-        return loadListElements(ctx, ptr, length, elemType);
+        if ((long) pointer + (long) length * elemSize > Memory.bytes(context.memory().pages())) {
+            throw new TrapException(
+                    "list of length " + length + " at " + pointer + " is out of bounds");
+        }
+        return loadListElements(context, pointer, length, elementType);
     }
 
     private static List<Object> loadListElements(
-            LiftLowerContext ctx, int ptr, int length, ResolvedType elemType) {
-        int elemSize = elemType.elementSize(ctx.ptrType());
+            LiftLowerContext context, int pointer, int length, ResolvedType elementType) {
+        int elemSize = elementType.elementSize(context.ptrType());
         List<Object> result = new ArrayList<>(length);
         for (int i = 0; i < length; i++) {
-            result.add(load(ctx, ptr + i * elemSize, elemType));
+            result.add(load(context, pointer + i * elemSize, elementType));
         }
         return result;
     }
 
-    private static Map<String, Object> loadRecord(LiftLowerContext ctx, int ptr, ResolvedType t) {
+    private static Map<String, Object> loadRecord(
+            LiftLowerContext context, int pointer, ResolvedType type) {
         Map<String, Object> record = new LinkedHashMap<>();
-        int p = ptr;
-        for (ResolvedType.Field f : t.fields()) {
-            p = DefValType.alignTo(p, f.type().alignment(ctx.ptrType()));
-            record.put(f.label(), load(ctx, p, f.type()));
-            p += f.type().elementSize(ctx.ptrType());
+        int p = pointer;
+        for (ResolvedType.Field f : type.fields()) {
+            p = DefValType.alignTo(p, f.type().alignment(context.ptrType()));
+            record.put(f.label(), load(context, p, f.type()));
+            p += f.type().elementSize(context.ptrType());
         }
         return record;
     }
 
-    private static VariantValue loadVariant(LiftLowerContext ctx, int ptr, ResolvedType t) {
-        var cases = t.cases();
-        int discSize = t.discriminantSize();
-        long caseIndex = loadInt(ctx.memory(), ptr, discSize, false);
+    private static VariantValue loadVariant(
+            LiftLowerContext context, int pointer, ResolvedType type) {
+        var cases = type.cases();
+        int discSize = type.discriminantSize();
+        long caseIndex = loadInt(context.memory(), pointer, discSize, false);
         if (caseIndex >= cases.size()) {
             throw new TrapException("invalid variant discriminant");
         }
         var c = cases.get((int) caseIndex);
-        int payloadPtr = DefValType.alignTo(ptr + discSize, t.maxCaseAlignment(ctx.ptrType()));
+        int payloadPointer =
+                DefValType.alignTo(pointer + discSize, type.maxCaseAlignment(context.ptrType()));
         if (!c.hasType()) {
             return VariantValue.of(c.label(), null);
         }
-        return VariantValue.of(c.label(), load(ctx, payloadPtr, c.type()));
+        return VariantValue.of(c.label(), load(context, payloadPointer, c.type()));
     }
 
-    private static Map<String, Boolean> loadFlags(LiftLowerContext ctx, int ptr, ResolvedType t) {
-        long i = loadInt(ctx.memory(), ptr, t.elementSize(ctx.ptrType()), false);
-        return unpackFlagsFromInt(i, t.labels());
+    private static Map<String, Boolean> loadFlags(
+            LiftLowerContext context, int pointer, ResolvedType type) {
+        long i = loadInt(context.memory(), pointer, type.elementSize(context.ptrType()), false);
+        return unpackFlagsFromInt(i, type.labels());
     }
 
     private static Map<String, Boolean> unpackFlagsFromInt(long i, List<String> labels) {
@@ -383,36 +386,31 @@ public final class CanonicalAbi {
         return record;
     }
 
-    private static long utf16Tag(PointerType ptrType) {
-        return 1L << (ptrType.size() * 8 - 1);
+    private static long utf16Tag(PointerType pointerType) {
+        return 1L << (pointerType.size() * 8 - 1);
     }
 
-    private static String loadString(LiftLowerContext ctx, int ptr) {
-        int ptrSize = ctx.ptrType().size();
-        long begin = loadInt(ctx.memory(), ptr, ptrSize, false);
-        long taggedCodeUnits = loadInt(ctx.memory(), ptr + ptrSize, ptrSize, false);
-        return loadStringFromRange(ctx, (int) begin, taggedCodeUnits);
+    private static String loadString(LiftLowerContext context, int pointer) {
+        int ptrSize = context.ptrType().size();
+        long begin = loadInt(context.memory(), pointer, ptrSize, false);
+        long taggedCodeUnits = loadInt(context.memory(), pointer + ptrSize, ptrSize, false);
+        return loadStringFromRange(context, (int) begin, taggedCodeUnits);
     }
 
-    private static String loadStringFromRange(LiftLowerContext ctx, int ptr, long taggedCodeUnits) {
-        var range = stringRange(ctx, taggedCodeUnits);
-        return decodeStrict(readStringBytes(ctx, ptr, range), range.charset);
+    private static String loadStringFromRange(
+            LiftLowerContext context, int pointer, long taggedCodeUnits) {
+        var range = stringRange(context, taggedCodeUnits);
+        return decodeStrict(readStringBytes(context, pointer, range), range.charset);
     }
 
-    /**
-     * Resolves a {@code (ptr, tagged_code_units)} pair against the context's string encoding
-     * into the concrete byte range and charset it denotes, without touching memory. The
-     * {@code latin1+utf16} encoding picks its charset from the high bit of {@code
-     * taggedCodeUnits}; the other two are fixed.
-     */
-    static StringRange stringRange(LiftLowerContext ctx, long taggedCodeUnits) {
-        switch (ctx.stringEncoding()) {
+    static StringRange stringRange(LiftLowerContext context, long taggedCodeUnits) {
+        switch (context.stringEncoding()) {
             case UTF8:
                 return new StringRange(1, taggedCodeUnits, StandardCharsets.UTF_8);
             case UTF16:
                 return new StringRange(2, 2 * taggedCodeUnits, StandardCharsets.UTF_16LE);
             case LATIN1_UTF16:
-                long tag = utf16Tag(ctx.ptrType());
+                long tag = utf16Tag(context.ptrType());
                 if ((taggedCodeUnits & tag) != 0) {
                     return new StringRange(
                             2, 2 * (taggedCodeUnits ^ tag), StandardCharsets.UTF_16LE);
@@ -420,35 +418,35 @@ public final class CanonicalAbi {
                 return new StringRange(taggedCodeUnits, StandardCharsets.ISO_8859_1);
             default:
                 throw new IllegalStateException(
-                        "unhandled string encoding " + ctx.stringEncoding());
+                        "unhandled string encoding " + context.stringEncoding());
         }
     }
 
-    /** Applies the length, alignment and bounds traps guarding a string range, then reads it. */
-    static byte[] readStringBytes(LiftLowerContext ctx, int ptr, StringRange range) {
+    /** Applies the length, alignment, and bounds traps guarding a string range, then reads it. */
+    static byte[] readStringBytes(LiftLowerContext context, int pointer, StringRange range) {
         if (range.byteLength > MAX_STRING_BYTE_LENGTH) {
             throw new TrapException(
                     "string byte length exceeds the maximum of " + MAX_STRING_BYTE_LENGTH);
         }
-        if (ptr != DefValType.alignTo(ptr, range.alignment)) {
+        if (pointer != DefValType.alignTo(pointer, range.alignment)) {
             throw new TrapException("unaligned pointer");
         }
-        if (ptr + range.byteLength > Memory.bytes(ctx.memory().pages())) {
+        if (pointer + range.byteLength > Memory.bytes(context.memory().pages())) {
             throw new TrapException(
                     "string of byte length "
                             + range.byteLength
                             + " at "
-                            + ptr
+                            + pointer
                             + " is out of bounds");
         }
         try {
-            return ctx.memory().readBytes(ptr, (int) range.byteLength);
+            return context.memory().readBytes(pointer, (int) range.byteLength);
         } catch (WasmRuntimeException e) {
             throw new TrapException("string content out-of-bounds");
         }
     }
 
-    /** The byte range and charset a {@code (ptr, tagged_code_units)} pair resolves to. */
+    /** The byte range and charset a pointer and tagged code units pair resolves to. */
     static final class StringRange {
         final int alignment;
         final long byteLength;
@@ -485,14 +483,15 @@ public final class CanonicalAbi {
         }
     }
 
-    public static void store(LiftLowerContext ctx, Object v, DefValType t, int ptr) {
-        store(ctx, v, ctx.ground(t), ptr);
+    public static void store(LiftLowerContext context, Object value, DefValType type, int pointer) {
+        store(context, value, context.resolve(type), pointer);
     }
 
-    public static void store(LiftLowerContext ctx, Object v, ResolvedType t, int ptr) {
-        switch (t.kind()) {
+    public static void store(
+            LiftLowerContext context, Object value, ResolvedType type, int pointer) {
+        switch (type.kind()) {
             case BOOL:
-                storeInt(ctx.memory(), (Boolean) v ? 1 : 0, ptr, 1);
+                storeInt(context.memory(), (Boolean) value ? 1 : 0, pointer, 1);
                 return;
             case U8:
             case U16:
@@ -502,50 +501,60 @@ public final class CanonicalAbi {
             case S16:
             case S32:
             case S64:
-                storeInt(ctx.memory(), ((Number) v).longValue(), ptr, elemSizeForIntKind(t.kind()));
+                storeInt(
+                        context.memory(),
+                        ((Number) value).longValue(),
+                        pointer,
+                        elemSizeForIntKind(type.kind()));
                 return;
             case F32:
-                ctx.memory().writeF32(ptr, canonicalizeNan32(((Number) v).floatValue()));
+                context.memory()
+                        .writeF32(pointer, canonicalizeNan32(((Number) value).floatValue()));
                 return;
             case F64:
-                ctx.memory().writeF64(ptr, canonicalizeNan64(((Number) v).doubleValue()));
+                context.memory()
+                        .writeF64(pointer, canonicalizeNan64(((Number) value).doubleValue()));
                 return;
             case CHAR:
-                storeInt(ctx.memory(), ((CharValue) v).codePoint(), ptr, 4);
+                storeInt(context.memory(), ((CharValue) value).codePoint(), pointer, 4);
                 return;
             case STRING:
-                storeString(ctx, (String) v, ptr);
+                storeString(context, (String) value, pointer);
                 return;
             case LIST:
-                storeList(ctx, (List<?>) v, ptr, t);
+            case SIZED_LIST:
+                storeList(context, (List<?>) value, pointer, type);
                 return;
             case RECORD:
-                storeRecord(ctx, (Map<?, ?>) v, ptr, t);
+                storeRecord(context, (Map<?, ?>) value, pointer, type);
                 return;
             case VARIANT:
-                storeVariant(ctx, (VariantValue) v, ptr, t);
+                storeVariant(context, (VariantValue) value, pointer, type);
                 return;
             case FLAGS:
-                storeFlags(ctx, (Map<?, ?>) v, ptr, t);
+                storeFlags(context, (Map<?, ?>) value, pointer, type);
                 return;
             case OWN:
                 storeInt(
-                        ctx.memory(), lowerOwn(ctx, (ResourceValue) v, (OwnType) t.node()), ptr, 4);
+                        context.memory(),
+                        lowerOwn(context, (ResourceValue) value, (OwnType) type.node()),
+                        pointer,
+                        4);
                 return;
             case BORROW:
                 storeInt(
-                        ctx.memory(),
-                        lowerBorrow(ctx, (ResourceValue) v, (BorrowType) t.node()),
-                        ptr,
+                        context.memory(),
+                        lowerBorrow(context, (ResourceValue) value, (BorrowType) type.node()),
+                        pointer,
                         4);
                 return;
             case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "storing " + t.kind() + " values is not implemented yet");
+                        "storing " + type.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + t.kind());
+                throw new IllegalStateException("unhandled kind " + type.kind());
         }
     }
 
@@ -568,71 +577,72 @@ public final class CanonicalAbi {
         }
     }
 
-    static void storeInt(Memory memory, long v, int ptr, int nbytes) {
-        switch (nbytes) {
+    static void storeInt(Memory memory, long value, int pointer, int numBytes) {
+        switch (numBytes) {
             case 1:
-                memory.writeByte(ptr, (byte) v);
+                memory.writeByte(pointer, (byte) value);
                 return;
             case 2:
-                memory.writeShort(ptr, (short) v);
+                memory.writeShort(pointer, (short) value);
                 return;
             case 4:
-                memory.writeI32(ptr, (int) v);
+                memory.writeI32(pointer, (int) value);
                 return;
             case 8:
-                memory.writeLong(ptr, v);
+                memory.writeLong(pointer, value);
                 return;
             default:
-                throw new IllegalArgumentException("unsupported int width " + nbytes);
+                throw new IllegalArgumentException("unsupported int width " + numBytes);
         }
     }
 
-    private static void storeList(LiftLowerContext ctx, List<?> v, int ptr, ResolvedType t) {
-        if (t.isFixedSizeList()) {
-            if (v.size() != t.fixedSize()) {
+    private static void storeList(
+            LiftLowerContext context, List<?> listValue, int pointer, ResolvedType type) {
+        if (type.isFixedSizeList()) {
+            if (listValue.size() != type.fixedSize()) {
                 throw new IllegalArgumentException(
                         "expected "
-                                + t.fixedSize()
+                                + type.fixedSize()
                                 + " elements for fixed-size list, got "
-                                + v.size());
+                                + listValue.size());
             }
-            storeListElements(ctx, v, ptr, t.element());
+            storeListElements(context, listValue, pointer, type.element());
             return;
         }
-        storeUnboundedList(ctx, v, ptr, t.element());
+        storeUnboundedList(context, listValue, pointer, type.element());
     }
 
     private static void storeUnboundedList(
-            LiftLowerContext ctx, List<?> v, int ptr, ResolvedType elemType) {
-        int begin = storeListIntoRange(ctx, v, elemType);
-        int ptrSize = ctx.ptrType().size();
-        storeInt(ctx.memory(), begin, ptr, ptrSize);
-        storeInt(ctx.memory(), v.size(), ptr + ptrSize, ptrSize);
+            LiftLowerContext context, List<?> listValue, int pointer, ResolvedType elementType) {
+        int begin = storeListIntoRange(context, listValue, elementType);
+        int ptrSize = context.ptrType().size();
+        storeInt(context.memory(), begin, pointer, ptrSize);
+        storeInt(context.memory(), listValue.size(), pointer + ptrSize, ptrSize);
     }
 
-    private static int storeListIntoRange(LiftLowerContext ctx, List<?> v, ResolvedType elemType) {
-        int elemSize = elemType.elementSize(ctx.ptrType());
-        long byteLength = (long) v.size() * elemSize;
+    private static int storeListIntoRange(
+            LiftLowerContext context, List<?> listValue, ResolvedType elementType) {
+        int elemSize = elementType.elementSize(context.ptrType());
+        long byteLength = (long) listValue.size() * elemSize;
         if (byteLength > MAX_LIST_BYTE_LENGTH) {
             throw new TrapException(
                     "list byte length exceeds the maximum of " + MAX_LIST_BYTE_LENGTH);
         }
-        int align = elemType.alignment(ctx.ptrType());
-        int ptr = allocate(ctx, align, (int) byteLength);
-        storeListElements(ctx, v, ptr, elemType);
+        int align = elementType.alignment(context.ptrType());
+        int ptr = allocate(context, align, (int) byteLength);
+        storeListElements(context, listValue, ptr, elementType);
         return ptr;
     }
 
     /**
      * Calls the context's {@code realloc} to allocate {@code size} fresh bytes and
-     * validates the result, matching the bounds/alignment checks the Python reference
-     * repeats after every {@code cx.opts.realloc(...)} call.
+     * validates the result with the bounds/alignment checks.
      */
-    private static int allocate(LiftLowerContext ctx, int align, int size) {
+    private static int allocate(LiftLowerContext context, int align, int size) {
         var realloc =
                 Objects.requireNonNull(
-                        ctx.realloc(), "storing this value requires a realloc in the context");
-        int ptr = realloc.realloc(0, 0, align, size);
+                        context.realloc(), "storing this value requires a realloc in the context");
+        int ptr = realloc.apply(0, 0, align, size);
         // A realloc result is an i32 address, so it is unsigned: a guest returning -1 to signal
         // failure means 0xFFFFFFFF, which is past the end of any memory. Reading it as a signed
         // Java int would put it below zero and slip through the bounds check below.
@@ -640,63 +650,67 @@ public final class CanonicalAbi {
         if (addr % align != 0) {
             throw new TrapException("realloc return: unaligned pointer");
         }
-        if (addr + size > Memory.bytes(ctx.memory().pages())) {
+        if (addr + size > Memory.bytes(context.memory().pages())) {
             throw new TrapException("realloc return: beyond end of memory");
         }
         return ptr;
     }
 
     private static void storeListElements(
-            LiftLowerContext ctx, List<?> v, int ptr, ResolvedType elemType) {
-        int elemSize = elemType.elementSize(ctx.ptrType());
+            LiftLowerContext context, List<?> listValue, int pointer, ResolvedType elementType) {
+        int elemSize = elementType.elementSize(context.ptrType());
         int i = 0;
-        for (Object e : v) {
-            store(ctx, e, elemType, ptr + i * elemSize);
+        for (Object e : listValue) {
+            store(context, e, elementType, pointer + i * elemSize);
             i++;
         }
     }
 
-    private static void storeRecord(LiftLowerContext ctx, Map<?, ?> v, int ptr, ResolvedType t) {
-        int p = ptr;
-        for (ResolvedType.Field f : t.fields()) {
-            p = DefValType.alignTo(p, f.type().alignment(ctx.ptrType()));
-            store(ctx, v.get(f.label()), f.type(), p);
-            p += f.type().elementSize(ctx.ptrType());
+    private static void storeRecord(
+            LiftLowerContext context, Map<?, ?> recordValue, int pointer, ResolvedType type) {
+        int p = pointer;
+        for (ResolvedType.Field f : type.fields()) {
+            p = DefValType.alignTo(p, f.type().alignment(context.ptrType()));
+            store(context, recordValue.get(f.label()), f.type(), p);
+            p += f.type().elementSize(context.ptrType());
         }
     }
 
     private static void storeVariant(
-            LiftLowerContext ctx, VariantValue v, int ptr, ResolvedType t) {
-        var cases = t.cases();
+            LiftLowerContext context, VariantValue value, int pointer, ResolvedType type) {
+        var cases = type.cases();
         int caseIndex = -1;
         for (int i = 0; i < cases.size(); i++) {
-            if (cases.get(i).label().equals(v.label())) {
+            if (cases.get(i).label().equals(value.label())) {
                 caseIndex = i;
                 break;
             }
         }
         if (caseIndex < 0) {
-            throw new IllegalArgumentException("no case labeled '" + v.label() + "' in variant");
+            throw new IllegalArgumentException(
+                    "no case labeled '" + value.label() + "' in variant");
         }
-        int discSize = t.discriminantSize();
-        storeInt(ctx.memory(), caseIndex, ptr, discSize);
+        int discSize = type.discriminantSize();
+        storeInt(context.memory(), caseIndex, pointer, discSize);
         var c = cases.get(caseIndex);
-        int payloadPtr = DefValType.alignTo(ptr + discSize, t.maxCaseAlignment(ctx.ptrType()));
+        int payloadPointer =
+                DefValType.alignTo(pointer + discSize, type.maxCaseAlignment(context.ptrType()));
         if (c.hasType()) {
-            store(ctx, v.value(), c.type(), payloadPtr);
+            store(context, value.value(), c.type(), payloadPointer);
         }
     }
 
-    private static void storeFlags(LiftLowerContext ctx, Map<?, ?> v, int ptr, ResolvedType t) {
-        long i = packFlagsIntoInt(v, t.labels());
-        storeInt(ctx.memory(), i, ptr, t.elementSize(ctx.ptrType()));
+    private static void storeFlags(
+            LiftLowerContext context, Map<?, ?> flagsValue, int pointer, ResolvedType type) {
+        long i = packFlagsIntoInt(flagsValue, type.labels());
+        storeInt(context.memory(), i, pointer, type.elementSize(context.ptrType()));
     }
 
-    private static long packFlagsIntoInt(Map<?, ?> v, List<String> labels) {
+    private static long packFlagsIntoInt(Map<?, ?> flagsValue, List<String> labels) {
         long i = 0;
         int shift = 0;
         for (String label : labels) {
-            if (Boolean.TRUE.equals(v.get(label))) {
+            if (Boolean.TRUE.equals(flagsValue.get(label))) {
                 i |= 1L << shift;
             }
             shift++;
@@ -704,65 +718,57 @@ public final class CanonicalAbi {
         return i;
     }
 
-    private static void storeString(LiftLowerContext ctx, String v, int ptr) {
-        var result = storeStringIntoRange(ctx, v);
-        int ptrSize = ctx.ptrType().size();
-        storeInt(ctx.memory(), result.ptr, ptr, ptrSize);
-        storeInt(ctx.memory(), result.codeUnits, ptr + ptrSize, ptrSize);
+    private static void storeString(LiftLowerContext context, String value, int pointer) {
+        var result = storeStringIntoRange(context, value);
+        int ptrSize = context.ptrType().size();
+        storeInt(context.memory(), result.pointer, pointer, ptrSize);
+        storeInt(context.memory(), result.codeUnits, pointer + ptrSize, ptrSize);
     }
 
-    /**
-     * The Python reference classifies the source value's own encoding to avoid
-     * re-transcoding when it already matches the destination (e.g. a UTF-8 source
-     * string copied verbatim into a UTF-8-encoded destination). That's purely a
-     * performance optimization in a reference implementation with no other consumers —
-     * it doesn't change the observable {@code (ptr, code_units)} result or memory
-     * content for any source/destination combination, since the decoded {@link String}
-     * is already the single source of truth by the time it reaches here. So this
-     * dispatches on the destination encoding alone and always (re-)encodes directly
-     * from {@code v}, which is simpler and produces identical results.
-     */
-    static PtrAndCodeUnits storeStringIntoRange(LiftLowerContext ctx, CharSequence v) {
-        switch (ctx.stringEncoding()) {
+    static PointerAndCodeUnits storeStringIntoRange(LiftLowerContext context, CharSequence value) {
+        switch (context.stringEncoding()) {
             case UTF8:
-                return storeStringCopy(ctx, v, 1, StandardCharsets.UTF_8);
+                return storeStringCopy(context, value, 1, StandardCharsets.UTF_8);
             case UTF16:
-                return storeStringCopy(ctx, v, 2, StandardCharsets.UTF_16LE);
+                return storeStringCopy(context, value, 2, StandardCharsets.UTF_16LE);
             case LATIN1_UTF16:
-                return storeStringToLatin1OrUtf16(ctx, v);
+                return storeStringToLatin1OrUtf16(context, value);
             default:
                 throw new IllegalStateException(
-                        "unhandled string encoding " + ctx.stringEncoding());
+                        "unhandled string encoding " + context.stringEncoding());
         }
     }
 
-    private static PtrAndCodeUnits storeStringCopy(
-            LiftLowerContext ctx, CharSequence src, int dstCodeUnitSize, Charset dstCharset) {
-        byte[] encoded = encodeStrict(src, dstCharset);
-        int ptr = allocateAndWrite(ctx, dstCodeUnitSize, encoded);
-        return new PtrAndCodeUnits(ptr, encoded.length / dstCodeUnitSize);
+    private static PointerAndCodeUnits storeStringCopy(
+            LiftLowerContext context,
+            CharSequence sourceValue,
+            int destCodeUnitSize,
+            Charset destCharset) {
+        byte[] encoded = encodeStrict(sourceValue, destCharset);
+        int ptr = allocateAndWrite(context, destCodeUnitSize, encoded);
+        return new PointerAndCodeUnits(ptr, encoded.length / destCodeUnitSize);
     }
 
-    private static PtrAndCodeUnits storeStringToLatin1OrUtf16(
-            LiftLowerContext ctx, CharSequence src) {
-        boolean fitsLatin1 = src.chars().allMatch(c -> c < 0x100);
+    private static PointerAndCodeUnits storeStringToLatin1OrUtf16(
+            LiftLowerContext context, CharSequence sourceValue) {
+        boolean fitsLatin1 = sourceValue.chars().allMatch(c -> c < 0x100);
         if (fitsLatin1) {
-            byte[] encoded = encodeStrict(src, StandardCharsets.ISO_8859_1);
-            int ptr = allocateAndWrite(ctx, 2, encoded);
-            return new PtrAndCodeUnits(ptr, encoded.length);
+            byte[] encoded = encodeStrict(sourceValue, StandardCharsets.ISO_8859_1);
+            int ptr = allocateAndWrite(context, 2, encoded);
+            return new PointerAndCodeUnits(ptr, encoded.length);
         }
-        byte[] encoded = encodeStrict(src, StandardCharsets.UTF_16LE);
-        int ptr = allocateAndWrite(ctx, 2, encoded);
-        return new PtrAndCodeUnits(ptr, (encoded.length / 2) | utf16Tag(ctx.ptrType()));
+        byte[] encoded = encodeStrict(sourceValue, StandardCharsets.UTF_16LE);
+        int ptr = allocateAndWrite(context, 2, encoded);
+        return new PointerAndCodeUnits(ptr, (encoded.length / 2) | utf16Tag(context.ptrType()));
     }
 
-    static byte[] encodeStrict(CharSequence src, Charset charset) {
+    static byte[] encodeStrict(CharSequence sourceValue, Charset charset) {
         try {
             var buf =
                     charset.newEncoder()
                             .onMalformedInput(CodingErrorAction.REPORT)
                             .onUnmappableCharacter(CodingErrorAction.REPORT)
-                            .encode(CharBuffer.wrap(src));
+                            .encode(CharBuffer.wrap(sourceValue));
             byte[] bytes = new byte[buf.remaining()];
             buf.get(bytes);
             return bytes;
@@ -771,38 +777,30 @@ public final class CanonicalAbi {
         }
     }
 
-    static int allocateAndWrite(LiftLowerContext ctx, int alignment, byte[] bytes) {
+    static int allocateAndWrite(LiftLowerContext context, int alignment, byte[] bytes) {
         if (bytes.length > MAX_STRING_BYTE_LENGTH) {
             throw new TrapException(
                     "string byte length exceeds the maximum of " + MAX_STRING_BYTE_LENGTH);
         }
-        int ptr = allocate(ctx, alignment, bytes.length);
-        ctx.memory().write(ptr, bytes);
+        int ptr = allocate(context, alignment, bytes.length);
+        context.memory().write(ptr, bytes);
         return ptr;
     }
 
-    /** {@code (ptr, code_units)} pair returned by the {@code store_string*} family. */
-    static final class PtrAndCodeUnits {
-        final int ptr;
+    /** Pointer and code units pair returned by the {@code storeString*} family. */
+    static final class PointerAndCodeUnits {
+        final int pointer;
         final long codeUnits;
 
-        PtrAndCodeUnits(int ptr, long codeUnits) {
-            this.ptr = ptr;
+        PointerAndCodeUnits(int pointer, long codeUnits) {
+            this.pointer = pointer;
             this.codeUnits = codeUnits;
         }
     }
 
     /**
-     * Consumes core Wasm values one at a time from a flat argument or result list. Endive
-     * represents every core value as a primitive {@code long}: an {@code i32} in the low
-     * 32 bits, an {@code i64} as the whole long, an {@code f32} as its raw bits (via
-     * {@link Float#floatToRawIntBits}) in the low 32 bits, and an {@code f64} as its raw
-     * bits (via {@link Double#doubleToRawLongBits}). Because each {@link #liftFlat} leaf
-     * decodes its own bit pattern, the reader hands back the raw long untouched and no
-     * per-value type dispatch is needed.
-     *
-     * <p>Package-private: callers work with plain {@code long[]} through {@link
-     * #liftFlatParams}/{@link #liftFlatResults}; this cursor is an internal lifting detail.
+     * A cursor for consuming core Wasm values one at a time from a flat argument or result
+     * list.
      */
     static final class CoreValues {
         private final long[] values;
@@ -833,146 +831,145 @@ public final class CanonicalAbi {
 
     /**
      * The maximum number of core values a function's parameters may flatten to before they
-     * are passed indirectly through linear memory ({@code MAX_FLAT_ASYNC_PARAMS} for async
-     * calls, {@code MAX_FLAT_PARAMS} otherwise).
+     * are passed indirectly through linear memory.
      */
-    private static int maxFlatParams(LiftLowerContext ctx) {
-        return ctx.isAsync() ? MAX_FLAT_ASYNC_PARAMS : MAX_FLAT_PARAMS;
+    private static int maxFlatParams(LiftLowerContext context) {
+        return context.isAsync() ? MAX_FLAT_ASYNC_PARAMS : MAX_FLAT_PARAMS;
     }
 
     /**
      * The maximum number of core values a function's results may flatten to before they are
-     * passed indirectly through linear memory ({@code 0} for async calls, {@code
-     * MAX_FLAT_RESULTS} otherwise).
+     * passed indirectly through linear memory.
      */
-    private static int maxFlatResults(LiftLowerContext ctx) {
-        return ctx.isAsync() ? 0 : MAX_FLAT_RESULTS;
+    private static int maxFlatResults(LiftLowerContext context) {
+        return context.isAsync() ? 0 : MAX_FLAT_RESULTS;
     }
 
     /**
-     * Lifts a function's flat core <em>parameters</em> {@code flatArgs} into the
-     * component-level values of types {@code ts}.
+     * Lifts a function's flat core <em>parameter values</em> {@code flatArgs} into the
+     * component-level values of types {@code types}.
      *
      * @see #liftFlatValues
      */
     public static List<Object> liftFlatParams(
-            LiftLowerContext ctx, long[] flatArgs, List<run.endive.cm.types.ValType> ts) {
-        return liftFlatValues(ctx, maxFlatParams(ctx), new CoreValues(flatArgs), ts);
+            LiftLowerContext context, long[] flatArgs, List<run.endive.cm.types.ValType> types) {
+        return liftFlatValues(context, maxFlatParams(context), new CoreValues(flatArgs), types);
     }
 
     /**
      * Lifts a function's flat core <em>results</em> {@code flatResults} into the
-     * component-level values of types {@code ts}.
+     * component-level values of types {@code types}.
      *
      * @see #liftFlatValues
      */
     public static List<Object> liftFlatResults(
-            LiftLowerContext ctx, long[] flatResults, List<run.endive.cm.types.ValType> ts) {
-        return liftFlatValues(ctx, maxFlatResults(ctx), new CoreValues(flatResults), ts);
+            LiftLowerContext context, long[] flatResults, List<run.endive.cm.types.ValType> types) {
+        return liftFlatValues(context, maxFlatResults(context), new CoreValues(flatResults), types);
     }
 
     /**
      * Lifts a flat list of core parameters or results (delivered by {@code vi}) into the
-     * component-level values of types {@code ts}. When the flattened form exceeds {@code
+     * component-level values of types {@code types}. When the flattened form exceeds {@code
      * maxFlat} core values, the values were passed indirectly through linear memory and
      * {@code vi} yields only a pointer to the spilled tuple.
      */
     private static List<Object> liftFlatValues(
-            LiftLowerContext ctx,
+            LiftLowerContext context,
             int maxFlat,
             CoreValues vi,
-            List<run.endive.cm.types.ValType> ts) {
-        List<ValType> flatTypes = flattenTypes(ctx, ts);
+            List<run.endive.cm.types.ValType> types) {
+        List<ValType> flatTypes = flattenTypes(context, types);
         if (flatTypes.size() > maxFlat) {
-            var tupleType = groundedTupleOf(ctx, ts);
-            int align = tupleType.alignment(ctx.ptrType());
-            int size = tupleType.elementSize(ctx.ptrType());
+            var tupleType = resolvedTupleOf(context, types);
+            int align = tupleType.alignment(context.ptrType());
+            int size = tupleType.elementSize(context.ptrType());
             int ptr = (int) vi.next();
             if (ptr != DefValType.alignTo(ptr, align)) {
                 throw new TrapException("unaligned pointer");
             }
-            if ((long) ptr + size > Memory.bytes(ctx.memory().pages())) {
+            if ((long) ptr + size > Memory.bytes(context.memory().pages())) {
                 throw new TrapException("spilled values at " + ptr + " are out of bounds");
             }
-            var record = (Map<?, ?>) load(ctx, ptr, tupleType);
+            var record = (Map<?, ?>) load(context, ptr, tupleType);
             return new ArrayList<>(record.values());
         }
-        List<Object> result = new ArrayList<>(ts.size());
-        for (run.endive.cm.types.ValType t : ts) {
-            result.add(liftFlat(ctx, vi, ctx.ground(t)));
+        List<Object> result = new ArrayList<>(types.size());
+        for (run.endive.cm.types.ValType t : types) {
+            result.add(liftFlat(context, vi, context.resolve(t)));
         }
         return result;
     }
 
-    static Object liftFlat(LiftLowerContext ctx, CoreValues vi, ResolvedType t) {
-        switch (t.kind()) {
+    static Object liftFlat(LiftLowerContext context, CoreValues coreValues, ResolvedType type) {
+        switch (type.kind()) {
             case BOOL:
-                return convertIntToBool(vi.next() & 0xFFFFFFFFL);
+                return convertIntToBool(coreValues.next() & 0xFFFFFFFFL);
             case U8:
             case U16:
             case U32:
             case U64:
-                return liftFlatUnsigned(vi, t.kind());
+                return liftFlatUnsigned(coreValues, type.kind());
             case S8:
             case S16:
             case S32:
             case S64:
-                return liftFlatSigned(vi, t.kind());
+                return liftFlatSigned(coreValues, type.kind());
             case F32:
-                return decodeI32AsFloat(vi.next());
+                return decodeI32AsFloat(coreValues.next());
             case F64:
-                return decodeI64AsFloat(vi.next());
+                return decodeI64AsFloat(coreValues.next());
             case CHAR:
-                return CharValue.of(convertI32ToChar(vi.next() & 0xFFFFFFFFL));
+                return CharValue.of(convertI32ToChar(coreValues.next() & 0xFFFFFFFFL));
             case STRING:
-                return liftFlatString(ctx, vi);
+                return liftFlatString(context, coreValues);
             case LIST:
-                return liftFlatList(ctx, vi, t);
+            case SIZED_LIST:
+                return liftFlatList(context, coreValues, type);
             case RECORD:
-                return liftFlatRecord(ctx, vi, t);
+                return liftFlatRecord(context, coreValues, type);
             case VARIANT:
-                return liftFlatVariant(ctx, vi, t);
+                return liftFlatVariant(context, coreValues, type);
             case FLAGS:
-                return liftFlatFlags(vi, t);
+                return liftFlatFlags(coreValues, type);
             case OWN:
-                return liftOwn(ctx, (int) vi.next(), (OwnType) t.node());
+                return liftOwn(context, (int) coreValues.next(), (OwnType) type.node());
             case BORROW:
-                return liftBorrow(ctx, (int) vi.next(), (BorrowType) t.node());
+                return liftBorrow(context, (int) coreValues.next(), (BorrowType) type.node());
             case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "lifting " + t.kind() + " values is not implemented yet");
+                        "lifting " + type.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + t.kind());
+                throw new IllegalStateException("unhandled kind " + type.kind());
         }
     }
 
-    private static Number liftFlatUnsigned(CoreValues vi, DefValType.Kind kind) {
+    private static Number liftFlatUnsigned(CoreValues coreValues, DefValType.Kind kind) {
         switch (kind) {
             case U8:
-                return boxUnsigned(kind, unsignedBits(vi, 32, 8));
+                return boxUnsigned(kind, unsignedBits(coreValues, 32, 8));
             case U16:
-                return boxUnsigned(kind, unsignedBits(vi, 32, 16));
+                return boxUnsigned(kind, unsignedBits(coreValues, 32, 16));
             case U32:
-                return boxUnsigned(kind, unsignedBits(vi, 32, 32));
+                return boxUnsigned(kind, unsignedBits(coreValues, 32, 32));
             case U64:
-                return boxUnsigned(kind, unsignedBits(vi, 64, 64));
+                return boxUnsigned(kind, unsignedBits(coreValues, 64, 64));
             default:
                 throw new IllegalArgumentException("not an unsigned integer kind: " + kind);
         }
     }
 
-    private static Number liftFlatSigned(CoreValues vi, DefValType.Kind kind) {
+    private static Number liftFlatSigned(CoreValues coreValues, DefValType.Kind kind) {
         switch (kind) {
             case S8:
-                return boxSigned(kind, signedBits(vi, 32, 8));
+                return boxSigned(kind, signedBits(coreValues, 32, 8));
             case S16:
-                return boxSigned(kind, signedBits(vi, 32, 16));
+                return boxSigned(kind, signedBits(coreValues, 32, 16));
             case S32:
-                return boxSigned(kind, signedBits(vi, 32, 32));
+                return boxSigned(kind, signedBits(coreValues, 32, 32));
             case S64:
-                return boxSigned(kind, signedBits(vi, 64, 64));
+                return boxSigned(kind, signedBits(coreValues, 64, 64));
             default:
                 throw new IllegalArgumentException("not a signed integer kind: " + kind);
         }
@@ -980,10 +977,9 @@ public final class CanonicalAbi {
 
     /**
      * Boxes an already width-normalized unsigned integer into the Java numeric wrapper the host
-     * binds to the given component type (see {@code PrimitiveHostTypeDescriptor}):
-     * {@code u8 -> Short}, {@code u16 -> Integer}, {@code u32 -> Long}, and {@code u64 -> BigInteger}
-     * (the ambiguous {@code u64} case, which could also bind to {@code Long}, is resolved to
-     * {@code BigInteger}). Shared by the flat-lift and memory-load paths so both yield the same
+     * binds to the given component type:
+     * {@code u8 -> Short}, {@code u16 -> Integer}, {@code u32 -> Long}, and {@code u64 -> BigInteger}.
+     * Shared by the flat-lift and memory-load paths so both yield the same
      * wrapper types.
      */
     private static Number boxUnsigned(DefValType.Kind kind, long bits) {
@@ -1022,22 +1018,22 @@ public final class CanonicalAbi {
         }
     }
 
-    private static long unsignedBits(CoreValues vi, int coreWidth, int tWidth) {
-        long i = coreWidth == 32 ? (vi.next() & 0xFFFFFFFFL) : vi.next();
-        if (tWidth >= coreWidth) {
+    private static long unsignedBits(CoreValues coreValues, int coreWidth, int typeWidth) {
+        long i = coreWidth == 32 ? (coreValues.next() & 0xFFFFFFFFL) : coreValues.next();
+        if (typeWidth >= coreWidth) {
             return i;
         }
-        long mask = (1L << tWidth) - 1;
+        long mask = (1L << typeWidth) - 1;
         return i & mask;
     }
 
-    private static long signedBits(CoreValues vi, int coreWidth, int tWidth) {
-        long i = unsignedBits(vi, coreWidth, tWidth);
-        if (tWidth == 64) {
+    private static long signedBits(CoreValues coreValues, int coreWidth, int typeWidth) {
+        long i = unsignedBits(coreValues, coreWidth, typeWidth);
+        if (typeWidth == 64) {
             return i;
         }
-        long signBit = 1L << (tWidth - 1);
-        return (i & signBit) != 0 ? i - (1L << tWidth) : i;
+        long signBit = 1L << (typeWidth - 1);
+        return (i & signBit) != 0 ? i - (1L << typeWidth) : i;
     }
 
     private static BigInteger toUnsignedBigInteger(long bits) {
@@ -1050,8 +1046,7 @@ public final class CanonicalAbi {
      * Reinterprets the raw bits of a core value as an {@code f32}. Endive packs an
      * {@code f32} into the low 32 bits of a {@code long} (see {@link CoreValues}), so a
      * value delivered through an {@code i32} or {@code i64} joined variant slot decodes
-     * identically — this subsumes the {@code i32→f32} and {@code i64→f32} coercions the
-     * Python reference performs explicitly.
+     * identically.
      */
     private static float decodeI32AsFloat(long bits) {
         return canonicalizeNan32(Float.intBitsToFloat((int) bits));
@@ -1075,90 +1070,81 @@ public final class CanonicalAbi {
         return Double.doubleToRawLongBits(canonicalizeNan64(f));
     }
 
-    private static String liftFlatString(LiftLowerContext ctx, CoreValues vi) {
-        int ptr = (int) vi.next();
-        long packedLength = vi.next() & 0xFFFFFFFFL;
-        return loadStringFromRange(ctx, ptr, packedLength);
+    private static String liftFlatString(LiftLowerContext context, CoreValues coreValues) {
+        int ptr = (int) coreValues.next();
+        long packedLength = coreValues.next() & 0xFFFFFFFFL;
+        return loadStringFromRange(context, ptr, packedLength);
     }
 
-    private static List<Object> liftFlatList(LiftLowerContext ctx, CoreValues vi, ResolvedType t) {
-        var elemType = t.element();
-        if (t.isFixedSizeList()) {
-            List<Object> a = new ArrayList<>(t.fixedSize());
-            for (int i = 0; i < t.fixedSize(); i++) {
-                a.add(liftFlat(ctx, vi, elemType));
+    private static List<Object> liftFlatList(
+            LiftLowerContext context, CoreValues coreValues, ResolvedType type) {
+        var elementType = type.element();
+        if (type.isFixedSizeList()) {
+            List<Object> a = new ArrayList<>(type.fixedSize());
+            for (int i = 0; i < type.fixedSize(); i++) {
+                a.add(liftFlat(context, coreValues, elementType));
             }
             return a;
         }
-        int ptr = (int) vi.next();
-        int length = (int) vi.next();
-        return loadListFromRange(ctx, ptr, length, elemType);
+        int ptr = (int) coreValues.next();
+        int length = (int) coreValues.next();
+        return loadListFromRange(context, ptr, length, elementType);
     }
 
     private static Map<String, Object> liftFlatRecord(
-            LiftLowerContext ctx, CoreValues vi, ResolvedType t) {
+            LiftLowerContext context, CoreValues coreValues, ResolvedType type) {
         Map<String, Object> record = new LinkedHashMap<>();
-        for (ResolvedType.Field f : t.fields()) {
-            record.put(f.label(), liftFlat(ctx, vi, f.type()));
+        for (ResolvedType.Field f : type.fields()) {
+            record.put(f.label(), liftFlat(context, coreValues, f.type()));
         }
         return record;
     }
 
-    /**
-     * Lifts a variant, consuming exactly the flattened core types produced by {@code
-     * flatten_variant} regardless of which case is present. Because a variant's flattened
-     * payload is the elementwise "join" across all cases, a specific case's own flat
-     * types can be narrower than the shared joined layout. In Endive's raw-{@code long}
-     * representation this needs no per-value coercion: each {@link #liftFlat} leaf already
-     * decodes its own bit pattern (masking to 32 bits for {@code i32}-shaped types,
-     * reinterpreting float bits), so the same long read out of a wider joined slot lifts
-     * correctly. We only have to skip whatever joined slots the chosen case left unused.
-     */
     private static VariantValue liftFlatVariant(
-            LiftLowerContext ctx, CoreValues vi, ResolvedType t) {
-        var cases = t.cases();
-        List<ValType> flatTypes = t.flatten(ctx.ptrType());
+            LiftLowerContext context, CoreValues coreValues, ResolvedType type) {
+        var cases = type.cases();
+        List<ValType> flatTypes = type.flatten(context.ptrType());
         if (flatTypes.get(0) != ValType.I32) {
             throw new IllegalStateException("variant discriminant flat type must be i32");
         }
         int payloadSlots = flatTypes.size() - 1;
-        long caseIndex = vi.next() & 0xFFFFFFFFL;
+        long caseIndex = coreValues.next() & 0xFFFFFFFFL;
         if (caseIndex >= cases.size()) {
             throw new TrapException("invalid variant discriminant");
         }
         var c = cases.get((int) caseIndex);
-        int payloadStart = vi.position();
-        Object v = c.hasType() ? liftFlat(ctx, vi, c.type()) : null;
-        vi.skipTo(payloadStart + payloadSlots);
+        int payloadStart = coreValues.position();
+        Object v = c.hasType() ? liftFlat(context, coreValues, c.type()) : null;
+        coreValues.skipTo(payloadStart + payloadSlots);
         return VariantValue.of(c.label(), v);
     }
 
-    private static Map<String, Boolean> liftFlatFlags(CoreValues vi, ResolvedType t) {
-        return unpackFlagsFromInt(vi.next() & 0xFFFFFFFFL, t.labels());
+    private static Map<String, Boolean> liftFlatFlags(CoreValues coreValues, ResolvedType type) {
+        return unpackFlagsFromInt(coreValues.next() & 0xFFFFFFFFL, type.labels());
     }
 
-    static long[] lowerFlat(LiftLowerContext ctx, Object v, ResolvedType t) {
-        LongList out = new LongList();
-        lowerFlatInto(ctx, v, t, out);
+    static long[] lowerFlat(LiftLowerContext context, Object value, ResolvedType type) {
+        LongBuffer out = new LongBuffer();
+        lowerFlatInto(context, value, type, out);
         return out.toArray();
     }
 
     /**
-     * Lowers a function's <em>parameters</em> — the component-level values {@code vs} of
-     * types {@code ts} — into a flat list of core values. When the parameters spill into
+     * Lowers a component function's <em>parameter values</em> {@code values} of
+     * types {@code types} into a flat list of core values. When the parameters spill into
      * linear memory, storage is freshly allocated via {@code realloc} and the returned list
      * is the spill pointer.
      *
      * @see #lowerFlatValues
      */
     public static long[] lowerFlatParams(
-            LiftLowerContext ctx, List<?> vs, List<run.endive.cm.types.ValType> ts) {
-        return lowerFlatValues(ctx, maxFlatParams(ctx), vs, ts, null);
+            LiftLowerContext context, List<?> values, List<run.endive.cm.types.ValType> types) {
+        return lowerFlatValues(context, maxFlatParams(context), values, types, null);
     }
 
     /**
-     * Lowers a function's <em>results</em> — the component-level values {@code vs} of types
-     * {@code ts} — into a flat list of core values. When the results spill into linear
+     * Lowers a component function's <em>results</em> {@code values} of types
+     * {@code types} into a flat list of core values. When the results spill into linear
      * memory and {@code outParam} is non-null, its first element is the caller-provided
      * spill pointer and no flat values are returned; when {@code outParam} is null, storage
      * is freshly allocated via {@code realloc} and the returned list is the spill pointer.
@@ -1166,132 +1152,131 @@ public final class CanonicalAbi {
      * @see #lowerFlatValues
      */
     public static long[] lowerFlatResults(
-            LiftLowerContext ctx,
-            List<?> vs,
-            List<run.endive.cm.types.ValType> ts,
+            LiftLowerContext context,
+            List<?> values,
+            List<run.endive.cm.types.ValType> types,
             long[] outParam) {
-        return lowerFlatValues(ctx, maxFlatResults(ctx), vs, ts, outParam);
+        return lowerFlatValues(context, maxFlatResults(context), values, types, outParam);
     }
 
     /**
-     * Lowers the component-level values {@code vs} of types {@code ts} into a flat list of
+     * Lowers the component-level values {@code values} of types {@code types} into a flat list of
      * core values. When the flattened form exceeds {@code maxFlat} core values, the values
      * are spilled into linear memory as a tuple: with no {@code outParam}, storage is
-     * freshly allocated via {@code realloc} and the returned list is the spill pointer;
-     * otherwise the caller-provided {@code outParam}'s first element is a pre-allocated
+     * freshly allocated via {@code realloc} and the returned list is the spill pointer.
+     * Otherwise, the caller-provided {@code outParam}'s first element is a pre-allocated
      * pointer and no flat values are returned.
-     *
-     * <p>The reference's {@code may_leave} guard against reentrant lowering is instance
-     * state not yet modeled here, so it is omitted.
      */
     private static long[] lowerFlatValues(
-            LiftLowerContext ctx,
+            LiftLowerContext context,
             int maxFlat,
-            List<?> vs,
-            List<run.endive.cm.types.ValType> ts,
+            List<?> values,
+            List<run.endive.cm.types.ValType> types,
             long[] outParam) {
 
-        if (vs.isEmpty()) {
+        if (values.isEmpty()) {
             return EMPTY_CORE_VALUES;
         }
 
-        List<ValType> flatTypes = flattenTypes(ctx, ts);
+        List<ValType> flatTypes = flattenTypes(context, types);
         if (flatTypes.size() > maxFlat) {
-            var tupleType = groundedTupleOf(ctx, ts);
+            var tupleType = resolvedTupleOf(context, types);
             Map<String, Object> tupleValue = new LinkedHashMap<>();
-            for (int i = 0; i < vs.size(); i++) {
-                tupleValue.put(Integer.toString(i), vs.get(i));
+            for (int i = 0; i < values.size(); i++) {
+                tupleValue.put(Integer.toString(i), values.get(i));
             }
-            int align = tupleType.alignment(ctx.ptrType());
-            int size = tupleType.elementSize(ctx.ptrType());
+            int align = tupleType.alignment(context.ptrType());
+            int size = tupleType.elementSize(context.ptrType());
             int ptr;
             long[] flatVals;
             if (outParam == null) {
-                ptr = allocate(ctx, align, size);
+                ptr = allocate(context, align, size);
                 flatVals = new long[] {Integer.toUnsignedLong(ptr)};
             } else {
                 ptr = (int) outParam[0];
                 if (ptr != DefValType.alignTo(ptr, align)) {
                     throw new TrapException("unaligned pointer");
                 }
-                if ((long) ptr + size > Memory.bytes(ctx.memory().pages())) {
+                if ((long) ptr + size > Memory.bytes(context.memory().pages())) {
                     throw new TrapException("spill out-param at " + ptr + " is out of bounds");
                 }
                 flatVals = new long[0];
             }
-            store(ctx, tupleValue, tupleType, ptr);
+            store(context, tupleValue, tupleType, ptr);
             return flatVals;
         }
-        LongList out = new LongList();
-        for (int i = 0; i < vs.size(); i++) {
-            lowerFlatInto(ctx, vs.get(i), ctx.ground(ts.get(i)), out);
+        LongBuffer out = new LongBuffer();
+        for (int i = 0; i < values.size(); i++) {
+            lowerFlatInto(context, values.get(i), context.resolve(types.get(i)), out);
         }
         return out.toArray();
     }
 
     private static void lowerFlatInto(
-            LiftLowerContext ctx, Object v, ResolvedType t, LongList out) {
-        switch (t.kind()) {
+            LiftLowerContext context, Object value, ResolvedType type, LongBuffer out) {
+        switch (type.kind()) {
             case BOOL:
-                out.add((Boolean) v ? 1L : 0L);
+                out.add((Boolean) value ? 1L : 0L);
                 return;
             case U8:
             case U16:
             case U32:
-                out.add(((Number) v).longValue() & 0xFFFFFFFFL);
+                out.add(((Number) value).longValue() & 0xFFFFFFFFL);
                 return;
             case U64:
-                out.add(((Number) v).longValue());
+                out.add(((Number) value).longValue());
                 return;
             case S8:
             case S16:
             case S32:
-                out.add(lowerFlatSigned(((Number) v).longValue(), 32));
+                out.add(lowerFlatSigned(((Number) value).longValue(), 32));
                 return;
             case S64:
-                out.add(lowerFlatSigned(((Number) v).longValue(), 64));
+                out.add(lowerFlatSigned(((Number) value).longValue(), 64));
                 return;
             case F32:
-                out.add(encodeFloatAsI32(((Number) v).floatValue()));
+                out.add(encodeFloatAsI32(((Number) value).floatValue()));
                 return;
             case F64:
-                out.add(encodeFloatAsI64(((Number) v).doubleValue()));
+                out.add(encodeFloatAsI64(((Number) value).doubleValue()));
                 return;
             case CHAR:
-                out.add(Integer.toUnsignedLong(((CharValue) v).codePoint()));
+                out.add(Integer.toUnsignedLong(((CharValue) value).codePoint()));
                 return;
             case STRING:
-                lowerFlatString(ctx, (String) v, out);
+                lowerFlatString(context, (String) value, out);
                 return;
             case LIST:
-                lowerFlatList(ctx, v, t, out);
+            case SIZED_LIST:
+                lowerFlatList(context, value, type, out);
                 return;
             case RECORD:
-                lowerFlatRecord(ctx, (Map<?, ?>) v, t, out);
+                lowerFlatRecord(context, (Map<?, ?>) value, type, out);
                 return;
             case VARIANT:
-                lowerFlatVariant(ctx, (VariantValue) v, t, out);
+                lowerFlatVariant(context, (VariantValue) value, type, out);
                 return;
             case FLAGS:
-                out.add(packFlagsIntoInt((Map<?, ?>) v, t.labels()) & 0xFFFFFFFFL);
+                out.add(packFlagsIntoInt((Map<?, ?>) value, type.labels()) & 0xFFFFFFFFL);
                 return;
             case OWN:
                 out.add(
                         Integer.toUnsignedLong(
-                                lowerOwn(ctx, (ResourceValue) v, (OwnType) t.node())));
+                                lowerOwn(context, (ResourceValue) value, (OwnType) type.node())));
                 return;
             case BORROW:
                 out.add(
                         Integer.toUnsignedLong(
-                                lowerBorrow(ctx, (ResourceValue) v, (BorrowType) t.node())));
+                                lowerBorrow(
+                                        context, (ResourceValue) value, (BorrowType) type.node())));
                 return;
             case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "lowering " + t.kind() + " values is not implemented yet");
+                        "lowering " + type.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + t.kind());
+                throw new IllegalStateException("unhandled kind " + type.kind());
         }
     }
 
@@ -1301,67 +1286,60 @@ public final class CanonicalAbi {
      * (zero-extending the two's-complement pattern into the long); for a 64-bit core
      * value the {@code long} already carries the correct pattern.
      */
-    private static long lowerFlatSigned(long i, int coreBits) {
-        return coreBits == 64 ? i : (i & 0xFFFFFFFFL);
+    private static long lowerFlatSigned(long value, int coreBits) {
+        return coreBits == 64 ? value : (value & 0xFFFFFFFFL);
     }
 
-    private static void lowerFlatString(LiftLowerContext ctx, String v, LongList out) {
-        var result = storeStringIntoRange(ctx, v);
-        out.add(Integer.toUnsignedLong(result.ptr));
+    private static void lowerFlatString(LiftLowerContext context, String value, LongBuffer out) {
+        var result = storeStringIntoRange(context, value);
+        out.add(Integer.toUnsignedLong(result.pointer));
         out.add(result.codeUnits & 0xFFFFFFFFL);
     }
 
     private static void lowerFlatList(
-            LiftLowerContext ctx, Object v, ResolvedType t, LongList out) {
-        var list = (List<?>) v;
-        var elemType = t.element();
-        if (t.isFixedSizeList()) {
-            if (list.size() != t.fixedSize()) {
+            LiftLowerContext context, Object value, ResolvedType type, LongBuffer out) {
+        var list = (List<?>) value;
+        var elementType = type.element();
+        if (type.isFixedSizeList()) {
+            if (list.size() != type.fixedSize()) {
                 throw new IllegalArgumentException(
                         "expected "
-                                + t.fixedSize()
+                                + type.fixedSize()
                                 + " elements for fixed-size list, got "
                                 + list.size());
             }
             for (Object e : list) {
-                lowerFlatInto(ctx, e, elemType, out);
+                lowerFlatInto(context, e, elementType, out);
             }
             return;
         }
-        int ptr = storeListIntoRange(ctx, list, elemType);
+        int ptr = storeListIntoRange(context, list, elementType);
         out.add(Integer.toUnsignedLong(ptr));
         out.add(Integer.toUnsignedLong(list.size()));
     }
 
     private static void lowerFlatRecord(
-            LiftLowerContext ctx, Map<?, ?> v, ResolvedType t, LongList out) {
-        for (ResolvedType.Field f : t.fields()) {
-            lowerFlatInto(ctx, v.get(f.label()), f.type(), out);
+            LiftLowerContext context, Map<?, ?> mapValue, ResolvedType type, LongBuffer out) {
+        for (ResolvedType.Field f : type.fields()) {
+            lowerFlatInto(context, mapValue.get(f.label()), f.type(), out);
         }
     }
 
-    /**
-     * Lowers a variant into the flattened core types produced by {@code flatten_variant}:
-     * the discriminant followed by the joined payload slots. As with {@link
-     * #liftFlatVariant}, the raw-{@code long} representation makes the joined-slot
-     * coercions the Python reference performs (e.g. {@code f32→i64}) unnecessary — each
-     * {@link #lowerFlatInto} leaf already emits the canonical unsigned bit pattern that
-     * fits any wider joined slot. Unused trailing slots are padded with {@code 0}.
-     */
     private static void lowerFlatVariant(
-            LiftLowerContext ctx, VariantValue v, ResolvedType t, LongList out) {
-        var cases = t.cases();
+            LiftLowerContext context, VariantValue value, ResolvedType type, LongBuffer out) {
+        var cases = type.cases();
         int caseIndex = -1;
         for (int i = 0; i < cases.size(); i++) {
-            if (cases.get(i).label().equals(v.label())) {
+            if (cases.get(i).label().equals(value.label())) {
                 caseIndex = i;
                 break;
             }
         }
         if (caseIndex < 0) {
-            throw new IllegalArgumentException("no case labeled '" + v.label() + "' in variant");
+            throw new IllegalArgumentException(
+                    "no case labeled '" + value.label() + "' in variant");
         }
-        List<ValType> flatTypes = t.flatten(ctx.ptrType());
+        List<ValType> flatTypes = type.flatten(context.ptrType());
         if (flatTypes.get(0) != ValType.I32) {
             throw new IllegalStateException("variant discriminant flat type must be i32");
         }
@@ -1370,109 +1348,91 @@ public final class CanonicalAbi {
         var c = cases.get(caseIndex);
         int payloadStart = out.size();
         if (c.hasType()) {
-            lowerFlatInto(ctx, v.value(), c.type(), out);
+            lowerFlatInto(context, value.value(), c.type(), out);
         }
         for (int i = out.size() - payloadStart; i < payloadSlots; i++) {
             out.add(0L);
         }
     }
 
-    // -------------------------------------------------------------------------------------
-    // Resource handles
-    //
-    // A handle is never a value in the way an integer or a record is: it is an index into the
-    // owning component instance's table, and the table is what gives it meaning. So unlike
-    // every type above, lifting and lowering a handle mutate state — lifting takes an index
-    // out of the source instance's table (for `own`) or registers a lend against it (for
-    // `borrow`), and lowering puts a fresh index into the destination's. The rep itself never
-    // crosses as a rep; each side only ever sees its own index.
-    //
-    // The guards below are what make `own` and `borrow` mean anything at runtime, and they are
-    // reproduced from the reference exactly, including the order in which they fire: `lift_own`
-    // removes before it validates, so a handle named by a well-formed-but-wrong index is
-    // consumed either way.
-    // -------------------------------------------------------------------------------------
-
     /**
      * Lifts an {@code own} handle, transferring ownership out of the source instance: the index
      * is removed from its table, so the component that held it can no longer name the resource.
      *
-     * <p>Fails unless ownership is genuinely transferable — the index must name a handle of
-     * this exact resource type, that handle must itself be owning rather than borrowed, and it
-     * must not currently be lent out, since giving the resource away while a callee still holds
-     * a borrow of it would leave that borrow dangling.
+     * <p>Fails unless ownership is genuinely transferable. The index must name a handle of
+     * this exact resource ownType, that handle must itself be owning rather than borrowed, and it
+     * must not currently be lent out.
      */
-    static ResourceValue liftOwn(LiftLowerContext ctx, int i, OwnType t) {
-        var rt = resourceTypeOf(ctx, t.typeIdx());
-        var h = requireHandle(handles(ctx).remove(i), i);
-        requireResourceType(h, rt, i);
+    static ResourceValue liftOwn(LiftLowerContext context, int index, OwnType ownType) {
+        var rt = resourceTypeOf(context, ownType.typeIdx());
+        var h = requireHandle(handles(context).remove(index), index);
+        requireResourceType(h, rt, index);
         if (h.numLends() != 0) {
             throw new TrapException("cannot remove owned resource while borrowed");
         }
         if (!h.own()) {
             throw new TrapException(
-                    "handle index " + i + " is a borrowed handle, expected an owned one");
+                    "handle index " + index + " is a borrowed handle, expected an owned one");
         }
         return ResourceValue.owned(rt, h.rep());
     }
 
     /**
-     * Lifts a {@code borrow} handle, leaving the source handle in place — the caller keeps it,
+     * Lifts a {@code borrow} handle, leaving the source handle in place. The caller keeps it,
      * and only the right to use it for the duration of the call crosses over.
      *
      * <p>Registering the source handle as a lender on the call's scope is what bounds that
      * duration: until the call resolves, the handle counts as lent and {@link #liftOwn} will
      * refuse to transfer it away.
      */
-    static ResourceValue liftBorrow(LiftLowerContext ctx, int i, BorrowType t) {
-        var rt = resourceTypeOf(ctx, t.typeIdx());
-        var h = requireHandle(handles(ctx).get(i), i);
-        requireResourceType(h, rt, i);
-        subtaskScope(ctx).addLender(h);
+    static ResourceValue liftBorrow(LiftLowerContext context, int index, BorrowType borrowType) {
+        var rt = resourceTypeOf(context, borrowType.typeIdx());
+        var h = requireHandle(handles(context).get(index), index);
+        requireResourceType(h, rt, index);
+        subtaskScope(context).addLender(h);
         return ResourceValue.borrowed(rt, h.rep());
     }
 
     /** Lowers an {@code own} handle by minting a fresh owning index in the destination. */
-    static int lowerOwn(LiftLowerContext ctx, ResourceValue v, OwnType t) {
-        var rt = resourceTypeOf(ctx, t.typeIdx());
-        return handles(ctx).add(rt, v.rep(), true, null);
+    static int lowerOwn(LiftLowerContext context, ResourceValue value, OwnType ownType) {
+        var rt = resourceTypeOf(context, ownType.typeIdx());
+        return handles(context).add(rt, value.rep(), true, null);
     }
 
     /**
-     * Lowers a {@code borrow} handle, charging it to the current call so that it must be
+     * Lowers a {@code borrow} handle, scoping it to the current call so that it must be
      * dropped before that call may return.
      *
      * <p>Lowering into the component that <em>implements</em> the resource type skips the table
-     * entirely and passes the representation itself. This is the reference's one deliberate
-     * shortcut, and it is observable rather than internal: a component receiving a borrow of
+     * entirely and passes the representation itself. A component receiving a borrow of
      * its own resource is handed a rep, not an index, and so must neither call {@code
      * resource.rep} on it nor drop it. That is sound because the only thing such a handle could
      * have been used for is recovering the rep it already is.
      */
-    static int lowerBorrow(LiftLowerContext ctx, ResourceValue v, BorrowType t) {
-        var rt = resourceTypeOf(ctx, t.typeIdx());
-        var handles = handles(ctx);
-        if (rt.impl() == handles) {
-            return v.rep();
+    static int lowerBorrow(LiftLowerContext context, ResourceValue value, BorrowType borrowType) {
+        var rt = resourceTypeOf(context, borrowType.typeIdx());
+        var handles = handles(context);
+        if (rt.handleTable() == handles) {
+            return value.rep();
         }
-        var scope = taskScope(ctx);
+        var scope = taskScope(context);
         scope.borrow();
-        return handles.add(rt, v.rep(), false, scope);
+        return handles.add(rt, value.rep(), false, scope);
     }
 
     /** Resolves an {@code own}/{@code borrow} type's index to the resource type it denotes. */
-    private static ResourceTypeRef resourceTypeOf(LiftLowerContext ctx, int typeIdx) {
+    private static ResourceTypeRef resourceTypeOf(LiftLowerContext context, int typeIdx) {
         var resolver =
                 Objects.requireNonNull(
-                        ctx.resourceTypes(),
+                        context.resourceTypes(),
                         "lifting or lowering a resource handle requires a resource type resolver"
                                 + " in the context");
         return resolver.resolveResourceType(typeIdx);
     }
 
-    private static HandleTable handles(LiftLowerContext ctx) {
+    private static HandleTable handles(LiftLowerContext context) {
         return Objects.requireNonNull(
-                ctx.handles(),
+                context.handles(),
                 "lifting or lowering a resource handle requires a handle table in the context");
     }
 
@@ -1481,106 +1441,93 @@ public final class CanonicalAbi {
      * naming one of those where a resource handle is expected has to trap rather than be
      * misread.
      */
-    private static Handle requireHandle(Object element, int i) {
-        if (!(element instanceof Handle)) {
-            throw new TrapException("handle index " + i + " is not a resource handle");
+    private static ResourceState requireHandle(Object element, int index) {
+        if (!(element instanceof ResourceState)) {
+            throw new TrapException("handle index " + index + " is not a resource handle");
         }
-        return (Handle) element;
+        return (ResourceState) element;
     }
 
     /**
-     * Resource types are compared by identity, not structure: two instantiations of the same
+     * Resource types are compared by identity, not structure, thus two instantiations of the same
      * component declare distinct resource types even though they share one declaration, and a
      * handle from one must not be usable against the other.
      */
-    private static void requireResourceType(Handle h, ResourceTypeRef expected, int i) {
-        if (h.resourceType() != expected) {
+    private static void requireResourceType(
+            ResourceState resource, ResourceTypeRef expected, int index) {
+        if (resource.resourceType() != expected) {
             throw new TrapException(
                     "handle index "
-                            + i
+                            + index
                             + " used with the wrong type, "
-                            + ResourceTypeRef.mismatch(expected, h.resourceType()));
+                            + ResourceTypeRef.mismatch(expected, resource.resourceType()));
         }
     }
 
-    private static BorrowScope.Task taskScope(LiftLowerContext ctx) {
-        var scope = ctx.borrowScope();
-        if (!(scope instanceof BorrowScope.Task)) {
+    private static BorrowScope.Callee taskScope(LiftLowerContext context) {
+        var scope = context.borrowScope();
+        if (!(scope instanceof BorrowScope.Callee)) {
             throw new IllegalStateException(
                     "lowering a borrow requires the context's borrow scope to be a task, got "
                             + scope);
         }
-        return (BorrowScope.Task) scope;
+        return (BorrowScope.Callee) scope;
     }
 
-    private static BorrowScope.Subtask subtaskScope(LiftLowerContext ctx) {
-        var scope = ctx.borrowScope();
-        if (!(scope instanceof BorrowScope.Subtask)) {
+    private static BorrowScope.Caller subtaskScope(LiftLowerContext context) {
+        var scope = context.borrowScope();
+        if (!(scope instanceof BorrowScope.Caller)) {
             throw new IllegalStateException(
                     "lifting a borrow requires the context's borrow scope to be a subtask, got "
                             + scope);
         }
-        return (BorrowScope.Subtask) scope;
+        return (BorrowScope.Caller) scope;
     }
-
-    // -------------------------------------------------------------------------------------
-    // Direct transfer
-    //
-    // When a lifted component function is immediately lowered back into another core
-    // module — the shape produced by wiring two core modules together through the
-    // component's type — the lift/lower pair above round-trips every value through a Java
-    // String, List, Map or boxed Number that nothing ever observes. The methods below move
-    // the same values straight from the source memory into the destination memory,
-    // collapsing whole records and lists into single copies where the Canonical ABI
-    // guarantees the bytes are identical, and doing real work only where it does not
-    // (string transcoding, pointer re-allocation, and the normalizations catalogued in
-    // {@link Transferability}).
-    // -------------------------------------------------------------------------------------
 
     /**
      * Bulk copies move through an intermediate {@code byte[]} because {@link Memory} exposes
-     * no memory-to-memory primitive; chunking bounds that buffer instead of letting it scale
+     * no memory-to-memory primitive. Chunking bounds that buffer instead of letting it scale
      * with the list being copied.
      */
     private static final int COPY_CHUNK_BYTES = 64 * 1024;
 
     /**
-     * Whether {@code ft}'s values can move directly between {@code caller} and {@code callee}
-     * rather than through the lift/lower pair. A {@code false} result is always safe — the
-     * caller simply keeps using {@link #liftFlatParams}/{@link #lowerFlatParams} — so this
-     * rejects anything the transfer path does not yet model rather than trying to be
-     * exhaustive.
+     * Whether a component function of type {@code funcType}'s values can move directly between
+     * {@code caller} and {@code callee} rather than through the lift/lower trampoline. A
+     * {@code false} result indicates that the caller should fall back to using
+     * {@link #liftFlatParams}/{@link #lowerFlatParams}. This rejects anything the transfer
+     * path does not yet model rather than trying to be exhaustive.
      *
      * <p>Linear memory is required only where it is actually used. A function whose values
-     * all travel as core Wasm values — no string, no unbounded list, and neither the
-     * parameters nor the result spilling — never touches memory, so it transfers between
-     * contexts defined with no {@code memory} canonopt at all. That covers the shapes
+     * all travel as core Wasm values (no string, no unbounded list, and neither the
+     * parameters nor the result spilling) never touches memory, so it transfers between
+     * contexts defined with no {@code memory} canon opt at all. That covers the shapes
      * {@code canon lift}/{@code canon lower} take when declared with no options, which is
      * common for functions over integers, {@code enum}s and payload-free {@code variant}s.
      *
-     * @param caller the context the call arrives from — parameters are read from it and
-     *     results are written back into it
-     * @param callee the context the call is dispatched into — parameters are written into it
-     *     and results are read from it
-     * @param ft the component-level function type both sides agree on
+     * @param caller the context the call arrives from, with parameters read from it and
+     *     results written back into it
+     * @param callee the context the call is dispatched into, with parameters written into it
+     *     and results read from it
+     * @param funcType the component function type both sides agree on
      */
     public static boolean canTransfer(
-            LiftLowerContext caller, LiftLowerContext callee, FuncType ft) {
-        if (caller.isAsync() || callee.isAsync() || ft.isAsync()) {
+            LiftLowerContext caller, LiftLowerContext callee, FuncType funcType) {
+        if (caller.isAsync() || callee.isAsync() || funcType.isAsync()) {
             return false;
         }
         if (caller.ptrType() != callee.ptrType()) {
             return false;
         }
-        List<run.endive.cm.types.ValType> paramTypes = paramValTypes(ft);
-        List<run.endive.cm.types.ValType> resultTypes = resultValTypes(ft);
+        List<run.endive.cm.types.ValType> paramTypes = paramValTypes(funcType);
+        List<run.endive.cm.types.ValType> resultTypes = resultValTypes(funcType);
         for (run.endive.cm.types.ValType t : paramTypes) {
-            if (!Transferability.isSupported(caller.ground(t))) {
+            if (!Transferability.isSupported(caller.resolve(t))) {
                 return false;
             }
         }
         for (run.endive.cm.types.ValType t : resultTypes) {
-            if (!Transferability.isSupported(caller.ground(t))) {
+            if (!Transferability.isSupported(caller.resolve(t))) {
                 return false;
             }
         }
@@ -1596,72 +1543,72 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Whether {@code ft}'s values can be handed from {@code caller} to {@code callee} with no
-     * adapter at all — the caller's flat core arguments passed to the callee's core function
-     * as they stand, and its core results returned unchanged.
+     * Whether component function type {@code funcType}'s values can be handed from {@code caller}
+     * to {@code callee} with no adapter at all. If true, the caller's flat core arguments
+     * can be passed to the callee's core function as they stand, and its core results returned
+     * without lifting.
      *
      * <p>True only when nothing reaches linear memory (no string, no unbounded list, and
-     * neither side spilling) <em>and</em> every flat slot survives untouched, which rules out
+     * neither side spilling) and every flat slot survives untouched, which rules out
      * {@code bool}, {@code char}, the narrow integers, sparse {@code flags} and every
-     * {@code variant} — see {@link Transferability#isFlatIdentity(TypeResolver, PointerType, DefValType)} for why, and for the sense
-     * in which an {@code i32} slot counts as unchanged.
+     * {@code variant}.
      *
      * <p>This covers the values only. A caller acting on it must also confirm the callee has
-     * no {@code post_return} to run; if it does, the values still need no work but the call
+     * no post-return function to run. If it does, the values still need no work but the call
      * itself still needs a wrapper. Where both hold, the callee's core function can be
      * registered as the caller's import directly.
      */
     public static boolean isIdentityTransfer(
-            LiftLowerContext caller, LiftLowerContext callee, FuncType ft) {
-        if (!canTransfer(caller, callee, ft)) {
+            LiftLowerContext caller, LiftLowerContext callee, FuncType funcType) {
+        if (!canTransfer(caller, callee, funcType)) {
             return false;
         }
-        List<run.endive.cm.types.ValType> paramTypes = paramValTypes(ft);
-        List<run.endive.cm.types.ValType> resultTypes = resultValTypes(ft);
+        List<run.endive.cm.types.ValType> paramTypes = paramValTypes(funcType);
+        List<run.endive.cm.types.ValType> resultTypes = resultValTypes(funcType);
         if (needsMemory(caller, paramTypes, MAX_FLAT_PARAMS)
                 || needsMemory(caller, resultTypes, MAX_FLAT_RESULTS)) {
             return false;
         }
         for (run.endive.cm.types.ValType t : paramTypes) {
-            if (!Transferability.isFlatIdentity(caller.ptrType(), caller.ground(t))) {
+            if (!Transferability.isFlatIdentity(caller.ptrType(), caller.resolve(t))) {
                 return false;
             }
         }
         for (run.endive.cm.types.ValType t : resultTypes) {
-            if (!Transferability.isFlatIdentity(caller.ptrType(), caller.ground(t))) {
+            if (!Transferability.isFlatIdentity(caller.ptrType(), caller.resolve(t))) {
                 return false;
             }
         }
         return true;
     }
 
-    private static List<run.endive.cm.types.ValType> paramValTypes(FuncType ft) {
-        List<run.endive.cm.types.ValType> ts = new ArrayList<>(ft.params().size());
-        for (LabelValType p : ft.params()) {
+    private static List<run.endive.cm.types.ValType> paramValTypes(FuncType funcType) {
+        List<run.endive.cm.types.ValType> ts = new ArrayList<>(funcType.params().size());
+        for (LabelValType p : funcType.params()) {
             ts.add(p.valType());
         }
         return ts;
     }
 
-    private static List<run.endive.cm.types.ValType> resultValTypes(FuncType ft) {
-        return ft.hasResult() ? List.of(ft.result()) : List.of();
+    private static List<run.endive.cm.types.ValType> resultValTypes(FuncType funcType) {
+        return funcType.hasResult() ? List.of(funcType.result()) : List.of();
     }
 
     /**
-     * Whether values of {@code ts} reach linear memory at all: either the flat list exceeds
-     * {@code maxFlat} and spills into a tuple, or some value is stored out of line behind a
-     * pointer.
+     * Whether values of component types {@code types} reach linear memory at all. Either the
+     * flat list exceeds {@code maxFlat} and spills into a tuple, or some value needs to be
+     * stored in memory with a pointer.
      */
     private static boolean needsMemory(
-            LiftLowerContext ctx, List<run.endive.cm.types.ValType> ts, int maxFlat) {
-        if (ts.isEmpty()) {
+            LiftLowerContext context, List<run.endive.cm.types.ValType> types, int maxFlat) {
+        if (types.isEmpty()) {
             return false;
         }
-        if (flattenTypes(ctx, ts).size() > maxFlat) {
+        if (flattenTypes(context, types).size() > maxFlat) {
             return true;
         }
-        for (run.endive.cm.types.ValType t : ts) {
-            if (contains(ctx.ground(t), CanonicalAbi::livesBehindPointer)) {
+        for (run.endive.cm.types.ValType t : types) {
+            if (contains(context.resolve(t), CanonicalAbi::storedInMemory)) {
                 return true;
             }
         }
@@ -1669,110 +1616,111 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Whether a value of this type is stored out of line, behind a pointer the destination
+     * Whether a value of this type must be stored in memory, behind a pointer the destination
      * has to allocate. A fixed-size list is stored inline and so needs no allocation of its
-     * own; every other {@code list} — including the despecialized form of a {@code map} — is
+     * own. Every other {@code list}, including the despecialized form of a {@code map}, is
      * a (pointer, length) pair, as is a {@code string}.
      */
-    private static boolean livesBehindPointer(ResolvedType t) {
-        if (t.kind() == DefValType.Kind.STRING) {
+    private static boolean storedInMemory(ResolvedType type) {
+        if (type.kind() == DefValType.Kind.STRING) {
             return true;
         }
-        if (t.kind() != DefValType.Kind.LIST && t.kind() != DefValType.Kind.SIZED_LIST) {
-            return false;
-        }
-        return !t.isFixedSizeList();
+        return type.kind() == DefValType.Kind.LIST;
     }
 
     /**
-     * Whether values can be read out of {@code src}'s memory and allocated into {@code
-     * dst}'s. Checking {@code realloc} here keeps {@link #canTransfer} honest: without it a
-     * missing one surfaces as a failure part-way through a transfer rather than as a clean
-     * decision to fall back.
+     * Whether values can be read out of {@code source}'s memory and allocated into {@code
+     * dest}'s.
      */
-    private static boolean canMoveThroughMemory(LiftLowerContext src, LiftLowerContext dst) {
-        return src.memory() != null && dst.memory() != null && dst.realloc() != null;
+    private static boolean canMoveThroughMemory(LiftLowerContext source, LiftLowerContext dest) {
+        return source.memory() != null && dest.memory() != null && dest.realloc() != null;
     }
 
     /**
-     * Moves the value of type {@code t} at {@code srcPtr} in {@code src}'s memory to {@code
-     * dstPtr} in {@code dst}'s memory, without materializing it as a Java value.
+     * Moves the value of type {@code type} at {@code sourcePointer} in {@code source}'s memory to {@code
+     * destPoints} in {@code dest}'s memory, without materializing it as a Java value.
      *
-     * <p>Observably equivalent to {@code store(dst, load(src, srcPtr, t), t, dstPtr)}, with
+     * <p>Observably equivalent to {@code store(dest, load(source, sourcePointer, type), type, destPoints)}, with
      * one deliberate exception: {@code f32}/{@code f64} NaN payloads are preserved rather
      * than canonicalized, which the Canonical ABI explicitly permits ("hosts may instead
      * choose to canonicalize to an arbitrary fixed NaN value, or even to the original value
      * of the NaN before lifting") and which is what lets float-bearing aggregates copy in
      * bulk. Every trap the lift path raises is raised here too.
      *
-     * <p>Both contexts must agree on {@link LiftLowerContext#ptrType()}, since the whole
-     * approach rests on a value occupying the same layout in both memories; {@code dst} must
-     * supply a {@code realloc} if {@code t} contains a string or an unbounded list.
+     * <p>Both contexts must agree on {@link LiftLowerContext#ptrType()} and {@code dest} must
+     * supply a {@code realloc} if {@code type} contains a string or an unbounded list.
      */
     public static void transfer(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, DefValType t) {
-        transfer(src, dst, srcPtr, dstPtr, src.ground(t));
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            int sourcePointer,
+            int destPoints,
+            DefValType type) {
+        transfer(source, dest, sourcePointer, destPoints, source.resolve(type));
     }
 
     public static void transfer(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, ResolvedType t) {
-        requireTransferable(src, dst);
-        if (Transferability.isBitwiseCopyable(src.ptrType(), t)) {
-            copyBytes(src, dst, srcPtr, dstPtr, t.elementSize(src.ptrType()));
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            int sourcePointer,
+            int destPointer,
+            ResolvedType type) {
+        requireTransferable(source, dest);
+        if (Transferability.isBitwiseCopyable(source.ptrType(), type)) {
+            copyBytes(source, dest, sourcePointer, destPointer, type.elementSize(source.ptrType()));
             return;
         }
-        transferValue(src, dst, srcPtr, dstPtr, t);
+        transferValue(source, dest, sourcePointer, destPointer, type);
     }
 
     /**
-     * Transfers a function's flat core <em>parameters</em> {@code flatArgs} of types {@code
-     * ts} from {@code src} to {@code dst}, returning the destination's flat parameters.
+     * Transfers a function's flat core <em>parameter values</em> {@code flatArgs} of types {@code
+     * types} from {@code source} to {@code dest}, returning the destination's flat parameters.
      *
      * @see #transfer
      */
     public static long[] transferFlatParams(
-            LiftLowerContext src,
-            LiftLowerContext dst,
+            LiftLowerContext source,
+            LiftLowerContext dest,
             long[] flatArgs,
-            List<run.endive.cm.types.ValType> ts) {
-        requireTransferable(src, dst);
-        return transferFlatValues(src, dst, MAX_FLAT_PARAMS, new CoreValues(flatArgs), ts, null);
+            List<run.endive.cm.types.ValType> types) {
+        requireTransferable(source, dest);
+        return transferFlatValues(
+                source, dest, MAX_FLAT_PARAMS, new CoreValues(flatArgs), types, null);
     }
 
     /**
      * Transfers a function's flat core <em>results</em> {@code flatResults} of types {@code
-     * ts} from {@code src} to {@code dst}. When the results spill into linear memory,
+     * types} from {@code source} to {@code dest}. When the results spill into linear memory,
      * {@code outParam}'s first element is the destination's caller-provided spill pointer
-     * and no flat values are returned; when it is null, destination storage is freshly
+     * and no flat values are returned. When it is null, destination storage is freshly
      * allocated and the returned list is the spill pointer.
      *
      * @see #transfer
      */
     public static long[] transferFlatResults(
-            LiftLowerContext src,
-            LiftLowerContext dst,
+            LiftLowerContext source,
+            LiftLowerContext dest,
             long[] flatResults,
-            List<run.endive.cm.types.ValType> ts,
+            List<run.endive.cm.types.ValType> types,
             long[] outParam) {
-        requireTransferable(src, dst);
+        requireTransferable(source, dest);
         return transferFlatValues(
-                src, dst, MAX_FLAT_RESULTS, new CoreValues(flatResults), ts, outParam);
+                source, dest, MAX_FLAT_RESULTS, new CoreValues(flatResults), types, outParam);
     }
 
     /**
-     * Rejects context pairs the transfer path cannot serve. A differing pointer width would
-     * give the same value a different layout on each side, which every offset computation
-     * below assumes away; async lifting and lowering are not modeled here yet.
+     * Rejects context pairs the transfer path cannot serve.
      */
-    static void requireTransferable(LiftLowerContext src, LiftLowerContext dst) {
-        if (src.ptrType() != dst.ptrType()) {
+    static void requireTransferable(LiftLowerContext source, LiftLowerContext dest) {
+        if (source.ptrType() != dest.ptrType()) {
             throw new IllegalArgumentException(
                     "cannot transfer between contexts with different pointer widths: "
-                            + src.ptrType()
+                            + source.ptrType()
                             + " and "
-                            + dst.ptrType());
+                            + dest.ptrType());
         }
-        if (src.isAsync() || dst.isAsync()) {
+        if (source.isAsync() || dest.isAsync()) {
             throw new UnsupportedOperationException(
                     "transferring values between async contexts is not implemented yet");
         }
@@ -1780,56 +1728,61 @@ public final class CanonicalAbi {
 
     /**
      * Transfers a value that is known not to be wholly bitwise copyable, dispatching on its
-     * kind. Source and destination offsets stay in lockstep throughout: the two memories lay
+     * kind. Source and destination offsets stay equal throughout. The two memories lay
      * the value out identically, so only the base pointers differ.
      */
     static void transferValue(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, ResolvedType t) {
-        switch (t.kind()) {
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            int sourcePointer,
+            int destPointer,
+            ResolvedType type) {
+        switch (type.kind()) {
             case BOOL:
-                transferBool(src, dst, srcPtr, dstPtr);
+                transferBool(source, dest, sourcePointer, destPointer);
                 return;
             case U8:
             case S8:
-                copyScalar(src, dst, srcPtr, dstPtr, 1);
+                copyScalar(source, dest, sourcePointer, destPointer, 1);
                 return;
             case U16:
             case S16:
-                copyScalar(src, dst, srcPtr, dstPtr, 2);
+                copyScalar(source, dest, sourcePointer, destPointer, 2);
                 return;
             case U32:
             case S32:
             case F32:
-                copyScalar(src, dst, srcPtr, dstPtr, 4);
+                copyScalar(source, dest, sourcePointer, destPointer, 4);
                 return;
             case U64:
             case S64:
             case F64:
-                copyScalar(src, dst, srcPtr, dstPtr, 8);
+                copyScalar(source, dest, sourcePointer, destPointer, 8);
                 return;
             case CHAR:
-                transferChar(src, dst, srcPtr, dstPtr);
+                transferChar(source, dest, sourcePointer, destPointer);
                 return;
             case STRING:
-                transferString(src, dst, srcPtr, dstPtr);
+                transferString(source, dest, sourcePointer, destPointer);
                 return;
             case LIST:
-                transferList(src, dst, srcPtr, dstPtr, t);
+            case SIZED_LIST:
+                transferList(source, dest, sourcePointer, destPointer, type);
                 return;
             case RECORD:
-                transferRecord(src, dst, srcPtr, dstPtr, t);
+                transferRecord(source, dest, sourcePointer, destPointer, type);
                 return;
             case VARIANT:
-                transferVariant(src, dst, srcPtr, dstPtr, t);
+                transferVariant(source, dest, sourcePointer, destPointer, type);
                 return;
             case FLAGS:
                 transferFlags(
-                        src,
-                        dst,
-                        srcPtr,
-                        dstPtr,
-                        t.elementSize(src.ptrType()),
-                        Transferability.flagsMask(t));
+                        source,
+                        dest,
+                        sourcePointer,
+                        destPointer,
+                        type.elementSize(source.ptrType()),
+                        Transferability.flagsMask(type));
                 return;
             case ERROR_CONTEXT:
             case OWN:
@@ -1837,75 +1790,96 @@ public final class CanonicalAbi {
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "transferring " + t.kind() + " values is not implemented yet");
+                        "transferring " + type.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + t.kind());
+                throw new IllegalStateException("unhandled kind " + type.kind());
         }
     }
 
     /** Copies {@code length} bytes verbatim, in bounded chunks. */
     static void copyBytes(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, int length) {
-        var srcMemory = src.memory();
-        var dstMemory = dst.memory();
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            int sourcePointer,
+            int destPointer,
+            int length) {
+        var sourceMemory = source.memory();
+        var destMemory = dest.memory();
         int copied = 0;
         while (copied < length) {
             int n = Math.min(COPY_CHUNK_BYTES, length - copied);
-            dstMemory.write(dstPtr + copied, srcMemory.readBytes(srcPtr + copied, n));
+            destMemory.write(
+                    destPointer + copied, sourceMemory.readBytes(sourcePointer + copied, n));
             copied += n;
         }
     }
 
     /** Copies a single naturally-sized scalar, avoiding the {@code byte[]} bulk path. */
     static void copyScalar(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, int nbytes) {
-        switch (nbytes) {
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            int sourcePointer,
+            int destPointer,
+            int numBytes) {
+        switch (numBytes) {
             case 1:
-                dst.memory().writeByte(dstPtr, src.memory().read(srcPtr));
+                dest.memory().writeByte(destPointer, source.memory().read(sourcePointer));
                 return;
             case 2:
-                dst.memory().writeShort(dstPtr, src.memory().readShort(srcPtr));
+                dest.memory().writeShort(destPointer, source.memory().readShort(sourcePointer));
                 return;
             case 4:
-                dst.memory().writeI32(dstPtr, src.memory().readInt(srcPtr));
+                dest.memory().writeI32(destPointer, source.memory().readInt(sourcePointer));
                 return;
             case 8:
-                dst.memory().writeLong(dstPtr, src.memory().readLong(srcPtr));
+                dest.memory().writeLong(destPointer, source.memory().readLong(sourcePointer));
                 return;
             default:
-                throw new IllegalArgumentException("unsupported scalar width " + nbytes);
+                throw new IllegalArgumentException("unsupported scalar width " + numBytes);
         }
     }
 
     /** Normalizes any non-zero source byte to {@code 1}, as lifting then lowering would. */
-    static void transferBool(LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr) {
-        dst.memory().writeByte(dstPtr, (byte) (src.memory().readU8(srcPtr) != 0 ? 1 : 0));
+    static void transferBool(
+            LiftLowerContext source, LiftLowerContext dest, int sourcePointer, int destPointer) {
+        dest.memory()
+                .writeByte(
+                        destPointer, (byte) (source.memory().readU8(sourcePointer) != 0 ? 1 : 0));
     }
 
     /** Copies a {@code char}, trapping on surrogates and out-of-range scalar values. */
-    static void transferChar(LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr) {
-        int c = convertI32ToChar(loadInt(src.memory(), srcPtr, 4, false));
-        storeInt(dst.memory(), c, dstPtr, 4);
+    static void transferChar(
+            LiftLowerContext source, LiftLowerContext dest, int sourcePointer, int destPointer) {
+        int c = convertI32ToChar(loadInt(source.memory(), sourcePointer, 4, false));
+        storeInt(dest.memory(), c, destPointer, 4);
     }
 
     /** Copies a {@code flags} value, dropping the slack bits lifting would discard. */
     static void transferFlags(
-            LiftLowerContext src,
-            LiftLowerContext dst,
-            int srcPtr,
-            int dstPtr,
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            int sourcePointer,
+            int destPointer,
             int size,
             long mask) {
-        storeInt(dst.memory(), loadInt(src.memory(), srcPtr, size, false) & mask, dstPtr, size);
+        storeInt(
+                dest.memory(),
+                loadInt(source.memory(), sourcePointer, size, false) & mask,
+                destPointer,
+                size);
     }
 
     private static void transferRecord(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, ResolvedType t) {
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            int sourcePointer,
+            int destPointer,
+            ResolvedType type) {
         int off = 0;
-        for (ResolvedType.Field f : t.fields()) {
-            off = DefValType.alignTo(off, f.type().alignment(src.ptrType()));
-            transferValue(src, dst, srcPtr + off, dstPtr + off, f.type());
-            off += f.type().elementSize(src.ptrType());
+        for (ResolvedType.Field f : type.fields()) {
+            off = DefValType.alignTo(off, f.type().alignment(source.ptrType()));
+            transferValue(source, dest, sourcePointer + off, destPointer + off, f.type());
+            off += f.type().elementSize(source.ptrType());
         }
     }
 
@@ -1916,65 +1890,74 @@ public final class CanonicalAbi {
      *
      * <p>The payload offset is computed relative to the value's own base rather than by
      * aligning the absolute pointer as {@code load}/{@code store} do. The two agree whenever
-     * the pointer is aligned to the variant's alignment — which the Canonical ABI requires —
+     * the pointer is aligned to the variant's alignment, which the Canonical ABI requires,
      * and only the relative form keeps the source and destination offsets identical.
      */
     private static void transferVariant(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, ResolvedType t) {
-        var cases = t.cases();
-        int discSize = t.discriminantSize();
-        long caseIndex = loadInt(src.memory(), srcPtr, discSize, false);
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            int sourcePointer,
+            int destPointer,
+            ResolvedType type) {
+        var cases = type.cases();
+        int discSize = type.discriminantSize();
+        long caseIndex = loadInt(source.memory(), sourcePointer, discSize, false);
         if (caseIndex >= cases.size()) {
             throw new TrapException("invalid variant discriminant");
         }
-        storeInt(dst.memory(), caseIndex, dstPtr, discSize);
+        storeInt(dest.memory(), caseIndex, destPointer, discSize);
         var c = cases.get((int) caseIndex);
         if (!c.hasType()) {
             return;
         }
-        int payloadOff = DefValType.alignTo(discSize, t.maxCaseAlignment(src.ptrType()));
-        transferValue(src, dst, srcPtr + payloadOff, dstPtr + payloadOff, c.type());
+        int payloadOff = DefValType.alignTo(discSize, type.maxCaseAlignment(source.ptrType()));
+        transferValue(source, dest, sourcePointer + payloadOff, destPointer + payloadOff, c.type());
     }
 
     private static void transferList(
-            LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr, ResolvedType t) {
-        if (t.isFixedSizeList()) {
-            transferListElements(src, dst, srcPtr, dstPtr, t.fixedSize(), t.element());
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            int sourcePointer,
+            int destPointer,
+            ResolvedType type) {
+        if (type.isFixedSizeList()) {
+            transferListElements(
+                    source, dest, sourcePointer, destPointer, type.fixedSize(), type.element());
             return;
         }
-        transferUnboundedList(src, dst, srcPtr, dstPtr, t.element());
+        transferUnboundedList(source, dest, sourcePointer, destPointer, type.element());
     }
 
     static void transferUnboundedList(
-            LiftLowerContext src,
-            LiftLowerContext dst,
-            int srcPtr,
-            int dstPtr,
-            ResolvedType elemType) {
-        int ptrSize = src.ptrType().size();
-        int begin = (int) loadInt(src.memory(), srcPtr, ptrSize, false);
-        int length = (int) loadInt(src.memory(), srcPtr + ptrSize, ptrSize, false);
-        int dstBegin = transferListIntoRange(src, dst, begin, length, elemType);
-        storeInt(dst.memory(), dstBegin, dstPtr, ptrSize);
-        storeInt(dst.memory(), length, dstPtr + ptrSize, ptrSize);
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            int sourcePointer,
+            int destPointer,
+            ResolvedType elementType) {
+        int ptrSize = source.ptrType().size();
+        int begin = (int) loadInt(source.memory(), sourcePointer, ptrSize, false);
+        int length = (int) loadInt(source.memory(), sourcePointer + ptrSize, ptrSize, false);
+        int destBegin = transferListIntoRange(source, dest, begin, length, elementType);
+        storeInt(dest.memory(), destBegin, destPointer, ptrSize);
+        storeInt(dest.memory(), length, destPointer + ptrSize, ptrSize);
     }
 
     /**
      * Validates a source list's range, allocates the matching range in the destination and
      * moves the elements into it, returning the destination pointer.
      *
-     * <p>The length is treated as unsigned, so a list claiming more than {@code 2^31}
+     * <p>The length is treated as unsigned, so a list with more than {@code 2^31}
      * elements traps on the byte-length check. {@link #loadListFromRange} computes the same
      * product with a signed length and lets such a list through as if it were empty.
      */
     static int transferListIntoRange(
-            LiftLowerContext src,
-            LiftLowerContext dst,
+            LiftLowerContext source,
+            LiftLowerContext dest,
             int begin,
             int length,
-            ResolvedType elemType) {
-        int elemSize = elemType.elementSize(src.ptrType());
-        int elemAlignment = elemType.alignment(src.ptrType());
+            ResolvedType elementType) {
+        int elemSize = elementType.elementSize(source.ptrType());
+        int elemAlignment = elementType.alignment(source.ptrType());
         long byteLength = Integer.toUnsignedLong(length) * elemSize;
         if (byteLength > MAX_LIST_BYTE_LENGTH) {
             throw new TrapException(
@@ -1984,97 +1967,101 @@ public final class CanonicalAbi {
             throw new TrapException(
                     "list pointer " + begin + " is not aligned to " + elemAlignment);
         }
-        if (Integer.toUnsignedLong(begin) + byteLength > Memory.bytes(src.memory().pages())) {
+        if (Integer.toUnsignedLong(begin) + byteLength > Memory.bytes(source.memory().pages())) {
             throw new TrapException(
                     "list of length " + length + " at " + begin + " is out of bounds");
         }
-        int dstBegin = allocate(dst, elemAlignment, (int) byteLength);
-        transferListElements(src, dst, begin, dstBegin, length, elemType);
-        return dstBegin;
+        int destBegin = allocate(dest, elemAlignment, (int) byteLength);
+        transferListElements(source, dest, begin, destBegin, length, elementType);
+        return destBegin;
     }
 
     /**
      * Moves {@code length} elements. When the element type copies verbatim the whole block
-     * becomes one bulk copy — the case that makes {@code list<u8>}, {@code string} payloads
-     * and {@code list<f32>} cheap.
+     * becomes one bulk copy.
      */
     private static void transferListElements(
-            LiftLowerContext src,
-            LiftLowerContext dst,
-            int srcPtr,
-            int dstPtr,
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            int sourcePointer,
+            int destPointer,
             int length,
-            ResolvedType elemType) {
-        int elemSize = elemType.elementSize(src.ptrType());
-        if (Transferability.isBitwiseCopyable(src.ptrType(), elemType)) {
-            copyBytes(src, dst, srcPtr, dstPtr, length * elemSize);
+            ResolvedType elementType) {
+        int elemSize = elementType.elementSize(source.ptrType());
+        if (Transferability.isBitwiseCopyable(source.ptrType(), elementType)) {
+            copyBytes(source, dest, sourcePointer, destPointer, length * elemSize);
             return;
         }
         for (int i = 0; i < length; i++) {
-            transferValue(src, dst, srcPtr + i * elemSize, dstPtr + i * elemSize, elemType);
+            transferValue(
+                    source,
+                    dest,
+                    sourcePointer + i * elemSize,
+                    destPointer + i * elemSize,
+                    elementType);
         }
     }
 
-    static void transferString(LiftLowerContext src, LiftLowerContext dst, int srcPtr, int dstPtr) {
-        int ptrSize = src.ptrType().size();
-        int begin = (int) loadInt(src.memory(), srcPtr, ptrSize, false);
-        long taggedCodeUnits = loadInt(src.memory(), srcPtr + ptrSize, ptrSize, false);
-        var result = transferStringIntoRange(src, dst, begin, taggedCodeUnits);
-        storeInt(dst.memory(), result.ptr, dstPtr, ptrSize);
-        storeInt(dst.memory(), result.codeUnits, dstPtr + ptrSize, ptrSize);
+    static void transferString(
+            LiftLowerContext source, LiftLowerContext dest, int sourcePointer, int destPointer) {
+        int ptrSize = source.ptrType().size();
+        int begin = (int) loadInt(source.memory(), sourcePointer, ptrSize, false);
+        long taggedCodeUnits = loadInt(source.memory(), sourcePointer + ptrSize, ptrSize, false);
+        var result = transferStringIntoRange(source, dest, begin, taggedCodeUnits);
+        storeInt(dest.memory(), result.pointer, destPointer, ptrSize);
+        storeInt(dest.memory(), result.codeUnits, destPointer + ptrSize, ptrSize);
     }
 
     /**
      * Moves a string's bytes into a fresh destination allocation, transcoding only when the
-     * two encodings genuinely disagree.
+     * two encodings disagree.
      *
      * <p>When the source bytes are already in the destination's encoding they are validated
-     * in place and copied — no decode, no re-encode, no {@link String}. That covers the
-     * common case of two modules that agreed on UTF-8. The {@code latin1+utf16} pairings are
-     * handled at the byte level too, because a tagged UTF-16 source still has to be re-checked
-     * against Latin-1 to reproduce what {@code store_string} would have chosen. Everything
-     * else decodes to a {@link CharBuffer} and re-encodes from it, still without a {@code
-     * String}.
+     * in place and copied with no decode, no re-encode, and no lifting to {@link String}. That
+     * covers the common case of two modules that agreed on UTF-8. The {@code latin1+utf16}
+     * pairings are handled at the byte level too, because a tagged UTF-16 source still has to
+     * be re-checked against Latin-1. Everything else decodes to a {@link CharBuffer} and
+     * re-encodes from it, still without a life to {@code String}.
      */
-    static PtrAndCodeUnits transferStringIntoRange(
-            LiftLowerContext src, LiftLowerContext dst, int ptr, long taggedCodeUnits) {
-        var range = stringRange(src, taggedCodeUnits);
-        byte[] bytes = readStringBytes(src, ptr, range);
-        var dstEncoding = dst.stringEncoding();
+    static PointerAndCodeUnits transferStringIntoRange(
+            LiftLowerContext source, LiftLowerContext dest, int pointer, long taggedCodeUnits) {
+        var range = stringRange(source, taggedCodeUnits);
+        byte[] bytes = readStringBytes(source, pointer, range);
+        var destEncoding = dest.stringEncoding();
         if (range.charset == StandardCharsets.UTF_8) {
-            if (dstEncoding == StringEncoding.UTF8) {
+            if (destEncoding == StringEncoding.UTF8) {
                 validateUtf8(bytes);
-                return new PtrAndCodeUnits(allocateAndWrite(dst, 1, bytes), bytes.length);
+                return new PointerAndCodeUnits(allocateAndWrite(dest, 1, bytes), bytes.length);
             }
         } else if (range.charset == StandardCharsets.UTF_16LE) {
-            if (dstEncoding == StringEncoding.UTF16) {
+            if (destEncoding == StringEncoding.UTF16) {
                 validateUtf16Le(bytes);
-                return new PtrAndCodeUnits(allocateAndWrite(dst, 2, bytes), bytes.length / 2);
+                return new PointerAndCodeUnits(allocateAndWrite(dest, 2, bytes), bytes.length / 2);
             }
-            if (dstEncoding == StringEncoding.LATIN1_UTF16) {
-                return transferUtf16ToLatin1OrUtf16(dst, bytes);
+            if (destEncoding == StringEncoding.LATIN1_UTF16) {
+                return transferUtf16ToLatin1OrUtf16(dest, bytes);
             }
-        } else if (dstEncoding == StringEncoding.LATIN1_UTF16) {
+        } else if (destEncoding == StringEncoding.LATIN1_UTF16) {
             // A Latin-1 source can only come from a latin1+utf16 context; every byte is
             // valid and fits, so it stays untagged and copies as-is.
-            return new PtrAndCodeUnits(allocateAndWrite(dst, 2, bytes), bytes.length);
+            return new PointerAndCodeUnits(allocateAndWrite(dest, 2, bytes), bytes.length);
         }
-        return storeStringIntoRange(dst, decodeStrictToChars(bytes, range.charset));
+        return storeStringIntoRange(dest, decodeStrictToChars(bytes, range.charset));
     }
 
-    private static PtrAndCodeUnits transferUtf16ToLatin1OrUtf16(
-            LiftLowerContext dst, byte[] utf16Bytes) {
+    private static PointerAndCodeUnits transferUtf16ToLatin1OrUtf16(
+            LiftLowerContext dest, byte[] utf16Bytes) {
         validateUtf16Le(utf16Bytes);
         if (!fitsLatin1Utf16(utf16Bytes)) {
-            return new PtrAndCodeUnits(
-                    allocateAndWrite(dst, 2, utf16Bytes),
-                    (utf16Bytes.length / 2) | utf16Tag(dst.ptrType()));
+            return new PointerAndCodeUnits(
+                    allocateAndWrite(dest, 2, utf16Bytes),
+                    (utf16Bytes.length / 2) | utf16Tag(dest.ptrType()));
         }
         byte[] latin1 = new byte[utf16Bytes.length / 2];
         for (int i = 0; i < latin1.length; i++) {
             latin1[i] = utf16Bytes[2 * i];
         }
-        return new PtrAndCodeUnits(allocateAndWrite(dst, 2, latin1), latin1.length);
+        return new PointerAndCodeUnits(allocateAndWrite(dest, 2, latin1), latin1.length);
     }
 
     /** Whether every UTF-16LE code unit is below {@code 0x100}, i.e. its high byte is zero. */
@@ -2089,7 +2076,7 @@ public final class CanonicalAbi {
 
     /**
      * Accepts exactly what a strict {@link StandardCharsets#UTF_8} decoder accepts, without
-     * producing any characters: rejects continuation bytes out of place, truncated sequences,
+     * producing any characters. Rejects continuation bytes out of place, truncated sequences,
      * overlong encodings, surrogates and scalar values above {@code U+10FFFF}.
      */
     static void validateUtf8(byte[] bytes) {
@@ -2143,8 +2130,8 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Accepts exactly what a strict {@link StandardCharsets#UTF_16LE} decoder accepts:
-     * every high surrogate must be followed by a low surrogate, and no low surrogate may
+     * Accepts exactly what a strict {@link StandardCharsets#UTF_16LE} decoder accepts.
+     * Every high surrogate must be followed by a low surrogate, and no low surrogate may
      * stand alone.
      */
     static void validateUtf16Le(byte[] bytes) {
@@ -2171,8 +2158,8 @@ public final class CanonicalAbi {
         }
     }
 
-    private static int codeUnitAt(byte[] bytes, int i) {
-        return (bytes[i] & 0xFF) | ((bytes[i + 1] & 0xFF) << 8);
+    private static int codeUnitAt(byte[] bytes, int index) {
+        return (bytes[index] & 0xFF) | ((bytes[index + 1] & 0xFF) << 8);
     }
 
     private static TrapException invalidUtf16() {
@@ -2180,82 +2167,84 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Transfers a flat parameter or result list. Because neither context is async and both
-     * share a pointer width, the two sides always agree on whether the values spill into
-     * linear memory: either both pass them flat, or both pass a pointer to the same tuple
-     * layout, which reduces to a single {@link #transfer} of that tuple.
+     * Transfers a flat parameter or result list. Because neither context is async (since
+     * async is not supported yet) and both share a pointer width, the two sides always
+     * agree on whether the values spill into linear memory. Either both pass them flat,
+     * or both pass a pointer to the same tuple layout, which reduces to a single
+     * {@link #transfer} of that tuple.
      */
     private static long[] transferFlatValues(
-            LiftLowerContext src,
-            LiftLowerContext dst,
+            LiftLowerContext source,
+            LiftLowerContext dest,
             int maxFlat,
-            CoreValues vi,
-            List<run.endive.cm.types.ValType> ts,
+            CoreValues coreValues,
+            List<run.endive.cm.types.ValType> types,
             long[] outParam) {
-        if (ts.isEmpty()) {
+        if (types.isEmpty()) {
             return EMPTY_CORE_VALUES;
         }
-        List<ValType> flatTypes = flattenTypes(src, ts);
+        List<ValType> flatTypes = flattenTypes(source, types);
         if (flatTypes.size() > maxFlat) {
-            var tupleType = groundedTupleOf(src, ts);
+            var tupleType = resolvedTupleOf(source, types);
             return transferSpilledValues(
-                    src,
-                    dst,
-                    vi,
-                    tupleType.alignment(src.ptrType()),
-                    tupleType.elementSize(src.ptrType()),
+                    source,
+                    dest,
+                    coreValues,
+                    tupleType.alignment(source.ptrType()),
+                    tupleType.elementSize(source.ptrType()),
                     outParam,
-                    (s, d, srcPtr, dstPtr) -> transfer(s, d, srcPtr, dstPtr, tupleType));
+                    (s, d, sourcePointer, destPointer) ->
+                            transfer(s, d, sourcePointer, destPointer, tupleType));
         }
-        LongList out = new LongList();
-        for (run.endive.cm.types.ValType t : ts) {
-            transferFlat(src, dst, vi, out, src.ground(t));
+        LongBuffer out = new LongBuffer();
+        for (run.endive.cm.types.ValType t : types) {
+            transferFlat(source, dest, coreValues, out, source.resolve(t));
         }
         return out.toArray();
     }
 
     /**
-     * Handles the spilled case shared by the interpreted and compiled transfer paths: reads
+     * Handles the spilled case shared by the interpreted and compiled transfer paths. Reads
      * the source's spill pointer, obtains the destination's (freshly allocated, or the
-     * caller-provided out-param), validates both, and hands them to {@code body} to move the
+     * caller-provided out-param), validates both, and hands them to {@code step} to move the
      * tuple across.
      */
     static long[] transferSpilledValues(
-            LiftLowerContext src,
-            LiftLowerContext dst,
-            CoreValues vi,
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            CoreValues coreValues,
             int align,
             int size,
             long[] outParam,
-            TransferPlan.Step body) {
-        int srcPtr = (int) vi.next();
-        if (srcPtr != DefValType.alignTo(srcPtr, align)) {
+            TransferPlan.Step step) {
+        int sourcePointer = (int) coreValues.next();
+        if (sourcePointer != DefValType.alignTo(sourcePointer, align)) {
             throw new TrapException("unaligned pointer");
         }
-        if ((long) srcPtr + size > Memory.bytes(src.memory().pages())) {
-            throw new TrapException("spilled values at " + srcPtr + " are out of bounds");
+        if ((long) sourcePointer + size > Memory.bytes(source.memory().pages())) {
+            throw new TrapException("spilled values at " + sourcePointer + " are out of bounds");
         }
-        int dstPtr;
+        int destPointer;
         long[] flatVals;
         if (outParam == null) {
-            dstPtr = allocate(dst, align, size);
-            flatVals = new long[] {Integer.toUnsignedLong(dstPtr)};
+            destPointer = allocate(dest, align, size);
+            flatVals = new long[] {Integer.toUnsignedLong(destPointer)};
         } else {
-            dstPtr = (int) outParam[0];
-            if (dstPtr != DefValType.alignTo(dstPtr, align)) {
+            destPointer = (int) outParam[0];
+            if (destPointer != DefValType.alignTo(destPointer, align)) {
                 throw new TrapException("unaligned pointer");
             }
-            if ((long) dstPtr + size > Memory.bytes(dst.memory().pages())) {
-                throw new TrapException("spill out-param at " + dstPtr + " is out of bounds");
+            if ((long) destPointer + size > Memory.bytes(dest.memory().pages())) {
+                throw new TrapException("spill out-param at " + destPointer + " is out of bounds");
             }
             flatVals = EMPTY_CORE_VALUES;
         }
-        body.run(src, dst, srcPtr, dstPtr);
+        step.run(source, dest, sourcePointer, destPointer);
         return flatVals;
     }
 
     /**
-     * Transfers one value's worth of flat core values from {@code vi} to {@code out}.
+     * Transfers one value's worth of flat core values from {@code coreValues} to {@code out}.
      *
      * <p>Scalars mostly pass straight through, but not unconditionally: lifting narrows
      * {@code u8}/{@code u16} to their type's width and sign-extends {@code s8}/{@code s16}
@@ -2265,56 +2254,56 @@ public final class CanonicalAbi {
      * and {@code f32}/{@code f64} keep their exact bit pattern.
      */
     static void transferFlat(
-            LiftLowerContext src,
-            LiftLowerContext dst,
-            CoreValues vi,
-            LongList out,
-            ResolvedType t) {
-        switch (t.kind()) {
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            CoreValues coreValues,
+            LongBuffer out,
+            ResolvedType type) {
+        switch (type.kind()) {
             case BOOL:
-                out.add((vi.next() & 0xFFFFFFFFL) != 0 ? 1L : 0L);
+                out.add((coreValues.next() & 0xFFFFFFFFL) != 0 ? 1L : 0L);
                 return;
             case U8:
-                out.add(vi.next() & 0xFFL);
+                out.add(coreValues.next() & 0xFFL);
                 return;
             case U16:
-                out.add(vi.next() & 0xFFFFL);
+                out.add(coreValues.next() & 0xFFFFL);
                 return;
             case S8:
-                out.add(Integer.toUnsignedLong((byte) vi.next()));
+                out.add(Integer.toUnsignedLong((byte) coreValues.next()));
                 return;
             case S16:
-                out.add(Integer.toUnsignedLong((short) vi.next()));
+                out.add(Integer.toUnsignedLong((short) coreValues.next()));
                 return;
             case U32:
             case S32:
             case F32:
-                out.add(vi.next() & 0xFFFFFFFFL);
+                out.add(coreValues.next() & 0xFFFFFFFFL);
                 return;
             case U64:
             case S64:
             case F64:
-                out.add(vi.next());
+                out.add(coreValues.next());
                 return;
             case CHAR:
-                out.add(convertI32ToChar(vi.next() & 0xFFFFFFFFL));
+                out.add(convertI32ToChar(coreValues.next() & 0xFFFFFFFFL));
                 return;
             case STRING:
-                transferFlatString(src, dst, vi, out);
+                transferFlatString(source, dest, coreValues, out);
                 return;
             case LIST:
-                transferFlatList(src, dst, vi, out, t);
+                transferFlatList(source, dest, coreValues, out, type);
                 return;
             case RECORD:
-                for (ResolvedType.Field f : t.fields()) {
-                    transferFlat(src, dst, vi, out, f.type());
+                for (ResolvedType.Field f : type.fields()) {
+                    transferFlat(source, dest, coreValues, out, f.type());
                 }
                 return;
             case VARIANT:
-                transferFlatVariant(src, dst, vi, out, t);
+                transferFlatVariant(source, dest, coreValues, out, type);
                 return;
             case FLAGS:
-                out.add(vi.next() & Transferability.flagsMask(t) & 0xFFFFFFFFL);
+                out.add(coreValues.next() & Transferability.flagsMask(type) & 0xFFFFFFFFL);
                 return;
             case ERROR_CONTEXT:
             case OWN:
@@ -2322,87 +2311,87 @@ public final class CanonicalAbi {
             case STREAM:
             case FUTURE:
                 throw new UnsupportedOperationException(
-                        "transferring " + t.kind() + " values is not implemented yet");
+                        "transferring " + type.kind() + " values is not implemented yet");
             default:
-                throw new IllegalStateException("unhandled kind " + t.kind());
+                throw new IllegalStateException("unhandled kind " + type.kind());
         }
     }
 
     static void transferFlatString(
-            LiftLowerContext src, LiftLowerContext dst, CoreValues vi, LongList out) {
-        int ptr = (int) vi.next();
-        long taggedCodeUnits = vi.next() & 0xFFFFFFFFL;
-        var result = transferStringIntoRange(src, dst, ptr, taggedCodeUnits);
-        out.add(Integer.toUnsignedLong(result.ptr));
+            LiftLowerContext source, LiftLowerContext dest, CoreValues coreValues, LongBuffer out) {
+        int ptr = (int) coreValues.next();
+        long taggedCodeUnits = coreValues.next() & 0xFFFFFFFFL;
+        var result = transferStringIntoRange(source, dest, ptr, taggedCodeUnits);
+        out.add(Integer.toUnsignedLong(result.pointer));
         out.add(result.codeUnits & 0xFFFFFFFFL);
     }
 
     private static void transferFlatList(
-            LiftLowerContext src,
-            LiftLowerContext dst,
-            CoreValues vi,
-            LongList out,
-            ResolvedType t) {
-        var elemType = t.element();
-        if (t.isFixedSizeList()) {
-            for (int i = 0; i < t.fixedSize(); i++) {
-                transferFlat(src, dst, vi, out, elemType);
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            CoreValues coreValues,
+            LongBuffer out,
+            ResolvedType type) {
+        var elementType = type.element();
+        if (type.isFixedSizeList()) {
+            for (int i = 0; i < type.fixedSize(); i++) {
+                transferFlat(source, dest, coreValues, out, elementType);
             }
             return;
         }
-        transferFlatUnboundedList(src, dst, vi, out, elemType);
+        transferFlatUnboundedList(source, dest, coreValues, out, elementType);
     }
 
     static void transferFlatUnboundedList(
-            LiftLowerContext src,
-            LiftLowerContext dst,
-            CoreValues vi,
-            LongList out,
-            ResolvedType elemType) {
-        int ptr = (int) vi.next();
-        int length = (int) vi.next();
-        int dstPtr = transferListIntoRange(src, dst, ptr, length, elemType);
-        out.add(Integer.toUnsignedLong(dstPtr));
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            CoreValues coreValues,
+            LongBuffer out,
+            ResolvedType elementType) {
+        int ptr = (int) coreValues.next();
+        int length = (int) coreValues.next();
+        int destPointer = transferListIntoRange(source, dest, ptr, length, elementType);
+        out.add(Integer.toUnsignedLong(destPointer));
         out.add(Integer.toUnsignedLong(length));
     }
 
     /**
      * Transfers a variant across the joined flat layout, consuming and producing exactly the
-     * slots {@code flatten_variant} defines regardless of which case is present — the source
+     * slots {@code flatten_variant} defines regardless of which case is present. The source
      * cursor skips the joined slots the chosen case left unused, and the destination pads
      * them with {@code 0}, mirroring {@link #liftFlatVariant} and {@link #lowerFlatVariant}.
      */
     private static void transferFlatVariant(
-            LiftLowerContext src,
-            LiftLowerContext dst,
-            CoreValues vi,
-            LongList out,
-            ResolvedType t) {
-        var cases = t.cases();
-        List<ValType> flatTypes = t.flatten(src.ptrType());
+            LiftLowerContext source,
+            LiftLowerContext dest,
+            CoreValues coreValues,
+            LongBuffer out,
+            ResolvedType type) {
+        var cases = type.cases();
+        List<ValType> flatTypes = type.flatten(source.ptrType());
         if (flatTypes.get(0) != ValType.I32) {
             throw new IllegalStateException("variant discriminant flat type must be i32");
         }
         int payloadSlots = flatTypes.size() - 1;
-        long caseIndex = vi.next() & 0xFFFFFFFFL;
+        long caseIndex = coreValues.next() & 0xFFFFFFFFL;
         if (caseIndex >= cases.size()) {
             throw new TrapException("invalid variant discriminant");
         }
         out.add(caseIndex);
         var c = cases.get((int) caseIndex);
-        int srcPayloadStart = vi.position();
-        int dstPayloadStart = out.size();
+        int sourcePayloadStart = coreValues.position();
+        int destPayloadStart = out.size();
         if (c.hasType()) {
-            transferFlat(src, dst, vi, out, c.type());
+            transferFlat(source, dest, coreValues, out, c.type());
         }
-        vi.skipTo(srcPayloadStart + payloadSlots);
-        for (int i = out.size() - dstPayloadStart; i < payloadSlots; i++) {
+        coreValues.skipTo(sourcePayloadStart + payloadSlots);
+        for (int i = out.size() - destPayloadStart; i < payloadSlots; i++) {
             out.add(0L);
         }
     }
 
     /** A growable primitive-{@code long} buffer used to accumulate flat lowered values. */
-    static final class LongList {
+    static final class LongBuffer {
         private long[] buf = new long[8];
         private int size;
 

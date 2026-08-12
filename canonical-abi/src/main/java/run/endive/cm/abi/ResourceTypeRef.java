@@ -5,45 +5,34 @@ package run.endive.cm.abi;
  *
  * <p>Resource types in the Component Model are <em>generative</em>: each instantiation of a
  * component that declares {@code (type (resource ...))} brings a distinct resource type into
- * existence, even though every instantiation shares the one declaration the binary was parsed
- * into. The Canonical ABI's guards turn on that distinction — a handle minted against one
- * instantiation's resource type must not be usable against another's — so they compare these
- * references with {@code ==} rather than {@code equals}, exactly as the Python reference
- * compares {@code h.rt is not t.rt}.
- *
- * <p>Implementations therefore have to give reference identity the meaning the spec asks of
- * it, and must <em>not</em> override {@code equals}: one instance per resource type per
- * instantiation, shared by every component that imports it.
+ * existence, even though every instantiation shares the same AST the binary was parsed
+ * into. The Canonical ABI guards on that distinction. A handle created with one
+ * instantiation's resource type must not be usable against another's so they are compared
+ * by reference identity.
  *
  * @see run.endive.cm.types.ResourceType the static declaration this is an instantiation of
  */
 public interface ResourceTypeRef {
 
     /**
-     * The component instance that declared this resource type — {@code rt.impl} in the
-     * reference — identified by its handle table.
+     * The handle table owned by the component instance that declared this resource type, {@code null}
+     * if this is a reference to a host-defined resource.
      *
-     * <p>{@code lower_borrow} compares this against the context's own table to recognize a
-     * {@code borrow} being handed back to the component that implements the resource. See
-     * {@link CanonicalAbi#lowerBorrow} for why that case bypasses the table entirely.
+     * <p>Lowering a {@code borrow} type compares this against the context's own table to recognize a
+     * {@code borrow} being handed back to the component that implements the resource.
      */
-    HandleTable impl();
+    HandleTable handleTable();
 
     /**
-     * How the spec's diagnostics name this kind of resource type — by who implements it, which
-     * is the only thing distinguishing two otherwise identical resource types to a reader.
+     * A description of the resource type, distinguished by where it is implemented, which
+     * is the only thing disambiguating two otherwise identical resource types to a reader.
      */
     default String describe() {
-        return impl() == null ? "host-defined resource" : "guest-defined resource";
+        return handleTable() == null ? "host-defined resource" : "guest-defined resource";
     }
 
     /**
-     * The clause reporting a handle used against the wrong resource type.
-     *
-     * <p>Two resource types that differ only by identity describe themselves identically, so
-     * saying merely "expected guest-defined resource, found guest-defined resource" would read
-     * as no mismatch at all. Naming the second "a different" one is what makes the report
-     * intelligible.
+     * The error text for reporting a handle used against the wrong resource type.
      */
     static String mismatch(ResourceTypeRef expected, ResourceTypeRef found) {
         String want = expected.describe();
@@ -60,7 +49,7 @@ public interface ResourceTypeRef {
      *
      * <p>This is separate from {@link run.endive.cm.types.TypeResolver} because that resolves
      * to the static {@link run.endive.cm.types.ResourceType} declaration, which is shared
-     * across instantiations and so cannot answer the identity question above.
+     * across instantiations.
      */
     @FunctionalInterface
     interface Resolver {

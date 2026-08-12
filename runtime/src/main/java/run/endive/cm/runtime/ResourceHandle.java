@@ -2,19 +2,19 @@ package run.endive.cm.runtime;
 
 import java.util.Objects;
 import run.endive.cm.abi.BorrowScope;
-import run.endive.cm.abi.Handle;
+import run.endive.cm.abi.ResourceState;
 import run.endive.cm.abi.ResourceTypeRef;
 
-public final class ResourceHandle implements Handle {
+public final class ResourceHandle implements ResourceState {
 
     private final ResourceTypeRef resourceType;
     private final int rep;
     private final boolean own;
-    private final BorrowScope.Task borrowScope;
+    private final BorrowScope.Callee borrowScope;
     private int numLends;
 
     ResourceHandle(
-            ResourceTypeRef resourceType, int rep, boolean own, BorrowScope.Task borrowScope) {
+            ResourceTypeRef resourceType, int rep, boolean own, BorrowScope.Callee borrowScope) {
         this.resourceType = Objects.requireNonNull(resourceType, "resourceType");
         this.rep = rep;
         this.own = own;
@@ -37,7 +37,7 @@ public final class ResourceHandle implements Handle {
     }
 
     @Override
-    public BorrowScope.Task borrowScope() {
+    public BorrowScope.Callee borrowScope() {
         return borrowScope;
     }
 

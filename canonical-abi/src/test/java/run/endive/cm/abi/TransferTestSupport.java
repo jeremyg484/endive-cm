@@ -71,15 +71,12 @@ final class TransferTestSupport {
     }
 
     /**
-     * The central property: transferring a value produces the same result as lifting it out of
-     * the source and lowering it into an identically configured destination — both in what the
-     * destination reads back and, since neither path writes anything the other does not, in the
-     * destination's bytes.
+     * Assert that transferring a value produces the same result as lifting it out of
+     * the source and lowering it into an identically configured destination.
      *
      * <p>Byte equality holds here because the source is written into a zeroed memory, so the
      * padding the transfer path copies is zero, which is also what the destination allocator
-     * hands back. {@code CanonicalAbiTransferTest#transferCarriesSourcePaddingWhileLiftLowerDoesNot}
-     * covers the case where it does not.
+     * hands back.
      */
     static void assertTransferMatchesLiftLower(
             Types types,
@@ -118,7 +115,7 @@ final class TransferTestSupport {
 
         CanonicalAbi.store(src, v, t, 0);
         CanonicalAbi.transfer(src, interpreted, 0, 0, t);
-        TransferPlan.compile(PointerType.I32, src.ground(t)).run(src, compiled, 0, 0);
+        TransferPlan.compile(PointerType.I32, src.resolve(t)).run(src, compiled, 0, 0);
 
         assertMemoryEquals(compiled.memory(), interpreted.memory());
     }

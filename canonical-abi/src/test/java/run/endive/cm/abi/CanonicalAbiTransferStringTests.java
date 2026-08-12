@@ -16,12 +16,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import run.endive.cm.types.PrimValType;
 import run.endive.runtime.TrapException;
 
-/**
- * Strings are the one conversion the transfer path cannot optimize away, so they get their
- * own matrix: every source encoding against every destination encoding, plus the hand-written
- * validators that let matching encodings skip decoding entirely.
- */
-class CanonicalAbiTransferStringTest {
+class CanonicalAbiTransferStringTests {
 
     private static final List<String> CORPUS =
             List.of(

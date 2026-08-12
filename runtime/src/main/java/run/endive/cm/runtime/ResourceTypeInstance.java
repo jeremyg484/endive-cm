@@ -42,7 +42,7 @@ final class ResourceTypeInstance implements ResourceTypeRef {
      * applies to one and its handles always go through a table.
      */
     @Override
-    public HandleTable impl() {
+    public HandleTable handleTable() {
         return impl;
     }
 

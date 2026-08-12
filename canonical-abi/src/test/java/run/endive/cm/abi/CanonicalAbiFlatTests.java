@@ -24,13 +24,10 @@ import run.endive.runtime.ByteArrayMemory;
 import run.endive.runtime.Memory;
 import run.endive.wasm.types.MemoryLimits;
 
-class CanonicalAbiFlatTest {
+class CanonicalAbiFlatTests {
 
     private static final TypeResolver STUB_RESOLVER = index -> null;
 
-    // Endive's core-wasm run.endive.wasm.types.ValType shares a simple name with our
-    // component-level run.endive.cm.types.ValType (imported above), so it can't also be
-    // imported here; alias the four constants we need instead.
     private static final run.endive.wasm.types.ValType CORE_I32 = run.endive.wasm.types.ValType.I32;
     private static final run.endive.wasm.types.ValType CORE_I64 = run.endive.wasm.types.ValType.I64;
 
@@ -61,9 +58,9 @@ class CanonicalAbiFlatTest {
     }
 
     private static Object roundTrip(LiftLowerContext ctx, Object v, DefValType t) {
-        var grounded = ctx.ground(t);
-        long[] flat = CanonicalAbi.lowerFlat(ctx, v, grounded);
-        return CanonicalAbi.liftFlat(ctx, new CanonicalAbi.CoreValues(flat), grounded);
+        var resolved = ctx.resolve(t);
+        long[] flat = CanonicalAbi.lowerFlat(ctx, v, resolved);
+        return CanonicalAbi.liftFlat(ctx, new CanonicalAbi.CoreValues(flat), resolved);
     }
 
     @Test
@@ -243,7 +240,7 @@ class CanonicalAbiFlatTest {
                                         .withValType(prim(PrimValType.F64))
                                         .build())
                         .build();
-        assertThat(ctx.ground(variant).flatten(PointerType.I32))
+        assertThat(ctx.resolve(variant).flatten(PointerType.I32))
                 .containsExactly(CORE_I32, CORE_I64);
 
         assertThat(roundTrip(ctx, VariantValue.of("a", 4_000_000_000L), variant))
@@ -253,7 +250,7 @@ class CanonicalAbiFlatTest {
     }
 
     @Test
-    void variantPayloadlessCasePadsUnusedSlotWithZero() {
+    void variantNoPayloadCasePadsUnusedSlotWithZero() {
         var ctx = newContext();
         var variant =
                 VariantType.builder()
@@ -265,7 +262,7 @@ class CanonicalAbiFlatTest {
                                         .build())
                         .build();
         long[] lowered =
-                CanonicalAbi.lowerFlat(ctx, VariantValue.of("none", null), ctx.ground(variant));
+                CanonicalAbi.lowerFlat(ctx, VariantValue.of("none", null), ctx.resolve(variant));
         assertThat(lowered).containsExactly(0L, 0L);
 
         assertThat(roundTrip(ctx, VariantValue.of("none", null), variant))

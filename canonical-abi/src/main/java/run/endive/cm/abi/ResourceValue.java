@@ -4,17 +4,6 @@ import java.util.Objects;
 
 /**
  * The component-level value an {@code own} or {@code borrow} type lifts to.
- *
- * <p>The Python reference lifts a handle to its bare {@code rep} and lowers straight from that
- * integer, because in a reference implementation nothing else ever looks at the value. Here the
- * rep travels with the resource type it belongs to and with whether it was owned or borrowed,
- * so that a host function receiving a resource has something self-describing to work with and
- * so that a lifted value cannot be silently confused with a plain {@code u32}. Lowering still
- * reads only {@link #rep}, which keeps the round trip identical to the reference's.
- *
- * <p>Instances are values: two describing the same handle of the same resource type are equal.
- * Note that this is <em>not</em> a handle — the table index the value came from is consumed by
- * lifting and a fresh one is minted by lowering, so no index appears here.
  */
 public final class ResourceValue {
 

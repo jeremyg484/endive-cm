@@ -55,8 +55,8 @@ public class ResourceTypeGenerativityTests {
 
         // Which instance implements a resource type decides where `lower_borrow` hands over a
         // representation rather than a handle, so the two must not answer for each other.
-        assertSame(first, declaredResourceType(first).impl());
-        assertSame(second, declaredResourceType(second).impl());
+        assertSame(first, declaredResourceType(first).handleTable());
+        assertSame(second, declaredResourceType(second).handleTable());
     }
 
     /** The resource type at index 0 of an instance's own type index space. */

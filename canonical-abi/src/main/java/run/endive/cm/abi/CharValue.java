@@ -3,16 +3,9 @@ package run.endive.cm.abi;
 /**
  * A component {@code char}: a single Unicode scalar value.
  *
- * <p>This exists because no Java character type can hold one. A component {@code char} ranges
- * up to {@code U+10FFFF}, while {@code char} and its box {@link Character} are both 16 bits
- * and stop at {@code U+FFFF} — {@link Character#MAX_CODE_POINT} describes Unicode, not the
- * range of a {@code Character} value. Nor can a larger scalar value be spelled as a surrogate
- * pair, because surrogates are excluded from the type; {@code U+1F370}, which the Component
- * Model's own {@code fused.wast} round-trips, simply has no {@code Character} representation.
- *
- * <p>Wrapping the code point instead makes the invalid values unrepresentable: {@link #of}
- * applies the same range and surrogate checks the Canonical ABI applies when lifting, so a
- * bad value is rejected where it is constructed rather than partway through a call.
+ * <p>This wrapper exists because no Java character type can hold the full range of possible values.
+ * Wrapping the code point instead makes the invalid values unrepresentable: {@link #of}
+ * applies the same range and surrogate checks the Canonical ABI applies when lifting.
  */
 public final class CharValue {
 

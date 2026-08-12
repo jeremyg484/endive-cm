@@ -6,10 +6,10 @@ import run.endive.cm.types.PointerType;
 import run.endive.cm.types.ResolvedType;
 
 /**
- * Static analysis backing the direct memory-to-memory transfer path: decides which
+ * Static analysis backing the direct memory-to-memory transfer path. Distinguishes which
  * component-level types can move between two core module memories as a verbatim byte copy,
  * and which have to be walked because lifting and lowering are not each other's exact
- * inverse for them.
+ * inverse.
  *
  * <p>A type is <em>bitwise copyable</em> only if, for every possible byte pattern in the
  * source, {@code store(dst, load(src, t), t)} would reproduce those bytes unchanged. That
@@ -27,22 +27,18 @@ import run.endive.cm.types.ResolvedType;
  *   <li>{@code string} and unbounded {@code list} — the payload lives behind a pointer that
  *       must be re-allocated in the destination, and strings may additionally need
  *       transcoding.
- *   <li>{@code variant} (and its {@code enum}/{@code option}/{@code result} specializations)
- *       — the discriminant has to be range-checked against the case list.
+ *   <li>{@code variant} (and its {@code enum}/{@code option}/{@code result} specializations),
+ *       in which case the discriminant has to be range-checked against the case list.
  * </ul>
  *
- * <p>Integers copy verbatim. So do {@code f32}/{@code f64}: the Canonical ABI explicitly
- * permits a host to preserve "the original value of the NaN before lifting, allowing them
- * to optimize away both the canonicalization of lifting and the randomization of lowering",
- * which is what the transfer path does. See {@link CanonicalAbi#transfer} for the
- * consequence — it differs from {@link CanonicalAbi#load}/{@link CanonicalAbi#store} for
- * non-canonical NaN payloads, and only for those.
+ * <p>Integers copy verbatim. Floats do as well {@code f32}/{@code f64} as the Canonical ABI
+ * explicitly permits a host to preserve "the original value of the NaN before lifting, allowing
+ * them to optimize away both the canonicalization of lifting and the randomization of lowering".
  *
  * <p>Aggregates are copyable when all of their leaves are. Padding inside a record and
  * between the elements of a fixed-size list is copied along with the fields, which
- * substitutes the source's undefined bytes for the destination allocator's — both are
- * undefined, and coalescing across them is what turns a record of integers into a single
- * copy.
+ * substitutes the source's undefined bytes for the destination allocator's, thus turning a record
+ * of integers into a single copy.
  *
  * <p>All results assume the source and destination agree on {@link PointerType}; callers
  * establish that before consulting this class, because a differing pointer width changes
@@ -53,8 +49,8 @@ final class Transferability {
     private Transferability() {}
 
     /**
-     * Whether a value of {@code t} occupies the same bytes in both memories and can be moved
-     * with a single verbatim copy, with no inspection, validation or normalization.
+     * Whether a value of type {@code t} occupies the same bytes in both memories and can be moved
+     * with a single verbatim copy, with no inspection, validation, or normalization.
      */
     static boolean isBitwiseCopyable(PointerType ptrType, ResolvedType t) {
         return isBitwiseCopyable(ptrType, t, new IdentityHashMap<>());
@@ -89,6 +85,7 @@ final class Transferability {
             case CHAR:
             case STRING:
             case VARIANT:
+            case LIST:
             case ERROR_CONTEXT:
             case OWN:
             case BORROW:
@@ -104,36 +101,26 @@ final class Transferability {
                     }
                 }
                 return true;
-            case LIST:
             case SIZED_LIST:
-                // Only a fixed-size list is stored inline; an unbounded one — including a
-                // despecialized map — is a (pointer, length) pair whose payload must be
+                // Only a fixed-size list is stored inline. An unbounded one (including a
+                // despecialized map) is a (pointer, length) pair whose payload must be
                 // re-allocated in the destination.
-                return t.isFixedSizeList() && isBitwiseCopyable(ptrType, t.element(), cache);
+                return isBitwiseCopyable(ptrType, t.element(), cache);
             default:
                 throw new IllegalStateException("unhandled kind " + t.kind());
         }
     }
 
     /**
-     * Whether transferring a value of {@code t} through the flat (core value) path leaves
-     * every slot alone — no masking, no sign extension, no validation, no memory access —
-     * so the source's core values can be handed to the destination as they stand.
+     * Whether transferring a value of type {@code t} through the flat (core value) path leaves
+     * every slot unchanged, requiring no masking, no sign extension, no validation, and no memory access.
+     * If true, the source's core values can be handed to the destination directly.
      *
      * <p>This is <em>not</em> {@link #isBitwiseCopyable}, and the two disagree in the
-     * direction that catches people out. In memory a {@code u8} occupies a single byte and
-     * copies verbatim, and eight {@code flags} labels exactly fill their byte; both are
-     * bitwise copyable. Flattened, each occupies a whole {@code i32} slot with slack bits
-     * above it that lifting discards and lowering re-zeroes, so neither is flat-identity.
+     * direction. In memory a {@code u8} occupies a single byte and copies verbatim, and eight {@code flags}
+     * labels exactly fill their byte, thus both are bitwise copyable. Flattened, each occupies a whole {@code i32}
+     * slot with slack bits above it that lifting discards and lowering re-zeroes, so neither is a flat identity.
      * Flat identity is the stricter of the two for every narrow type.
-     *
-     * <p>"Unchanged" means unchanged <em>at the slot's core value type</em>. Endive carries
-     * an {@code i32} in a {@code long} without guaranteeing which way the upper 32 bits are
-     * extended — {@code InterpreterMachine.I32_ADD} pushes an {@code int}, which Java
-     * sign-extends — whereas the Canonical ABI's own lowering zero-extends. So for an
-     * {@code i32}-shaped slot the two paths can disagree above bit 31. Every consumer of an
-     * {@code i32} slot narrows to the low 32 bits first, so that difference is unobservable;
-     * a consumer that reads such a slot as a full 64-bit value would see it.
      */
     static boolean isFlatIdentity(PointerType ptrType, ResolvedType t) {
         return isFlatIdentity(ptrType, t, new IdentityHashMap<>());
@@ -168,6 +155,7 @@ final class Transferability {
             case S16:
             case STRING:
             case VARIANT:
+            case LIST:
             case ERROR_CONTEXT:
             case OWN:
             case BORROW:
@@ -186,27 +174,23 @@ final class Transferability {
                     }
                 }
                 return true;
-            case LIST:
             case SIZED_LIST:
                 // A fixed-size list flattens to its elements laid end to end; an unbounded
                 // one is a (pointer, length) pair whose payload has to be re-allocated.
-                return t.isFixedSizeList() && isFlatIdentity(ptrType, t.element(), cache);
+                return isFlatIdentity(ptrType, t.element(), cache);
             default:
                 throw new IllegalStateException("unhandled kind " + t.kind());
         }
     }
 
     /**
-     * Whether every type reachable from {@code t} is one the transfer path can carry, so that a
-     * caller can decide up front to fall back rather than trapping partway through.
+     * Whether every type reachable from type {@code t} is one that the transfer path can carry,
+     * so that a caller can decide up front to fall back rather than trapping partway through.
      *
      * <p>{@code own} and {@code borrow} are rejected permanently rather than pending: a handle
      * is an index into one component instance's table, and the bytes that encode it are
-     * meaningless in another's. Moving one means removing an entry on the source side and
-     * minting one on the destination side, which is bookkeeping no byte copy can express — so
-     * handles always take the lift/lower path, where {@link CanonicalAbi#liftOwn} and its
-     * siblings do that work. The async value types are rejected because they are not modeled
-     * here yet.
+     * meaningless in another's, so handles always take the lift/lower path. The async value
+     * types are rejected because they are not modeled here yet.
      */
     static boolean isSupported(ResolvedType t) {
         return !CanonicalAbi.contains(t, Transferability::isUnsupportedKind);
@@ -232,18 +216,16 @@ final class Transferability {
     }
 
     /**
-     * Whether {@code t}'s labels exactly fill its <em>in-memory</em> storage width, leaving
-     * no slack bits for lifting to drop and lowering to re-zero. That width is as narrow as
-     * one byte, so eight labels are enough.
+     * Whether type {@code t}'s labels exactly fill its <em>in-memory</em> storage width, leaving
+     * no slack bits for lifting to drop and lowering to re-zero.
      */
     static boolean flagsFillWidth(PointerType ptrType, ResolvedType t) {
         return t.labels().size() >= t.elementSize(ptrType) * Byte.SIZE;
     }
 
     /**
-     * Whether {@code t}'s labels fill its <em>flattened</em> slot, which is always an
-     * {@code i32} regardless of how few labels there are — so this needs a full 32 of them,
-     * where {@link #flagsFillWidth} is satisfied by 8.
+     * Whether type {@code t}'s labels fill its <em>flattened</em> slot, which is always an
+     * {@code i32}.
      */
     static boolean flagsFillFlatSlot(ResolvedType t) {
         return t.labels().size() >= Integer.SIZE;

@@ -1744,7 +1744,7 @@ public final class ComponentLinker {
                             (instance, args) -> {
                                 requireMayEnter(target);
                                 long[] results = callee.apply(args);
-                                postReturn.call(results != null ? results : EMPTY_CORE_VALUES);
+                                postReturn.apply(results != null ? results : EMPTY_CORE_VALUES);
                                 return results;
                             }));
             return;
@@ -1768,7 +1768,7 @@ public final class ComponentLinker {
 
                         var postReturn = func.context().postReturn();
                         if (postReturn != null) {
-                            postReturn.call(
+                            postReturn.apply(
                                     calleeResults != null ? calleeResults : EMPTY_CORE_VALUES);
                         }
                         return callerResults;
@@ -1866,7 +1866,7 @@ public final class ComponentLinker {
                         task.requireBorrowsReleased();
                     }
                     if (context.postReturn() != null) {
-                        context.postReturn().call(result != null ? result : EMPTY_CORE_VALUES);
+                        context.postReturn().apply(result != null ? result : EMPTY_CORE_VALUES);
                     }
                     return lifted;
                 };

@@ -9,6 +9,7 @@ import run.endive.cm.types.PointerType;
 import run.endive.cm.types.ResolvedType;
 import run.endive.cm.types.TypeResolver;
 import run.endive.cm.types.TypeSpace;
+import run.endive.cm.types.ValType;
 import run.endive.runtime.Memory;
 
 public final class LiftLowerContext {
@@ -18,18 +19,7 @@ public final class LiftLowerContext {
     private final StringEncoding stringEncoding;
     private final TypeResolver typeResolver;
     private final TypeSpace typeSpace;
-
-    /**
-     * Grounded forms of the types this context has been asked about, keyed by the syntax node
-     * they came from.
-     *
-     * <p>Sound because a context resolves against exactly one space, so a node can only ground
-     * one way here. Shared with the per-call copies {@link #withBorrowScope} makes, since the
-     * grounding does not depend on the borrow scope and re-doing it per call would defeat the
-     * point of caching it at all.
-     */
-    private final Map<DefValType, ResolvedType> grounded;
-
+    private final Map<DefValType, ResolvedType> resolvedTypes;
     private final PostReturn postReturn;
     private final Realloc realloc;
     private final boolean async;
@@ -44,7 +34,7 @@ public final class LiftLowerContext {
             StringEncoding stringEncoding,
             TypeResolver typeResolver,
             TypeSpace typeSpace,
-            Map<DefValType, ResolvedType> grounded,
+            Map<DefValType, ResolvedType> resolvedTypes,
             PostReturn postReturn,
             Realloc realloc,
             boolean async,
@@ -56,10 +46,8 @@ public final class LiftLowerContext {
         this.ptrType = ptrType == null ? PointerType.I32 : ptrType;
         this.stringEncoding = stringEncoding == null ? StringEncoding.UTF8 : stringEncoding;
         this.typeResolver = requireNonNull(typeResolver, "typeResolver");
-        // A context that was given no space of its own resolves everything locally, which is
-        // what a component's own definitions do and what a hand-built table in a test does.
         this.typeSpace = typeSpace == null ? TypeSpace.of(this.typeResolver) : typeSpace;
-        this.grounded = grounded == null ? new IdentityHashMap<>() : grounded;
+        this.resolvedTypes = resolvedTypes == null ? new IdentityHashMap<>() : resolvedTypes;
         this.postReturn = postReturn;
         this.realloc = realloc;
         this.async = async;
@@ -67,6 +55,28 @@ public final class LiftLowerContext {
         this.handles = handles;
         this.resourceTypes = resourceTypes;
         this.borrowScope = borrowScope;
+    }
+
+    /**
+     * This context with its borrow scope replaced. The rest of a context is fixed by the
+     * {@code canonopt}s of a canonical definition and so is built once at link time, but the
+     * scope belongs to an individual call and has to be supplied per invocation.
+     */
+    public LiftLowerContext withBorrowScope(BorrowScope borrowScope) {
+        return new LiftLowerContext(
+                memory,
+                ptrType,
+                stringEncoding,
+                typeResolver,
+                typeSpace,
+                resolvedTypes,
+                postReturn,
+                realloc,
+                async,
+                callback,
+                handles,
+                resourceTypes,
+                borrowScope);
     }
 
     public Memory memory() {
@@ -81,34 +91,8 @@ public final class LiftLowerContext {
         return stringEncoding;
     }
 
-    public TypeResolver typeResolver() {
-        return typeResolver;
-    }
-
-    /** The index space this context's type indices count in. */
     public TypeSpace typeSpace() {
         return typeSpace;
-    }
-
-    /**
-     * Grounds {@code t} against this context's space, following every type index once so the
-     * result can be laid out and walked without a resolver.
-     */
-    public ResolvedType ground(DefValType t) {
-        if (t == null) {
-            return null;
-        }
-        return grounded.computeIfAbsent(t, node -> ResolvedType.of(node, typeSpace));
-    }
-
-    /** Grounds the type {@code valType} names, which counts in this context's space. */
-    public ResolvedType ground(run.endive.cm.types.ValType valType) {
-        TypeSpace.Resolved resolved = typeSpace.resolve(valType);
-        // Only a type that resolved here can go in the cache; one that came from another space
-        // is a different type despite sharing a node, which is the whole reason spaces exist.
-        return resolved.space() == typeSpace
-                ? ground(resolved.type())
-                : ResolvedType.of(resolved.type(), resolved.space());
     }
 
     public PostReturn postReturn() {
@@ -127,47 +111,35 @@ public final class LiftLowerContext {
         return callback;
     }
 
-    /**
-     * The handle table of the component instance this context lifts out of and lowers into
-     * ({@code cx.inst.handles}). Absent unless the context's types involve resources.
-     */
     public HandleTable handles() {
         return handles;
     }
 
-    /** Resolves the type indices carried by {@code own} and {@code borrow} types. */
     public ResourceTypeRef.Resolver resourceTypes() {
         return resourceTypes;
     }
 
-    /**
-     * The call {@code borrow} handles lifted or lowered through this context are scoped to.
-     * Absent when those types contain no {@code borrow}.
-     */
     public BorrowScope borrowScope() {
         return borrowScope;
     }
 
     /**
-     * This context with its borrow scope replaced. The rest of a context is fixed by the
-     * {@code canonopt}s of a canonical definition and so is built once at link time, but the
-     * scope belongs to an individual call and has to be supplied per invocation.
+     * Resolves {@code t} against this context's space, following every type index once so the
+     * result can be laid out and walked without a resolver.
      */
-    public LiftLowerContext withBorrowScope(BorrowScope borrowScope) {
-        return new LiftLowerContext(
-                memory,
-                ptrType,
-                stringEncoding,
-                typeResolver,
-                typeSpace,
-                grounded,
-                postReturn,
-                realloc,
-                async,
-                callback,
-                handles,
-                resourceTypes,
-                borrowScope);
+    public ResolvedType resolve(DefValType t) {
+        if (t == null) {
+            return null;
+        }
+        return resolvedTypes.computeIfAbsent(t, node -> ResolvedType.of(node, typeSpace));
+    }
+
+    /** Resolves {@code valType} against this context's space. */
+    public ResolvedType resolve(ValType valType) {
+        TypeSpace.Resolved resolved = typeSpace.resolve(valType);
+        return resolved.space() == typeSpace
+                ? resolve(resolved.type())
+                : ResolvedType.of(resolved.type(), resolved.space());
     }
 
     public static Builder builder() {
@@ -210,11 +182,6 @@ public final class LiftLowerContext {
             return this;
         }
 
-        /**
-         * The index space this context's types count in. Optional: without one every type
-         * resolves through {@code typeResolver} locally, which is right only where nothing was
-         * written in another component.
-         */
         public Builder withTypeSpace(TypeSpace typeSpace) {
             this.typeSpace = typeSpace;
             return this;

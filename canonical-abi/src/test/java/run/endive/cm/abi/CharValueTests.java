@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-class CharValueTest {
+class CharValueTests {
 
     @ParameterizedTest
     @ValueSource(ints = {0, 0x41, 0xD7FF, 0xE000, 0xFFFF, 0x10000, 0x1F370, 0x10FFFF})
@@ -33,9 +33,6 @@ class CharValueTest {
 
     @Test
     void carriesScalarValuesNoJavaCharacterCanHold() {
-        // The point of the type: U+1F370 exceeds Character.MAX_VALUE, so no char or
-        // Character can represent it, and it is not expressible as a surrogate pair either
-        // because surrogates are not scalar values.
         var cake = CharValue.of(0x1F370);
 
         assertThat(cake.codePoint()).isGreaterThan(Character.MAX_VALUE);
