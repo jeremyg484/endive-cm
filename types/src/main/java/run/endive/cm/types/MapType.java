@@ -4,6 +4,15 @@ import static java.util.Objects.requireNonNull;
 
 import java.util.Objects;
 
+/**
+ * A {@code map<k, v>}, which is shorthand for {@code list<(k, v)>}.
+ *
+ * <p>Unlike the other shorthands this one cannot be expanded into another {@link DefValType}: the
+ * entry type is a tuple built here rather than one the component named, and a {@code list}'s
+ * element is a type <em>index</em>, which there is no index to give. So {@link MapType} is not
+ * {@link Specialized}, and the expansion happens where children are pointers rather than indices
+ * — see {@code ResolvedType}.
+ */
 public final class MapType extends DefValType {
 
     private final ValType keyType;

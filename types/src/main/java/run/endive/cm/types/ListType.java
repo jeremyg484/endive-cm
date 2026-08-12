@@ -7,7 +7,7 @@ public final class ListType extends DefValType {
     private static final int UNDEFINED_SIZE = -1;
 
     private ListType(ValType elementType, int fixedSize) {
-        super(Kind.LIST);
+        super(fixedSize == UNDEFINED_SIZE ? Kind.LIST : Kind.SIZED_LIST);
         this.elementType = elementType;
         this.size = fixedSize;
     }
@@ -21,7 +21,7 @@ public final class ListType extends DefValType {
     }
 
     public boolean isFixedSize() {
-        return size != UNDEFINED_SIZE;
+        return kind() == Kind.SIZED_LIST;
     }
 
     public int size() {

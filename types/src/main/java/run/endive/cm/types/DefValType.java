@@ -1,5 +1,7 @@
 package run.endive.cm.types;
 
+import java.util.Objects;
+
 public abstract class DefValType {
 
     private final Kind kind;
@@ -10,6 +12,10 @@ public abstract class DefValType {
 
     public Kind kind() {
         return kind;
+    }
+
+    public static int alignTo(int ptr, int alignment) {
+        return (ptr + alignment - 1) / alignment * alignment;
     }
 
     public enum Kind {
@@ -60,5 +66,24 @@ public abstract class DefValType {
             }
             return null;
         }
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        DefValType that = (DefValType) o;
+        return kind == that.kind;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(kind);
+    }
+
+    @Override
+    public String toString() {
+        return "DefValType{" + "kind=" + kind + '}';
     }
 }

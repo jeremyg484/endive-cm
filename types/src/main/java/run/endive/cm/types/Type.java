@@ -67,6 +67,19 @@ public final class Type {
         return resourceType;
     }
 
+    public String simpleName() {
+        if (funcType != null) {
+            return "func";
+        } else if (componentType != null) {
+            return "component";
+        } else if (instanceType != null) {
+            return "instance";
+        } else if (resourceType != null) {
+            return "resource";
+        }
+        return toString();
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof Type)) {

@@ -4,7 +4,7 @@ import static java.util.Objects.requireNonNull;
 
 import java.util.Objects;
 
-public final class OptionType extends DefValType {
+public final class OptionType extends DefValType implements Specialized<VariantType> {
 
     private final ValType valType;
 
@@ -19,6 +19,14 @@ public final class OptionType extends DefValType {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    @Override
+    public VariantType despecialize() {
+        return VariantType.builder()
+                .addCase(Case.builder().withLabel("none").build())
+                .addCase(Case.builder().withLabel("some").withValType(valType).build())
+                .build();
     }
 
     public static final class Builder {
