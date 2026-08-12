@@ -1,30 +1,29 @@
 package run.endive.cm.types;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import run.endive.wasm.types.ValType;
 
 /**
- * A component value type with its type indices already followed: a self-contained graph that means
+ * A component value type with its type indices already resolved, forming a self-contained graph that means
  * one thing, independent of any index space.
  *
- * <p>A parsed {@link DefValType} is syntax. Its children are numbers, and a number only means
- * something relative to the space it was written in, so the same node laid out against two spaces
- * can be two different types. Grounding resolves every child once, against the space that child
- * actually belongs to, and the result no longer needs a resolver to be understood.
+ * <p>Grounding resolves every child once, against the space that child
+ * actually belongs to, and the result does not need a {@link TypeResolver} to be understood.
  *
- * <p>That is what makes memory layout a property of this class rather than of {@link DefValType}.
- * Alignment, size and flattening cannot be cached on a syntax node — the answer depends on the
- * space — but they are fixed for a grounded type, so each is computed at most once per pointer
+ * <p>Memory layout is a property of this class rather than of {@link DefValType}.
+ * Alignment, size, and flattening cannot be cached on a syntax node as the answer depends on the
+ * space, but they are fixed for a fully resolved type, so each is computed at most once per pointer
  * width here.
  *
- * <p>Grounding also despecializes: {@code tuple}, {@code enum}, {@code option}, {@code result} and
- * {@code map} are shorthand for records and variants, and are expanded once at construction
+ * <p>The resolution process also despecializes {@code tuple}, {@code enum}, {@code option}, {@code result} and
+ * {@code map} into records and variants. The expansion is done once at construction
  * instead of allocating a fresh expansion on every layout query. {@link #node()} still reports the
  * type as written, for diagnostics and for the places that distinguish the sugar from what it
- * stands for.
+ * represents.
  *
- * <p>Handles are the exception to "self-contained": {@code own} and {@code borrow} keep the index
+ * <p>Handles are the exception to "self-contained". {@code own} and {@code borrow} keep the index
  * they were written with, because which runtime resource type that names is a property of the
  * component instance doing the lifting, not of the type. The Canonical ABI resolves it per call.
  */
@@ -41,7 +40,7 @@ public final class ResolvedType {
 
     private final int[] alignments = newMemo();
     private final int[] elementSizes = newMemo();
-    private final List<ValType>[] flattenings = newFlatMemo();
+    private final List<ValType>[] flattenedTypes = newFlatMemo();
 
     private ResolvedType(
             DefValType node,
@@ -56,7 +55,7 @@ public final class ResolvedType {
         this.element = element;
     }
 
-    /** Grounds {@code type}, whose own indices count in {@code space}. */
+    /** Resolves {@code type}, whose own indices count in {@code space}. */
     public static ResolvedType of(DefValType type, TypeSpace space) {
         if (type == null) {
             return null;
@@ -71,14 +70,14 @@ public final class ResolvedType {
         switch (kind) {
             case RECORD:
                 return new ResolvedType(
-                        type, kind, groundFields(((RecordType) d).fields(), space), null, null);
+                        type, kind, resolveFields(((RecordType) d).fields(), space), null, null);
             case VARIANT:
                 return new ResolvedType(
-                        type, kind, null, groundCases(((VariantType) d).cases(), space), null);
+                        type, kind, null, resolveCases(((VariantType) d).cases(), space), null);
             case LIST:
             case SIZED_LIST:
                 return new ResolvedType(
-                        type, kind, null, null, ground(((ListType) d).elementType(), space));
+                        type, kind, null, null, resolve(((ListType) d).elementType(), space));
             case STREAM:
                 {
                     var stream = (StreamType) d;
@@ -87,7 +86,7 @@ public final class ResolvedType {
                             kind,
                             null,
                             null,
-                            stream.hasElementType() ? ground(stream.elementType(), space) : null);
+                            stream.hasElementType() ? resolve(stream.elementType(), space) : null);
                 }
             case FUTURE:
                 {
@@ -97,7 +96,7 @@ public final class ResolvedType {
                             kind,
                             null,
                             null,
-                            future.hasElementType() ? ground(future.elementType(), space) : null);
+                            future.hasElementType() ? resolve(future.elementType(), space) : null);
                 }
             default:
                 return new ResolvedType(type, kind, null, null, null);
@@ -105,7 +104,7 @@ public final class ResolvedType {
     }
 
     /**
-     * The entry type of a {@code map<k, v>}: the record {@code (k, v)} despecializes to, whose
+     * The entry type of {@code map<k, v>} that the record {@code (k, v)} despecializes to, whose
      * two fields count in the same space the map itself was written in.
      */
     private static ResolvedType mapEntry(MapType map, TypeSpace space) {
@@ -118,36 +117,36 @@ public final class ResolvedType {
                 space);
     }
 
-    private static ResolvedType ground(run.endive.cm.types.ValType valType, TypeSpace space) {
+    private static ResolvedType resolve(run.endive.cm.types.ValType valType, TypeSpace space) {
         TypeSpace.Resolved resolved = space.resolve(valType);
         return of(resolved.type(), resolved.space());
     }
 
-    private static List<Field> groundFields(List<LabelValType> fields, TypeSpace space) {
-        List<Field> grounded = new ArrayList<>(fields.size());
+    private static List<Field> resolveFields(List<LabelValType> fields, TypeSpace space) {
+        List<Field> resolved = new ArrayList<>(fields.size());
         for (LabelValType f : fields) {
-            grounded.add(new Field(f.label(), ground(f.valType(), space)));
+            resolved.add(new Field(f.label(), resolve(f.valType(), space)));
         }
-        return List.copyOf(grounded);
+        return List.copyOf(resolved);
     }
 
-    private static List<Case> groundCases(List<run.endive.cm.types.Case> cases, TypeSpace space) {
-        List<Case> grounded = new ArrayList<>(cases.size());
+    private static List<Case> resolveCases(List<run.endive.cm.types.Case> cases, TypeSpace space) {
+        List<Case> resolved = new ArrayList<>(cases.size());
         for (run.endive.cm.types.Case c : cases) {
-            grounded.add(new Case(c.label(), c.hasValType() ? ground(c.valType(), space) : null));
+            resolved.add(new Case(c.label(), c.hasValType() ? resolve(c.valType(), space) : null));
         }
-        return List.copyOf(grounded);
+        return List.copyOf(resolved);
     }
 
-    /** The type as written, before despecialization. */
+    /** The parsed AST representation of the type, before resolution and despecialization. */
     public DefValType node() {
         return node;
     }
 
     /**
-     * The kind of the type this stands for, with the shorthands expanded — so a {@code tuple}
-     * reports {@code RECORD}, an {@code option} reports {@code VARIANT} and a {@code map}
-     * reports {@code LIST}. This is what the ABI switches on.
+     * The kind of type this stands for, with the shorthands expanded according to
+     * despecialization, so a {@code tuple} reports {@code RECORD}, an {@code option}
+     * reports {@code VARIANT} and a {@code map} reports {@code LIST}.
      */
     public DefValType.Kind kind() {
         return kind;
@@ -170,7 +169,7 @@ public final class ResolvedType {
     }
 
     /**
-     * The element type of a list, or the payload of a {@code stream} or {@code future};
+     * A list's element type, or the payload of a {@code stream} or {@code future},
      * {@code null} when a stream or future carries none.
      */
     public ResolvedType element() {
@@ -209,15 +208,15 @@ public final class ResolvedType {
     }
 
     public List<ValType> flatten(PointerType ptrType) {
-        List<ValType> memo = flattenings[ptrType.ordinal()];
+        List<ValType> memo = flattenedTypes[ptrType.ordinal()];
         if (memo == null) {
             memo = computeFlatten(ptrType);
-            flattenings[ptrType.ordinal()] = memo;
+            flattenedTypes[ptrType.ordinal()] = memo;
         }
         return memo;
     }
 
-    /** The alignment of the widest case payload, which a variant's own layout is built on. */
+    /** The alignment of the widest case payload, which a variant's own layout is built upon. */
     public int maxCaseAlignment(PointerType ptrType) {
         int a = 1;
         for (Case c : cases()) {
@@ -444,9 +443,7 @@ public final class ResolvedType {
 
     private static int[] newMemo() {
         int[] memo = new int[PTR_WIDTHS];
-        for (int i = 0; i < PTR_WIDTHS; i++) {
-            memo[i] = UNCOMPUTED;
-        }
+        Arrays.fill(memo, UNCOMPUTED);
         return memo;
     }
 
@@ -460,7 +457,7 @@ public final class ResolvedType {
         return "ResolvedType{" + node + '}';
     }
 
-    /** One field of a grounded {@code record}. */
+    /** One field of a resolved {@code record}. */
     public static final class Field {
 
         private final String label;
@@ -480,7 +477,7 @@ public final class ResolvedType {
         }
     }
 
-    /** One case of a grounded {@code variant}; the payload is optional. */
+    /** One case of a resolved {@code variant}, with the payload optional. */
     public static final class Case {
 
         private final String label;
