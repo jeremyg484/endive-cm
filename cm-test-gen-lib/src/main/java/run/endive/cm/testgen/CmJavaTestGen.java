@@ -30,6 +30,7 @@ public final class CmJavaTestGen {
                 "CmSpec" + CmStringUtils.capitalize(CmStringUtils.escapedCamelCase(name)) + "Test";
 
         cu.addImport("java.io.ByteArrayInputStream");
+        cu.addImport("java.math.BigInteger");
         cu.addImport("java.io.InputStream");
         cu.addImport("java.util.LinkedHashMap");
         cu.addImport("java.util.List");
@@ -49,6 +50,7 @@ public final class CmJavaTestGen {
         cu.addImport("run.endive.cm.parser.ComponentParser");
         cu.addImport("run.endive.cm.runtime.ComponentLinker");
         cu.addImport("run.endive.cm.abi.CharValue");
+        cu.addImport("run.endive.cm.abi.VariantValue");
         cu.addImport("run.endive.cm.runtime.ComponentInstance");
         cu.addImport("run.endive.cm.runtime.LinkageException");
         cu.addImport("run.endive.cm.runtime.SpecTestImports");

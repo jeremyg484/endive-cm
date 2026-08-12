@@ -184,6 +184,10 @@ public final class ComponentFunctionInstance implements ComponentFunction {
             return isTypeCompatible(store, ResourceHostTypeDescriptor.instance(), componentType);
         } else if (ListHostTypeDescriptor.supports(hostType)) {
             return isTypeCompatible(store, ListHostTypeDescriptor.instance(), componentType);
+        } else if (RecordHostTypeDescriptor.supports(hostType)) {
+            return isTypeCompatible(store, RecordHostTypeDescriptor.instance(), componentType);
+        } else if (VariantHostTypeDescriptor.supports(hostType)) {
+            return isTypeCompatible(store, VariantHostTypeDescriptor.instance(), componentType);
         }
         throw new IllegalArgumentException(
                 "host type " + hostType.getName() + " is not yet supported");

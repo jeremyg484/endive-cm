@@ -79,6 +79,8 @@
             <wast>validation/kebab.wast</wast>
             <wast>validation/outer-alias.wast</wast>
             <wast>validation/resources.wast</wast>
+            <wast>values/concat.wast</wast>
+            <wast>values/strings.wast</wast>
             <wast>wasm-tools/adapt.wast</wast>
             <wast>wasm-tools/alias.wast</wast>
             <wast>wasm-tools/big.wast</wast>
@@ -157,10 +159,7 @@
             <wast>async/validate-no-stream-char.wast</wast>
             <wast>async/wait-during-callback.wast</wast>
             <wast>async/zero-length.wast</wast>
-            <wast>values/concat.wast</wast>
             <wast>values/post-return.wast</wast>
-            <wast>values/strings.wast</wast>
-
           </excludedWasts>
           <excludedTests>
             <!-- These require 64-bit memory support, not yet implemented in Endive for core Wasm -->
