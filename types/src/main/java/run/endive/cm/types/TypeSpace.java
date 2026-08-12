@@ -1,16 +1,15 @@
 package run.endive.cm.types;
 
 /**
- * A type index space: what a {@link ValType}'s index means, and which space the type it names goes
- * on counting in.
+ * A type index space where a given {@link ValType}'s index can be resolved.
  *
- * <p>A component-level type is written against a particular index space and keeps meaning what it
- * meant there. A record aliased out of one component into another still has field types numbered
- * in the space that defined it, so resolving those fields against the space that imported it reads
- * whatever types happen to sit at those numbers — a different type, or none at all. Resolving
- * therefore hands back a space to continue in as well as a type, and a walk follows it.
+ * <p>A component-level type is written against a particular index space. A type aliased out
+ * of one component and into another still potentially has indices numbered
+ * in the space that defined it. When a type is imported, it needs a way for its indices
+ * to resolve in the space where it originated. Resolving therefore hands back a space to
+ * continue in as well as a type.
  *
- * <p>{@link TypeResolver} is the degenerate case, where everything resolves in one place.
+ * <p>{@link TypeResolver} is the base case, where everything resolves in one place.
  */
 public interface TypeSpace {
 
@@ -19,7 +18,7 @@ public interface TypeSpace {
     /**
      * A space backed by a plain index lookup, in which every type resolves locally.
      *
-     * <p>Correct only where nothing was written elsewhere — a single component's own definitions,
+     * <p>Correct only where nothing was written elsewhere, such as a single component's own definitions,
      * or a test's hand-built table. A space that can receive types from outside has to record
      * where each of its slots came from instead.
      */
@@ -33,7 +32,7 @@ public interface TypeSpace {
         };
     }
 
-    /** A resolved type together with the space its own type indices belong to. */
+    /** A resolved type together with the space wherein its own type indices resolve. */
     final class Resolved {
 
         private final DefValType type;
