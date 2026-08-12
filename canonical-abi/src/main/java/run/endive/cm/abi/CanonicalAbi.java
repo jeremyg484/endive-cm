@@ -5,12 +5,14 @@ import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
+import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Predicate;
@@ -428,22 +430,27 @@ public final class CanonicalAbi {
             throw new TrapException(
                     "string byte length exceeds the maximum of " + MAX_STRING_BYTE_LENGTH);
         }
-        if (pointer != DefValType.alignTo(pointer, range.alignment)) {
+        long address = Integer.toUnsignedLong(pointer);
+        if (address % range.alignment != 0) {
             throw new TrapException("unaligned pointer");
         }
-        if (pointer + range.byteLength > Memory.bytes(context.memory().pages())) {
-            throw new TrapException(
-                    "string of byte length "
-                            + range.byteLength
-                            + " at "
-                            + pointer
-                            + " is out of bounds");
+        if (address + range.byteLength > Memory.bytes(context.memory().pages())) {
+            throw new TrapException(stringOutOfBounds(range.byteLength, address));
         }
         try {
             return context.memory().readBytes(pointer, (int) range.byteLength);
         } catch (WasmRuntimeException e) {
-            throw new TrapException("string content out-of-bounds");
+            throw new TrapException(stringOutOfBounds(range.byteLength, address));
         }
+    }
+
+    private static String stringOutOfBounds(long byteLength, long address) {
+        return "string content out-of-bounds - string pointer/length out of bounds of memory"
+                + " (byte length "
+                + byteLength
+                + " at "
+                + address
+                + ")";
     }
 
     /** The byte range and charset a pointer and tagged code units pair resolves to. */
@@ -473,13 +480,31 @@ public final class CanonicalAbi {
      * without ever materializing one.
      */
     static CharBuffer decodeStrictToChars(byte[] bytes, Charset charset) {
-        try {
-            return charset.newDecoder()
-                    .onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(bytes));
-        } catch (CharacterCodingException e) {
-            throw new TrapException("invalid " + charset.name() + " byte sequence");
+        var decoder =
+                charset.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT);
+        ByteBuffer in = ByteBuffer.wrap(bytes);
+        CharBuffer out =
+                CharBuffer.allocate((int) Math.ceil(bytes.length * decoder.maxCharsPerByte()) + 1);
+
+        CoderResult result = decoder.decode(in, out, false);
+        if (result.isUnderflow() && in.hasRemaining()) {
+            throw incompleteEncoding(charset);
+        }
+        requireDecoded(result, charset);
+        requireDecoded(decoder.decode(in, out, true), charset);
+        requireDecoded(decoder.flush(out), charset);
+        out.flip();
+        return out;
+    }
+
+    private static void requireDecoded(CoderResult result, Charset charset) {
+        if (result.isError()) {
+            throw invalidEncoding(charset);
+        }
+        if (result.isOverflow()) {
+            throw new IllegalStateException("decode buffer too small for " + charset.name());
         }
     }
 
@@ -2102,7 +2127,7 @@ public final class CanonicalAbi {
                 throw invalidUtf8();
             }
             if (i + length > bytes.length) {
-                throw invalidUtf8();
+                throw incompleteUtf8();
             }
             for (int k = 1; k < length; k++) {
                 int bk = bytes[i + k] & 0xFF;
@@ -2126,7 +2151,23 @@ public final class CanonicalAbi {
     }
 
     private static TrapException invalidUtf8() {
-        return new TrapException("invalid " + StandardCharsets.UTF_8.name() + " byte sequence");
+        return invalidEncoding(StandardCharsets.UTF_8);
+    }
+
+    private static TrapException incompleteUtf8() {
+        return incompleteEncoding(StandardCharsets.UTF_8);
+    }
+
+    private static TrapException invalidEncoding(Charset charset) {
+        return new TrapException("invalid " + encodingName(charset) + " byte sequence");
+    }
+
+    private static TrapException incompleteEncoding(Charset charset) {
+        return new TrapException("incomplete " + encodingName(charset) + " byte sequence");
+    }
+
+    private static String encodingName(Charset charset) {
+        return charset.name().toLowerCase(Locale.ROOT);
     }
 
     /**
@@ -2163,7 +2204,7 @@ public final class CanonicalAbi {
     }
 
     private static TrapException invalidUtf16() {
-        return new TrapException("invalid " + StandardCharsets.UTF_16LE.name() + " byte sequence");
+        return invalidEncoding(StandardCharsets.UTF_16LE);
     }
 
     /**
