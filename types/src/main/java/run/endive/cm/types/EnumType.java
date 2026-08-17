@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-public final class EnumType extends DefValType {
+public final class EnumType extends DefValType implements Specialized<VariantType> {
 
     private final List<String> labels;
 
@@ -21,6 +21,15 @@ public final class EnumType extends DefValType {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    @Override
+    public VariantType despecialize() {
+        var builder = VariantType.builder();
+        for (String label : labels) {
+            builder.addCase(Case.builder().withLabel(label).build());
+        }
+        return builder.build();
     }
 
     public static final class Builder {

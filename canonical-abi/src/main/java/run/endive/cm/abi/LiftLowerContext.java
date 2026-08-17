@@ -1,0 +1,242 @@
+package run.endive.cm.abi;
+
+import static java.util.Objects.requireNonNull;
+
+import java.util.IdentityHashMap;
+import java.util.Map;
+import run.endive.cm.types.DefValType;
+import run.endive.cm.types.PointerType;
+import run.endive.cm.types.ResolvedType;
+import run.endive.cm.types.TypeResolver;
+import run.endive.cm.types.TypeSpace;
+import run.endive.cm.types.ValType;
+import run.endive.runtime.Memory;
+
+public final class LiftLowerContext {
+
+    private final Memory memory;
+    private final PointerType ptrType;
+    private final StringEncoding stringEncoding;
+    private final TypeResolver typeResolver;
+    private final TypeSpace typeSpace;
+    private final Map<DefValType, ResolvedType> resolvedTypes;
+    private final PostReturn postReturn;
+    private final Realloc realloc;
+    private final boolean async;
+    private final Callback callback;
+    private final HandleTable handles;
+    private final ResourceTypeRef.Resolver resourceTypes;
+    private final BorrowScope borrowScope;
+
+    private LiftLowerContext(
+            Memory memory,
+            PointerType ptrType,
+            StringEncoding stringEncoding,
+            TypeResolver typeResolver,
+            TypeSpace typeSpace,
+            Map<DefValType, ResolvedType> resolvedTypes,
+            PostReturn postReturn,
+            Realloc realloc,
+            boolean async,
+            Callback callback,
+            HandleTable handles,
+            ResourceTypeRef.Resolver resourceTypes,
+            BorrowScope borrowScope) {
+        this.memory = memory;
+        this.ptrType = ptrType == null ? PointerType.I32 : ptrType;
+        this.stringEncoding = stringEncoding == null ? StringEncoding.UTF8 : stringEncoding;
+        this.typeResolver = requireNonNull(typeResolver, "typeResolver");
+        this.typeSpace = typeSpace == null ? TypeSpace.of(this.typeResolver) : typeSpace;
+        this.resolvedTypes = resolvedTypes == null ? new IdentityHashMap<>() : resolvedTypes;
+        this.postReturn = postReturn;
+        this.realloc = realloc;
+        this.async = async;
+        this.callback = callback;
+        this.handles = handles;
+        this.resourceTypes = resourceTypes;
+        this.borrowScope = borrowScope;
+    }
+
+    /**
+     * This context with its borrow scope replaced. The rest of a context is fixed by the
+     * {@code canonopt}s of a canonical definition and so is built once at link time, but the
+     * scope belongs to an individual call and has to be supplied per invocation.
+     */
+    public LiftLowerContext withBorrowScope(BorrowScope borrowScope) {
+        return new LiftLowerContext(
+                memory,
+                ptrType,
+                stringEncoding,
+                typeResolver,
+                typeSpace,
+                resolvedTypes,
+                postReturn,
+                realloc,
+                async,
+                callback,
+                handles,
+                resourceTypes,
+                borrowScope);
+    }
+
+    public Memory memory() {
+        return memory;
+    }
+
+    public PointerType ptrType() {
+        return ptrType;
+    }
+
+    public StringEncoding stringEncoding() {
+        return stringEncoding;
+    }
+
+    public TypeSpace typeSpace() {
+        return typeSpace;
+    }
+
+    public PostReturn postReturn() {
+        return postReturn;
+    }
+
+    public Realloc realloc() {
+        return realloc;
+    }
+
+    public boolean isAsync() {
+        return async;
+    }
+
+    public Callback callback() {
+        return callback;
+    }
+
+    public HandleTable handles() {
+        return handles;
+    }
+
+    public ResourceTypeRef.Resolver resourceTypes() {
+        return resourceTypes;
+    }
+
+    public BorrowScope borrowScope() {
+        return borrowScope;
+    }
+
+    /**
+     * Resolves {@code t} against this context's space, following every type index once so the
+     * result can be laid out and walked without a resolver.
+     */
+    public ResolvedType resolve(DefValType t) {
+        if (t == null) {
+            return null;
+        }
+        return resolvedTypes.computeIfAbsent(t, node -> ResolvedType.of(node, typeSpace));
+    }
+
+    /** Resolves {@code valType} against this context's space. */
+    public ResolvedType resolve(ValType valType) {
+        TypeSpace.Resolved resolved = typeSpace.resolve(valType);
+        return resolved.space() == typeSpace
+                ? resolve(resolved.type())
+                : ResolvedType.of(resolved.type(), resolved.space());
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static final class Builder {
+        private Memory memory;
+        private PointerType ptrType;
+        private StringEncoding stringEncoding;
+        private TypeResolver typeResolver;
+        private TypeSpace typeSpace;
+        private PostReturn postReturn;
+        private Realloc realloc;
+        private boolean async;
+        private Callback callback;
+        private HandleTable handles;
+        private ResourceTypeRef.Resolver resourceTypes;
+        private BorrowScope borrowScope;
+
+        private Builder() {}
+
+        public Builder withMemory(Memory memory) {
+            this.memory = memory;
+            return this;
+        }
+
+        public Builder withPtrType(PointerType ptrType) {
+            this.ptrType = ptrType;
+            return this;
+        }
+
+        public Builder withStringEncoding(StringEncoding stringEncoding) {
+            this.stringEncoding = stringEncoding;
+            return this;
+        }
+
+        public Builder withTypeResolver(TypeResolver typeResolver) {
+            this.typeResolver = typeResolver;
+            return this;
+        }
+
+        public Builder withTypeSpace(TypeSpace typeSpace) {
+            this.typeSpace = typeSpace;
+            return this;
+        }
+
+        public Builder withPostReturn(PostReturn postReturn) {
+            this.postReturn = postReturn;
+            return this;
+        }
+
+        public Builder withRealloc(Realloc realloc) {
+            this.realloc = realloc;
+            return this;
+        }
+
+        public Builder withAsync(boolean async) {
+            this.async = async;
+            return this;
+        }
+
+        public Builder withCallback(Callback callback) {
+            this.callback = callback;
+            return this;
+        }
+
+        public Builder withHandles(HandleTable handles) {
+            this.handles = handles;
+            return this;
+        }
+
+        public Builder withResourceTypes(ResourceTypeRef.Resolver resourceTypes) {
+            this.resourceTypes = resourceTypes;
+            return this;
+        }
+
+        public Builder withBorrowScope(BorrowScope borrowScope) {
+            this.borrowScope = borrowScope;
+            return this;
+        }
+
+        public LiftLowerContext build() {
+            return new LiftLowerContext(
+                    memory,
+                    ptrType,
+                    stringEncoding,
+                    typeResolver,
+                    typeSpace,
+                    null,
+                    postReturn,
+                    realloc,
+                    async,
+                    callback,
+                    handles,
+                    resourceTypes,
+                    borrowScope);
+        }
+    }
+}

@@ -4,6 +4,8 @@ import java.util.Objects;
 
 public final class InstanceDecl {
 
+    private final Kind kind;
+
     private final CoreType coreType;
 
     private final Type type;
@@ -13,26 +15,39 @@ public final class InstanceDecl {
     private final ExportDecl exportDecl;
 
     public static InstanceDecl of(CoreType coreType) {
-        return new InstanceDecl(coreType, null, null, null);
+        return new InstanceDecl(Kind.CORE_TYPE, coreType, null, null, null);
     }
 
     public static InstanceDecl of(Type type) {
-        return new InstanceDecl(null, type, null, null);
+        return new InstanceDecl(Kind.TYPE, null, type, null, null);
     }
 
     public static InstanceDecl of(Alias alias) {
-        return new InstanceDecl(null, null, alias, null);
+        return new InstanceDecl(Kind.ALIAS, null, null, alias, null);
     }
 
     public static InstanceDecl of(ExportDecl exportDecl) {
-        return new InstanceDecl(null, null, null, exportDecl);
+        return new InstanceDecl(Kind.EXPORT_DECL, null, null, null, exportDecl);
     }
 
-    private InstanceDecl(CoreType coreType, Type type, Alias alias, ExportDecl exportDecl) {
+    public enum Kind {
+        CORE_TYPE,
+        TYPE,
+        ALIAS,
+        EXPORT_DECL,
+    }
+
+    private InstanceDecl(
+            Kind kind, CoreType coreType, Type type, Alias alias, ExportDecl exportDecl) {
+        this.kind = kind;
         this.coreType = coreType;
         this.type = type;
         this.alias = alias;
         this.exportDecl = exportDecl;
+    }
+
+    public Kind kind() {
+        return kind;
     }
 
     public CoreType coreType() {
@@ -53,11 +68,12 @@ public final class InstanceDecl {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof InstanceDecl)) {
+        if (o == null || getClass() != o.getClass()) {
             return false;
         }
         InstanceDecl that = (InstanceDecl) o;
-        return Objects.equals(coreType, that.coreType)
+        return kind == that.kind
+                && Objects.equals(coreType, that.coreType)
                 && Objects.equals(type, that.type)
                 && Objects.equals(alias, that.alias)
                 && Objects.equals(exportDecl, that.exportDecl);
@@ -65,22 +81,22 @@ public final class InstanceDecl {
 
     @Override
     public int hashCode() {
-        return Objects.hash(coreType, type, alias, exportDecl);
+        return Objects.hash(kind, coreType, type, alias, exportDecl);
     }
 
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder("InstanceDecl{");
-        if (coreType != null) {
-            sb.append("coreType=").append(coreType);
-        } else if (type != null) {
-            sb.append("type=").append(type);
-        } else if (alias != null) {
-            sb.append("alias=").append(alias);
-        } else if (exportDecl != null) {
-            sb.append("exportDecl=").append(exportDecl);
-        }
-        sb.append('}');
-        return sb.toString();
+        return "InstanceDecl{"
+                + "kind="
+                + kind
+                + ", coreType="
+                + coreType
+                + ", type="
+                + type
+                + ", alias="
+                + alias
+                + ", exportDecl="
+                + exportDecl
+                + '}';
     }
 }

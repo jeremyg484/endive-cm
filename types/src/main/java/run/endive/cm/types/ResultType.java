@@ -2,7 +2,7 @@ package run.endive.cm.types;
 
 import java.util.Objects;
 
-public final class ResultType extends DefValType {
+public final class ResultType extends DefValType implements Specialized<VariantType> {
 
     private final ValType ok;
     private final ValType error;
@@ -31,6 +31,19 @@ public final class ResultType extends DefValType {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    @Override
+    public VariantType despecialize() {
+        var okCase = Case.builder().withLabel("ok");
+        if (ok != null) {
+            okCase.withValType(ok);
+        }
+        var errorCase = Case.builder().withLabel("error");
+        if (error != null) {
+            errorCase.withValType(error);
+        }
+        return VariantType.builder().addCase(okCase.build()).addCase(errorCase.build()).build();
     }
 
     public static final class Builder {
