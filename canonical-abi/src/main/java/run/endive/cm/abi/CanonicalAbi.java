@@ -16,15 +16,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Predicate;
-import run.endive.cm.types.BorrowType;
 import run.endive.cm.types.DefValType;
-import run.endive.cm.types.FuncType;
-import run.endive.cm.types.LabelValType;
-import run.endive.cm.types.OwnType;
 import run.endive.cm.types.PointerType;
+import run.endive.cm.types.ResolvedFuncType;
 import run.endive.cm.types.ResolvedType;
-import run.endive.cm.types.TupleType;
-import run.endive.cm.types.TypeResolver;
 import run.endive.cm.types.TypeSpace;
 import run.endive.runtime.Memory;
 import run.endive.runtime.TrapException;
@@ -35,8 +30,8 @@ import run.endive.wasm.types.ValType;
 public final class CanonicalAbi {
 
     /**
-     * List size is capped so that {@code 2 * length} can never
-     * overflow the {@code i32} realloc arguments used to allocate them.
+     * List size is capped so that {@code 2 * length} can never overflow the {@code i32} realloc
+     * arguments used to allocate them.
      */
     private static final int MAX_LIST_BYTE_LENGTH = (1 << 28) - 1;
 
@@ -58,7 +53,8 @@ public final class CanonicalAbi {
     private CanonicalAbi() {}
 
     /**
-     * Whether resolved type {@code type}, or of any type reachable from it, matches the resolved type predicate {@code typeMatch}.
+     * Whether resolved type {@code type}, or of any type reachable from it, matches the resolved
+     * type predicate {@code typeMatch}.
      */
     public static boolean contains(ResolvedType type, Predicate<ResolvedType> typeMatch) {
         if (type == null) {
@@ -92,26 +88,31 @@ public final class CanonicalAbi {
         }
     }
 
-    public static boolean containsBorrow(TypeResolver typeResolver, DefValType type) {
-        return contains(
-                ResolvedType.of(type, TypeSpace.of(typeResolver)),
-                u -> u.kind() == DefValType.Kind.BORROW);
+    /** Whether {@code type} contains a {@code borrow} anywhere. */
+    public static boolean containsBorrow(ResolvedType type) {
+        return contains(type, u -> u.kind() == DefValType.Kind.BORROW);
     }
 
-    public static boolean containsAsyncValue(TypeResolver typeResolver, DefValType type) {
+    /**
+     * Whether {@code type}, whose own indices count in {@code space}, contains a {@code borrow}.
+     */
+    public static boolean containsBorrow(TypeSpace space, DefValType type) {
+        return containsBorrow(ResolvedType.of(type, space));
+    }
+
+    public static boolean containsAsyncValue(TypeSpace space, DefValType type) {
         return contains(
-                ResolvedType.of(type, TypeSpace.of(typeResolver)),
+                ResolvedType.of(type, space),
                 u -> u.kind() == DefValType.Kind.STREAM || u.kind() == DefValType.Kind.FUTURE);
     }
 
     /**
-     * The flattened core Wasm signature to which a component-level function type lowers.
-     * When the flat parameter/result list exceeds the max size defined by the spec, it
-     * collapses to a single pointer and the caller/callee agree to pass/receive the value(s)
-     * via memory instead.
+     * The flattened core Wasm signature to which a component-level function type lowers. When the
+     * flat parameter/result list exceeds the max size defined by the spec, it collapses to a single
+     * pointer and the caller/callee agree to pass/receive the value(s) via memory instead.
      */
     public static FunctionType flattenFuncType(
-            LiftLowerContext context, FuncType funcType, Direction direction) {
+            LiftLowerContext context, ResolvedFuncType funcType, Direction direction) {
         List<ValType> flatParams = new ArrayList<>(flattenParams(context, funcType));
         List<ValType> flatResults = new ArrayList<>(flattenResult(context, funcType));
         if (!context.isAsync()) {
@@ -155,55 +156,31 @@ public final class CanonicalAbi {
         return FunctionType.of(flatParams, flatResults);
     }
 
-    private static List<ValType> flattenParams(LiftLowerContext context, FuncType funcType) {
+    private static List<ValType> flattenParams(LiftLowerContext context, ResolvedFuncType ft) {
         List<ValType> flat = new ArrayList<>();
-        for (LabelValType p : funcType.params()) {
-            flat.addAll(context.resolve(p.valType()).flatten(context.ptrType()));
+        for (ResolvedFuncType.Param p : ft.params()) {
+            flat.addAll(p.type().flatten(context.ptrType()));
         }
         return flat;
     }
 
-    private static List<ValType> flattenResult(LiftLowerContext context, FuncType funcType) {
-        if (!funcType.hasResult()) {
+    private static List<ValType> flattenResult(LiftLowerContext context, ResolvedFuncType ft) {
+        if (!ft.hasResult()) {
             return List.of();
         }
-        return context.resolve(funcType.result()).flatten(context.ptrType());
+        return ft.result().flatten(context.ptrType());
     }
 
     /**
-     * Flattens each of the component model types of {@code types} into core types and
-     * concatenates the results.
+     * Flattens each of the component model types of {@code types} into core types and concatenates
+     * the results.
      */
-    static List<ValType> flattenTypes(
-            LiftLowerContext context, List<run.endive.cm.types.ValType> types) {
+    static List<ValType> flattenTypes(LiftLowerContext context, List<ResolvedType> types) {
         List<ValType> flat = new ArrayList<>();
-        for (run.endive.cm.types.ValType t : types) {
-            flat.addAll(context.resolve(t).flatten(context.ptrType()));
+        for (ResolvedType t : types) {
+            flat.addAll(t.flatten(context.ptrType()));
         }
         return flat;
-    }
-
-    /**
-     * Bundles component model types of {@code types} into a {@link TupleType} with
-     * fully resolved element types. This can be used to load/store a whole parameter
-     * or result list from a single spill buffer when it is too large to pass as flat
-     * core values.
-     */
-    static ResolvedType resolvedTupleOf(
-            LiftLowerContext context, List<run.endive.cm.types.ValType> types) {
-        return ResolvedType.of(tupleTypeOf(types), context.typeSpace());
-    }
-
-    static TupleType tupleTypeOf(List<run.endive.cm.types.ValType> types) {
-        var builder = TupleType.builder();
-        for (run.endive.cm.types.ValType t : types) {
-            builder.addElementType(t);
-        }
-        return builder.build();
-    }
-
-    public static Object load(LiftLowerContext context, int pointer, DefValType type) {
-        return load(context, pointer, context.resolve(type));
     }
 
     public static Object load(LiftLowerContext context, int pointer, ResolvedType type) {
@@ -244,15 +221,10 @@ public final class CanonicalAbi {
             case FLAGS:
                 return loadFlags(context, pointer, type);
             case OWN:
-                return liftOwn(
-                        context,
-                        (int) loadInt(context.memory(), pointer, 4, false),
-                        (OwnType) type.node());
+                return liftOwn(context, (int) loadInt(context.memory(), pointer, 4, false), type);
             case BORROW:
                 return liftBorrow(
-                        context,
-                        (int) loadInt(context.memory(), pointer, 4, false),
-                        (BorrowType) type.node());
+                        context, (int) loadInt(context.memory(), pointer, 4, false), type);
             case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
@@ -475,9 +447,9 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Strictly decodes {@code bytes}, trapping on any malformed or unmappable input. Returns
-     * the {@link CharBuffer} rather than a {@link String} so the transfer path can re-encode
-     * without ever materializing one.
+     * Strictly decodes {@code bytes}, trapping on any malformed or unmappable input. Returns the
+     * {@link CharBuffer} rather than a {@link String} so the transfer path can re-encode without
+     * ever materializing one.
      */
     static CharBuffer decodeStrictToChars(byte[] bytes, Charset charset) {
         var decoder =
@@ -506,10 +478,6 @@ public final class CanonicalAbi {
         if (result.isOverflow()) {
             throw new IllegalStateException("decode buffer too small for " + charset.name());
         }
-    }
-
-    public static void store(LiftLowerContext context, Object value, DefValType type, int pointer) {
-        store(context, value, context.resolve(type), pointer);
     }
 
     public static void store(
@@ -562,14 +530,14 @@ public final class CanonicalAbi {
             case OWN:
                 storeInt(
                         context.memory(),
-                        lowerOwn(context, (ResourceValue) value, (OwnType) type.node()),
+                        lowerOwn(context, (ResourceValue) value, type),
                         pointer,
                         4);
                 return;
             case BORROW:
                 storeInt(
                         context.memory(),
-                        lowerBorrow(context, (ResourceValue) value, (BorrowType) type.node()),
+                        lowerBorrow(context, (ResourceValue) value, type),
                         pointer,
                         4);
                 return;
@@ -660,17 +628,16 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Calls the context's {@code realloc} to allocate {@code size} fresh bytes and
-     * validates the result with the bounds/alignment checks.
+     * Calls the context's {@code realloc} to allocate {@code size} fresh bytes and validates the
+     * result with the bounds/alignment checks.
      */
     private static int allocate(LiftLowerContext context, int align, int size) {
         var realloc =
                 Objects.requireNonNull(
                         context.realloc(), "storing this value requires a realloc in the context");
         int ptr = realloc.apply(0, 0, align, size);
-        // A realloc result is an i32 address, so it is unsigned: a guest returning -1 to signal
-        // failure means 0xFFFFFFFF, which is past the end of any memory. Reading it as a signed
-        // Java int would put it below zero and slip through the bounds check below.
+        // A realloc result is an unsigned i32 address, so reading it as a signed Java int would
+        // put a failure return below zero and slip through the bounds check below.
         long addr = Integer.toUnsignedLong(ptr);
         if (addr % align != 0) {
             throw new TrapException("realloc return: unaligned pointer");
@@ -824,8 +791,7 @@ public final class CanonicalAbi {
     }
 
     /**
-     * A cursor for consuming core Wasm values one at a time from a flat argument or result
-     * list.
+     * A cursor for consuming core Wasm values one at a time from a flat argument or result list.
      */
     static final class CoreValues {
         private final long[] values;
@@ -855,16 +821,16 @@ public final class CanonicalAbi {
     }
 
     /**
-     * The maximum number of core values a function's parameters may flatten to before they
-     * are passed indirectly through linear memory.
+     * The maximum number of core values a function's parameters may flatten to before they are
+     * passed indirectly through linear memory.
      */
     private static int maxFlatParams(LiftLowerContext context) {
         return context.isAsync() ? MAX_FLAT_ASYNC_PARAMS : MAX_FLAT_PARAMS;
     }
 
     /**
-     * The maximum number of core values a function's results may flatten to before they are
-     * passed indirectly through linear memory.
+     * The maximum number of core values a function's results may flatten to before they are passed
+     * indirectly through linear memory.
      */
     private static int maxFlatResults(LiftLowerContext context) {
         return context.isAsync() ? 0 : MAX_FLAT_RESULTS;
@@ -877,35 +843,32 @@ public final class CanonicalAbi {
      * @see #liftFlatValues
      */
     public static List<Object> liftFlatParams(
-            LiftLowerContext context, long[] flatArgs, List<run.endive.cm.types.ValType> types) {
+            LiftLowerContext context, long[] flatArgs, List<ResolvedType> types) {
         return liftFlatValues(context, maxFlatParams(context), new CoreValues(flatArgs), types);
     }
 
     /**
-     * Lifts a function's flat core <em>results</em> {@code flatResults} into the
-     * component-level values of types {@code types}.
+     * Lifts a function's flat core <em>results</em> {@code flatResults} into the component-level
+     * values of types {@code types}.
      *
      * @see #liftFlatValues
      */
     public static List<Object> liftFlatResults(
-            LiftLowerContext context, long[] flatResults, List<run.endive.cm.types.ValType> types) {
+            LiftLowerContext context, long[] flatResults, List<ResolvedType> types) {
         return liftFlatValues(context, maxFlatResults(context), new CoreValues(flatResults), types);
     }
 
     /**
      * Lifts a flat list of core parameters or results (delivered by {@code vi}) into the
-     * component-level values of types {@code types}. When the flattened form exceeds {@code
-     * maxFlat} core values, the values were passed indirectly through linear memory and
+     * component-level values of types {@code types}. When the flattened form exceeds
+     * {@code maxFlat} core values, the values were passed indirectly through linear memory and
      * {@code vi} yields only a pointer to the spilled tuple.
      */
     private static List<Object> liftFlatValues(
-            LiftLowerContext context,
-            int maxFlat,
-            CoreValues vi,
-            List<run.endive.cm.types.ValType> types) {
+            LiftLowerContext context, int maxFlat, CoreValues vi, List<ResolvedType> types) {
         List<ValType> flatTypes = flattenTypes(context, types);
         if (flatTypes.size() > maxFlat) {
-            var tupleType = resolvedTupleOf(context, types);
+            var tupleType = ResolvedType.tupleOf(types);
             int align = tupleType.alignment(context.ptrType());
             int size = tupleType.elementSize(context.ptrType());
             int ptr = (int) vi.next();
@@ -919,8 +882,8 @@ public final class CanonicalAbi {
             return new ArrayList<>(record.values());
         }
         List<Object> result = new ArrayList<>(types.size());
-        for (run.endive.cm.types.ValType t : types) {
-            result.add(liftFlat(context, vi, context.resolve(t)));
+        for (ResolvedType t : types) {
+            result.add(liftFlat(context, vi, t));
         }
         return result;
     }
@@ -957,9 +920,9 @@ public final class CanonicalAbi {
             case FLAGS:
                 return liftFlatFlags(coreValues, type);
             case OWN:
-                return liftOwn(context, (int) coreValues.next(), (OwnType) type.node());
+                return liftOwn(context, (int) coreValues.next(), type);
             case BORROW:
-                return liftBorrow(context, (int) coreValues.next(), (BorrowType) type.node());
+                return liftBorrow(context, (int) coreValues.next(), type);
             case ERROR_CONTEXT:
             case STREAM:
             case FUTURE:
@@ -1002,10 +965,9 @@ public final class CanonicalAbi {
 
     /**
      * Boxes an already width-normalized unsigned integer into the Java numeric wrapper the host
-     * binds to the given component type:
-     * {@code u8 -> Short}, {@code u16 -> Integer}, {@code u32 -> Long}, and {@code u64 -> BigInteger}.
-     * Shared by the flat-lift and memory-load paths so both yield the same
-     * wrapper types.
+     * binds to the given component type: {@code u8 -> Short}, {@code u16 -> Integer},
+     * {@code u32 -> Long}, and {@code u64 -> BigInteger}. Shared by the flat-lift and memory-load
+     * paths so both yield the same wrapper types.
      */
     private static Number boxUnsigned(DefValType.Kind kind, long bits) {
         switch (kind) {
@@ -1024,9 +986,9 @@ public final class CanonicalAbi {
 
     /**
      * Boxes an already sign-extended signed integer into the Java numeric wrapper the host binds to
-     * the given component type (see {@code PrimitiveHostTypeDescriptor}): {@code s8 -> Byte},
-     * {@code s16 -> Short}, {@code s32 -> Integer}, and {@code s64 -> Long}. Shared by the flat-lift
-     * and memory-load paths so both yield the same wrapper types.
+     * the given component type. {@code s8} becomes {@code Byte}, {@code s16 -> Short},
+     * {@code s32 -> Integer}, and {@code s64 -> Long}. Shared by the flat-lift and memory-load
+     * paths so both yield the same wrapper types.
      */
     private static Number boxSigned(DefValType.Kind kind, long bits) {
         switch (kind) {
@@ -1068,10 +1030,9 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Reinterprets the raw bits of a core value as an {@code f32}. Endive packs an
-     * {@code f32} into the low 32 bits of a {@code long} (see {@link CoreValues}), so a
-     * value delivered through an {@code i32} or {@code i64} joined variant slot decodes
-     * identically.
+     * Reinterprets the raw bits of a core value as an {@code f32}. Endive packs an {@code f32} into
+     * the low 32 bits of a {@code long} (see {@link CoreValues}), so a value delivered through an
+     * {@code i32} or {@code i64} joined variant slot decodes identically.
      */
     private static float decodeI32AsFloat(long bits) {
         return canonicalizeNan32(Float.intBitsToFloat((int) bits));
@@ -1082,10 +1043,10 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Encodes an {@code f32} into the low 32 bits of a {@code long}, zero-extended so the
-     * upper 32 bits are clear. Zero-extension matters when the value lands in an
-     * {@code i64} joined variant slot, where the Canonical ABI expects the unsigned
-     * 32-bit bit pattern rather than a sign-extended one.
+     * Encodes an {@code f32} into the low 32 bits of a {@code long}, zero-extended so the upper 32
+     * bits are clear. Zero-extension matters when the value lands in an {@code i64} joined variant
+     * slot, where the Canonical ABI expects the unsigned 32-bit bit pattern rather than a
+     * sign-extended one.
      */
     private static long encodeFloatAsI32(float f) {
         return Integer.toUnsignedLong(Float.floatToRawIntBits(canonicalizeNan32(f)));
@@ -1155,48 +1116,44 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Lowers a component function's <em>parameter values</em> {@code values} of
-     * types {@code types} into a flat list of core values. When the parameters spill into
-     * linear memory, storage is freshly allocated via {@code realloc} and the returned list
-     * is the spill pointer.
+     * Lowers a component function's <em>parameter values</em> {@code values} of types {@code types}
+     * into a flat list of core values. When the parameters spill into linear memory, storage is
+     * freshly allocated via {@code realloc} and the returned list is the spill pointer.
      *
      * @see #lowerFlatValues
      */
     public static long[] lowerFlatParams(
-            LiftLowerContext context, List<?> values, List<run.endive.cm.types.ValType> types) {
+            LiftLowerContext context, List<?> values, List<ResolvedType> types) {
         return lowerFlatValues(context, maxFlatParams(context), values, types, null);
     }
 
     /**
-     * Lowers a component function's <em>results</em> {@code values} of types
-     * {@code types} into a flat list of core values. When the results spill into linear
-     * memory and {@code outParam} is non-null, its first element is the caller-provided
-     * spill pointer and no flat values are returned; when {@code outParam} is null, storage
-     * is freshly allocated via {@code realloc} and the returned list is the spill pointer.
+     * Lowers a component function's <em>results</em> {@code values} of types {@code types} into a
+     * flat list of core values. When the results spill into linear memory and {@code outParam} is
+     * non-null, its first element is the caller-provided spill pointer and no flat values are
+     * returned. When {@code outParam} is null, storage is freshly allocated via {@code realloc} and
+     * the returned list is the spill pointer.
      *
      * @see #lowerFlatValues
      */
     public static long[] lowerFlatResults(
-            LiftLowerContext context,
-            List<?> values,
-            List<run.endive.cm.types.ValType> types,
-            long[] outParam) {
+            LiftLowerContext context, List<?> values, List<ResolvedType> types, long[] outParam) {
         return lowerFlatValues(context, maxFlatResults(context), values, types, outParam);
     }
 
     /**
      * Lowers the component-level values {@code values} of types {@code types} into a flat list of
-     * core values. When the flattened form exceeds {@code maxFlat} core values, the values
-     * are spilled into linear memory as a tuple: with no {@code outParam}, storage is
-     * freshly allocated via {@code realloc} and the returned list is the spill pointer.
-     * Otherwise, the caller-provided {@code outParam}'s first element is a pre-allocated
-     * pointer and no flat values are returned.
+     * core values. When the flattened form exceeds {@code maxFlat} core values, the values are
+     * spilled into linear memory as a tuple. With no {@code outParam}, storage is freshly allocated
+     * via {@code realloc} and the returned list is the spill pointer. Otherwise, the
+     * caller-provided {@code outParam}'s first element is a pre-allocated pointer and no flat
+     * values are returned.
      */
     private static long[] lowerFlatValues(
             LiftLowerContext context,
             int maxFlat,
             List<?> values,
-            List<run.endive.cm.types.ValType> types,
+            List<ResolvedType> types,
             long[] outParam) {
 
         if (values.isEmpty()) {
@@ -1205,7 +1162,7 @@ public final class CanonicalAbi {
 
         List<ValType> flatTypes = flattenTypes(context, types);
         if (flatTypes.size() > maxFlat) {
-            var tupleType = resolvedTupleOf(context, types);
+            var tupleType = ResolvedType.tupleOf(types);
             Map<String, Object> tupleValue = new LinkedHashMap<>();
             for (int i = 0; i < values.size(); i++) {
                 tupleValue.put(Integer.toString(i), values.get(i));
@@ -1232,7 +1189,7 @@ public final class CanonicalAbi {
         }
         LongBuffer out = new LongBuffer();
         for (int i = 0; i < values.size(); i++) {
-            lowerFlatInto(context, values.get(i), context.resolve(types.get(i)), out);
+            lowerFlatInto(context, values.get(i), types.get(i), out);
         }
         return out.toArray();
     }
@@ -1285,15 +1242,10 @@ public final class CanonicalAbi {
                 out.add(packFlagsIntoInt((Map<?, ?>) value, type.labels()) & 0xFFFFFFFFL);
                 return;
             case OWN:
-                out.add(
-                        Integer.toUnsignedLong(
-                                lowerOwn(context, (ResourceValue) value, (OwnType) type.node())));
+                out.add(Integer.toUnsignedLong(lowerOwn(context, (ResourceValue) value, type)));
                 return;
             case BORROW:
-                out.add(
-                        Integer.toUnsignedLong(
-                                lowerBorrow(
-                                        context, (ResourceValue) value, (BorrowType) type.node())));
+                out.add(Integer.toUnsignedLong(lowerBorrow(context, (ResourceValue) value, type)));
                 return;
             case ERROR_CONTEXT:
             case STREAM:
@@ -1306,10 +1258,10 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Applies the Canonical ABI's 2s-complement conversion of a signed component value
-     * into an unsigned core value. For a 32-bit core value this masks to the low 32 bits
-     * (zero-extending the two's-complement pattern into the long); for a 64-bit core
-     * value the {@code long} already carries the correct pattern.
+     * Applies the Canonical ABI's 2s-complement conversion of a signed component value into an
+     * unsigned core value. For a 32-bit core value this masks to the low 32 bits by zero-extending
+     * the two's-complement pattern into the long. For a 64-bit core value the {@code long} already
+     * carries the correct pattern.
      */
     private static long lowerFlatSigned(long value, int coreBits) {
         return coreBits == 64 ? value : (value & 0xFFFFFFFFL);
@@ -1381,15 +1333,15 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Lifts an {@code own} handle, transferring ownership out of the source instance: the index
-     * is removed from its table, so the component that held it can no longer name the resource.
+     * Lifts an {@code own} handle, transferring ownership out of the source instance. The index is
+     * removed from its table, so the component that held it can no longer name the resource.
      *
-     * <p>Fails unless ownership is genuinely transferable. The index must name a handle of
-     * this exact resource ownType, that handle must itself be owning rather than borrowed, and it
-     * must not currently be lent out.
+     * <p>Fails unless ownership is genuinely transferable. The index must name a handle of this
+     * exact resource ownType, that handle must itself be owning rather than borrowed, and no borrow
+     * of it may currently be outstanding.
      */
-    static ResourceValue liftOwn(LiftLowerContext context, int index, OwnType ownType) {
-        var rt = resourceTypeOf(context, ownType.typeIdx());
+    static ResourceValue liftOwn(LiftLowerContext context, int index, ResolvedType ownType) {
+        var rt = resourceTypeOf(ownType);
         var h = requireHandle(handles(context).remove(index), index);
         requireResourceType(h, rt, index);
         if (h.numLends() != 0) {
@@ -1403,15 +1355,15 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Lifts a {@code borrow} handle, leaving the source handle in place. The caller keeps it,
-     * and only the right to use it for the duration of the call crosses over.
+     * Lifts a {@code borrow} handle, leaving the source handle in place. The caller keeps it, and
+     * only the right to use it for the duration of the call crosses the boundary.
      *
      * <p>Registering the source handle as a lender on the call's scope is what bounds that
-     * duration: until the call resolves, the handle counts as lent and {@link #liftOwn} will
-     * refuse to transfer it away.
+     * duration. Until the call resolves the handle counts as lent and {@link #liftOwn} will refuse
+     * to transfer it away.
      */
-    static ResourceValue liftBorrow(LiftLowerContext context, int index, BorrowType borrowType) {
-        var rt = resourceTypeOf(context, borrowType.typeIdx());
+    static ResourceValue liftBorrow(LiftLowerContext context, int index, ResolvedType borrowType) {
+        var rt = resourceTypeOf(borrowType);
         var h = requireHandle(handles(context).get(index), index);
         requireResourceType(h, rt, index);
         subtaskScope(context).addLender(h);
@@ -1419,23 +1371,23 @@ public final class CanonicalAbi {
     }
 
     /** Lowers an {@code own} handle by minting a fresh owning index in the destination. */
-    static int lowerOwn(LiftLowerContext context, ResourceValue value, OwnType ownType) {
-        var rt = resourceTypeOf(context, ownType.typeIdx());
+    static int lowerOwn(LiftLowerContext context, ResourceValue value, ResolvedType ownType) {
+        var rt = resourceTypeOf(ownType);
         return handles(context).add(rt, value.rep(), true, null);
     }
 
     /**
-     * Lowers a {@code borrow} handle, scoping it to the current call so that it must be
-     * dropped before that call may return.
+     * Lowers a {@code borrow} handle, scoping it to the current call so that it must be dropped
+     * before that call may return.
      *
      * <p>Lowering into the component that <em>implements</em> the resource type skips the table
-     * entirely and passes the representation itself. A component receiving a borrow of
-     * its own resource is handed a rep, not an index, and so must neither call {@code
-     * resource.rep} on it nor drop it. That is sound because the only thing such a handle could
-     * have been used for is recovering the rep it already is.
+     * entirely and passes the representation itself. A component receiving a borrow of its own
+     * resource is handed a rep, not an index, and so must neither call {@code resource.rep} on it
+     * nor drop it. That is sound because the only thing such a handle could have been used for is
+     * recovering the rep it already is.
      */
-    static int lowerBorrow(LiftLowerContext context, ResourceValue value, BorrowType borrowType) {
-        var rt = resourceTypeOf(context, borrowType.typeIdx());
+    static int lowerBorrow(LiftLowerContext context, ResourceValue value, ResolvedType borrowType) {
+        var rt = resourceTypeOf(borrowType);
         var handles = handles(context);
         if (rt.handleTable() == handles) {
             return value.rep();
@@ -1445,14 +1397,12 @@ public final class CanonicalAbi {
         return handles.add(rt, value.rep(), false, scope);
     }
 
-    /** Resolves an {@code own}/{@code borrow} type's index to the resource type it denotes. */
-    private static ResourceTypeRef resourceTypeOf(LiftLowerContext context, int typeIdx) {
-        var resolver =
-                Objects.requireNonNull(
-                        context.resourceTypes(),
-                        "lifting or lowering a resource handle requires a resource type resolver"
-                                + " in the context");
-        return resolver.resolveResourceType(typeIdx);
+    /**
+     * The resource type an {@code own}/{@code borrow} denotes, settled when the type was resolved
+     * against the space it was written in rather than looked up here.
+     */
+    private static ResourceTypeRef resourceTypeOf(ResolvedType type) {
+        return (ResourceTypeRef) type.resourceType();
     }
 
     private static HandleTable handles(LiftLowerContext context) {
@@ -1462,9 +1412,8 @@ public final class CanonicalAbi {
     }
 
     /**
-     * A handle table also holds waitables, waitable sets and error contexts, so an index
-     * naming one of those where a resource handle is expected has to trap rather than be
-     * misread.
+     * A handle table also holds waitables, waitable sets and error contexts, so an index naming one
+     * of those where a resource handle is expected has to trap rather than be misread.
      */
     private static ResourceState requireHandle(Object element, int index) {
         if (!(element instanceof ResourceState)) {
@@ -1510,9 +1459,9 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Bulk copies move through an intermediate {@code byte[]} because {@link Memory} exposes
-     * no memory-to-memory primitive. Chunking bounds that buffer instead of letting it scale
-     * with the list being copied.
+     * Bulk copies move through an intermediate {@code byte[]} because {@link Memory} exposes no
+     * memory-to-memory primitive. Chunking bounds that buffer instead of letting it scale with the
+     * list being copied.
      */
     private static final int COPY_CHUNK_BYTES = 64 * 1024;
 
@@ -1520,44 +1469,44 @@ public final class CanonicalAbi {
      * Whether a component function of type {@code funcType}'s values can move directly between
      * {@code caller} and {@code callee} rather than through the lift/lower trampoline. A
      * {@code false} result indicates that the caller should fall back to using
-     * {@link #liftFlatParams}/{@link #lowerFlatParams}. This rejects anything the transfer
-     * path does not yet model rather than trying to be exhaustive.
+     * {@link #liftFlatParams}/{@link #lowerFlatParams}. This rejects anything the transfer path
+     * does not yet model rather than trying to be exhaustive.
      *
-     * <p>Linear memory is required only where it is actually used. A function whose values
-     * all travel as core Wasm values (no string, no unbounded list, and neither the
-     * parameters nor the result spilling) never touches memory, so it transfers between
-     * contexts defined with no {@code memory} canon opt at all. That covers the shapes
-     * {@code canon lift}/{@code canon lower} take when declared with no options, which is
-     * common for functions over integers, {@code enum}s and payload-free {@code variant}s.
+     * <p>Linear memory is required only where it is actually used. A function whose values all
+     * travel as core Wasm values (no string, no unbounded list, and neither the parameters nor the
+     * result spilling) never touches memory, so it transfers between contexts defined with no
+     * {@code memory} canon opt at all. That covers the shapes
+     * {@code canon lift}/{@code canon lower} take when declared with no options, which is common
+     * for functions over integers, {@code enum}s and payload-free {@code variant}s.
      *
-     * @param caller the context the call arrives from, with parameters read from it and
+     * @param caller the context from which the call arrives, with parameters read from it and
      *     results written back into it
-     * @param callee the context the call is dispatched into, with parameters written into it
+     * @param callee the context into which the call is dispatched, with parameters written into it
      *     and results read from it
      * @param funcType the component function type both sides agree on
      */
     public static boolean canTransfer(
-            LiftLowerContext caller, LiftLowerContext callee, FuncType funcType) {
+            LiftLowerContext caller, LiftLowerContext callee, ResolvedFuncType funcType) {
         if (caller.isAsync() || callee.isAsync() || funcType.isAsync()) {
             return false;
         }
         if (caller.ptrType() != callee.ptrType()) {
             return false;
         }
-        List<run.endive.cm.types.ValType> paramTypes = paramValTypes(funcType);
-        List<run.endive.cm.types.ValType> resultTypes = resultValTypes(funcType);
-        for (run.endive.cm.types.ValType t : paramTypes) {
-            if (!Transferability.isSupported(caller.resolve(t))) {
+        List<ResolvedType> paramTypes = paramTypesOf(funcType);
+        List<ResolvedType> resultTypes = resultTypesOf(funcType);
+        for (ResolvedType t : paramTypes) {
+            if (!Transferability.isSupported(t)) {
                 return false;
             }
         }
-        for (run.endive.cm.types.ValType t : resultTypes) {
-            if (!Transferability.isSupported(caller.resolve(t))) {
+        for (ResolvedType t : resultTypes) {
+            if (!Transferability.isSupported(t)) {
                 return false;
             }
         }
         // Parameters move caller -> callee and results move callee -> caller, so each
-        // direction needs memory on both ends and a realloc on the receiving end — but only
+        // direction needs memory on both ends and a realloc on the receiving end, but only
         // if anything actually goes through memory.
         if (needsMemory(caller, paramTypes, MAX_FLAT_PARAMS)
                 && !canMoveThroughMemory(caller, callee)) {
@@ -1569,71 +1518,72 @@ public final class CanonicalAbi {
 
     /**
      * Whether component function type {@code funcType}'s values can be handed from {@code caller}
-     * to {@code callee} with no adapter at all. If true, the caller's flat core arguments
-     * can be passed to the callee's core function as they stand, and its core results returned
-     * without lifting.
+     * to {@code callee} with no adapter at all. If true, the caller's flat core arguments can be
+     * passed to the callee's core function as they stand, and its core results returned without
+     * lifting.
      *
-     * <p>True only when nothing reaches linear memory (no string, no unbounded list, and
-     * neither side spilling) and every flat slot survives untouched, which rules out
-     * {@code bool}, {@code char}, the narrow integers, sparse {@code flags} and every
-     * {@code variant}.
+     * <p>True only when nothing reaches linear memory (no string, no unbounded list, and neither
+     * side spilling) and every flat slot survives untouched, which rules out {@code bool},
+     * {@code char}, the narrow integers, sparse {@code flags} and every {@code variant}.
      *
-     * <p>This covers the values only. A caller acting on it must also confirm the callee has
-     * no post-return function to run. If it does, the values still need no work but the call
-     * itself still needs a wrapper. Where both hold, the callee's core function can be
-     * registered as the caller's import directly.
+     * <p>This covers the values only. A caller acting on it must also confirm the callee has no
+     * post-return function to run. If it does, the values still need no work but the call itself
+     * still needs a wrapper. Where both hold, the callee's core function can be registered as the
+     * caller's import directly.
      */
     public static boolean isIdentityTransfer(
-            LiftLowerContext caller, LiftLowerContext callee, FuncType funcType) {
+            LiftLowerContext caller, LiftLowerContext callee, ResolvedFuncType funcType) {
         if (!canTransfer(caller, callee, funcType)) {
             return false;
         }
-        List<run.endive.cm.types.ValType> paramTypes = paramValTypes(funcType);
-        List<run.endive.cm.types.ValType> resultTypes = resultValTypes(funcType);
+        List<ResolvedType> paramTypes = paramTypesOf(funcType);
+        List<ResolvedType> resultTypes = resultTypesOf(funcType);
         if (needsMemory(caller, paramTypes, MAX_FLAT_PARAMS)
                 || needsMemory(caller, resultTypes, MAX_FLAT_RESULTS)) {
             return false;
         }
-        for (run.endive.cm.types.ValType t : paramTypes) {
-            if (!Transferability.isFlatIdentity(caller.ptrType(), caller.resolve(t))) {
+        for (ResolvedType t : paramTypes) {
+            if (!Transferability.isFlatIdentity(caller.ptrType(), t)) {
                 return false;
             }
         }
-        for (run.endive.cm.types.ValType t : resultTypes) {
-            if (!Transferability.isFlatIdentity(caller.ptrType(), caller.resolve(t))) {
+        for (ResolvedType t : resultTypes) {
+            if (!Transferability.isFlatIdentity(caller.ptrType(), t)) {
                 return false;
             }
         }
         return true;
     }
 
-    private static List<run.endive.cm.types.ValType> paramValTypes(FuncType funcType) {
-        List<run.endive.cm.types.ValType> ts = new ArrayList<>(funcType.params().size());
-        for (LabelValType p : funcType.params()) {
-            ts.add(p.valType());
+    /** A function type's parameter types, in order. */
+    public static List<ResolvedType> paramTypesOf(ResolvedFuncType funcType) {
+        List<ResolvedType> ts = new ArrayList<>(funcType.params().size());
+        for (ResolvedFuncType.Param p : funcType.params()) {
+            ts.add(p.type());
         }
         return ts;
     }
 
-    private static List<run.endive.cm.types.ValType> resultValTypes(FuncType funcType) {
+    /** A function type's result type as a list, empty when it returns nothing. */
+    public static List<ResolvedType> resultTypesOf(ResolvedFuncType funcType) {
         return funcType.hasResult() ? List.of(funcType.result()) : List.of();
     }
 
     /**
-     * Whether values of component types {@code types} reach linear memory at all. Either the
-     * flat list exceeds {@code maxFlat} and spills into a tuple, or some value needs to be
-     * stored in memory with a pointer.
+     * Whether values of component types {@code types} reach linear memory at all. Either the flat
+     * list exceeds {@code maxFlat} and spills into a tuple, or some value needs to be stored in
+     * memory with a pointer.
      */
     private static boolean needsMemory(
-            LiftLowerContext context, List<run.endive.cm.types.ValType> types, int maxFlat) {
+            LiftLowerContext context, List<ResolvedType> types, int maxFlat) {
         if (types.isEmpty()) {
             return false;
         }
         if (flattenTypes(context, types).size() > maxFlat) {
             return true;
         }
-        for (run.endive.cm.types.ValType t : types) {
-            if (contains(context.resolve(t), CanonicalAbi::storedInMemory)) {
+        for (ResolvedType t : types) {
+            if (contains(t, CanonicalAbi::storedInMemory)) {
                 return true;
             }
         }
@@ -1641,10 +1591,10 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Whether a value of this type must be stored in memory, behind a pointer the destination
-     * has to allocate. A fixed-size list is stored inline and so needs no allocation of its
-     * own. Every other {@code list}, including the despecialized form of a {@code map}, is
-     * a (pointer, length) pair, as is a {@code string}.
+     * Whether a value of this type must be stored in memory, behind a pointer the destination has
+     * to allocate. A fixed-size list is stored inline and so needs no allocation of its own. Every
+     * other {@code list}, including the despecialized form of a {@code map}, is a (pointer, length)
+     * pair, as is a {@code string}.
      */
     private static boolean storedInMemory(ResolvedType type) {
         if (type.kind() == DefValType.Kind.STRING) {
@@ -1654,36 +1604,27 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Whether values can be read out of {@code source}'s memory and allocated into {@code
-     * dest}'s.
+     * Whether values can be read out of {@code source}'s memory and allocated into {@code dest}'s.
      */
     private static boolean canMoveThroughMemory(LiftLowerContext source, LiftLowerContext dest) {
         return source.memory() != null && dest.memory() != null && dest.realloc() != null;
     }
 
     /**
-     * Moves the value of type {@code type} at {@code sourcePointer} in {@code source}'s memory to {@code
-     * destPoints} in {@code dest}'s memory, without materializing it as a Java value.
+     * Moves the value of type {@code type} at {@code sourcePointer} in {@code source}'s memory to
+     * {@code destPoints} in {@code dest}'s memory, without materializing it as a Java value.
      *
-     * <p>Observably equivalent to {@code store(dest, load(source, sourcePointer, type), type, destPoints)}, with
-     * one deliberate exception: {@code f32}/{@code f64} NaN payloads are preserved rather
-     * than canonicalized, which the Canonical ABI explicitly permits ("hosts may instead
-     * choose to canonicalize to an arbitrary fixed NaN value, or even to the original value
-     * of the NaN before lifting") and which is what lets float-bearing aggregates copy in
-     * bulk. Every trap the lift path raises is raised here too.
+     * <p>Observably equivalent to
+     * {@code store(dest, load(source, sourcePointer, type), type, destPoints)}, with one deliberate
+     * exception. {@code f32} and {@code f64} NaN payloads are preserved rather than canonicalized,
+     * which the Canonical ABI explicitly permits ("hosts may instead choose to canonicalize to an
+     * arbitrary fixed NaN value, or even to the original value of the NaN before lifting") and
+     * which is what lets float-bearing aggregates copy in bulk. Every trap the lift path raises is
+     * raised here too.
      *
      * <p>Both contexts must agree on {@link LiftLowerContext#ptrType()} and {@code dest} must
      * supply a {@code realloc} if {@code type} contains a string or an unbounded list.
      */
-    public static void transfer(
-            LiftLowerContext source,
-            LiftLowerContext dest,
-            int sourcePointer,
-            int destPoints,
-            DefValType type) {
-        transfer(source, dest, sourcePointer, destPoints, source.resolve(type));
-    }
-
     public static void transfer(
             LiftLowerContext source,
             LiftLowerContext dest,
@@ -1699,8 +1640,9 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Transfers a function's flat core <em>parameter values</em> {@code flatArgs} of types {@code
-     * types} from {@code source} to {@code dest}, returning the destination's flat parameters.
+     * Transfers a function's flat core <em>parameter values</em> {@code flatArgs} of types
+     * {@code types} from {@code source} to {@code dest}, returning the destination's flat
+     * parameters.
      *
      * @see #transfer
      */
@@ -1708,18 +1650,18 @@ public final class CanonicalAbi {
             LiftLowerContext source,
             LiftLowerContext dest,
             long[] flatArgs,
-            List<run.endive.cm.types.ValType> types) {
+            List<ResolvedType> types) {
         requireTransferable(source, dest);
         return transferFlatValues(
                 source, dest, MAX_FLAT_PARAMS, new CoreValues(flatArgs), types, null);
     }
 
     /**
-     * Transfers a function's flat core <em>results</em> {@code flatResults} of types {@code
-     * types} from {@code source} to {@code dest}. When the results spill into linear memory,
-     * {@code outParam}'s first element is the destination's caller-provided spill pointer
-     * and no flat values are returned. When it is null, destination storage is freshly
-     * allocated and the returned list is the spill pointer.
+     * Transfers a function's flat core <em>results</em> {@code flatResults} of types {@code types}
+     * from {@code source} to {@code dest}. When the results spill into linear memory,
+     * {@code outParam}'s first element is the destination's caller-provided spill pointer and no
+     * flat values are returned. When it is null, destination storage is freshly allocated and the
+     * returned list is the spill pointer.
      *
      * @see #transfer
      */
@@ -1727,16 +1669,14 @@ public final class CanonicalAbi {
             LiftLowerContext source,
             LiftLowerContext dest,
             long[] flatResults,
-            List<run.endive.cm.types.ValType> types,
+            List<ResolvedType> types,
             long[] outParam) {
         requireTransferable(source, dest);
         return transferFlatValues(
                 source, dest, MAX_FLAT_RESULTS, new CoreValues(flatResults), types, outParam);
     }
 
-    /**
-     * Rejects context pairs the transfer path cannot serve.
-     */
+    /** Rejects context pairs the transfer path cannot serve. */
     static void requireTransferable(LiftLowerContext source, LiftLowerContext dest) {
         if (source.ptrType() != dest.ptrType()) {
             throw new IllegalArgumentException(
@@ -1752,9 +1692,9 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Transfers a value that is known not to be wholly bitwise copyable, dispatching on its
-     * kind. Source and destination offsets stay equal throughout. The two memories lay
-     * the value out identically, so only the base pointers differ.
+     * Transfers a value that is known not to be wholly bitwise copyable, dispatching on its kind.
+     * Source and destination offsets stay equal throughout. The two memories lay the value out
+     * identically, so only the base pointers differ.
      */
     static void transferValue(
             LiftLowerContext source,
@@ -1909,14 +1849,14 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Transfers a variant, validating the discriminant and then only the payload of the case
-     * it selects. The bytes of the wider cases the source did not use are left as the
-     * destination allocator produced them, exactly as {@code store} leaves them.
+     * Transfers a variant, validating the discriminant and then only the payload of the case it
+     * selects. The bytes of the wider cases the source did not use are left as the destination
+     * allocator produced them, exactly as {@code store} leaves them.
      *
-     * <p>The payload offset is computed relative to the value's own base rather than by
-     * aligning the absolute pointer as {@code load}/{@code store} do. The two agree whenever
-     * the pointer is aligned to the variant's alignment, which the Canonical ABI requires,
-     * and only the relative form keeps the source and destination offsets identical.
+     * <p>The payload offset is computed relative to the value's own base rather than by aligning
+     * the absolute pointer as {@code load}/{@code store} do. The two agree whenever the pointer is
+     * aligned to the variant's alignment, which the Canonical ABI requires, and only the relative
+     * form keeps the source and destination offsets identical.
      */
     private static void transferVariant(
             LiftLowerContext source,
@@ -1968,12 +1908,12 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Validates a source list's range, allocates the matching range in the destination and
-     * moves the elements into it, returning the destination pointer.
+     * Validates a source list's range, allocates the matching range in the destination and moves
+     * the elements into it, returning the destination pointer.
      *
-     * <p>The length is treated as unsigned, so a list with more than {@code 2^31}
-     * elements traps on the byte-length check. {@link #loadListFromRange} computes the same
-     * product with a signed length and lets such a list through as if it were empty.
+     * <p>The length is treated as unsigned, so a list with more than {@code 2^31} elements traps on
+     * the byte-length check. {@link #loadListFromRange} computes the same product with a signed
+     * length and lets such a list through as if it were empty.
      */
     static int transferListIntoRange(
             LiftLowerContext source,
@@ -2002,8 +1942,8 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Moves {@code length} elements. When the element type copies verbatim the whole block
-     * becomes one bulk copy.
+     * Moves {@code length} elements. When the element type copies verbatim the whole block becomes
+     * one bulk copy.
      */
     private static void transferListElements(
             LiftLowerContext source,
@@ -2038,15 +1978,15 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Moves a string's bytes into a fresh destination allocation, transcoding only when the
-     * two encodings disagree.
+     * Moves a string's bytes into a fresh destination allocation, transcoding only when the two
+     * encodings disagree.
      *
-     * <p>When the source bytes are already in the destination's encoding they are validated
-     * in place and copied with no decode, no re-encode, and no lifting to {@link String}. That
-     * covers the common case of two modules that agreed on UTF-8. The {@code latin1+utf16}
-     * pairings are handled at the byte level too, because a tagged UTF-16 source still has to
-     * be re-checked against Latin-1. Everything else decodes to a {@link CharBuffer} and
-     * re-encodes from it, still without a life to {@code String}.
+     * <p>When the source bytes are already in the destination's encoding they are validated in
+     * place and copied with no decode, no re-encode, and no lifting to {@link String}. That covers
+     * the common case of two modules that agreed on UTF-8. The {@code latin1+utf16} pairings are
+     * handled at the byte level too, because a tagged UTF-16 source still has to be re-checked
+     * against Latin-1. Everything else decodes to a {@link CharBuffer} and re-encodes from it,
+     * still without a life to {@code String}.
      */
     static PointerAndCodeUnits transferStringIntoRange(
             LiftLowerContext source, LiftLowerContext dest, int pointer, long taggedCodeUnits) {
@@ -2067,7 +2007,7 @@ public final class CanonicalAbi {
                 return transferUtf16ToLatin1OrUtf16(dest, bytes);
             }
         } else if (destEncoding == StringEncoding.LATIN1_UTF16) {
-            // A Latin-1 source can only come from a latin1+utf16 context; every byte is
+            // A Latin-1 source can only come from a latin1+utf16 context, so every byte is
             // valid and fits, so it stays untagged and copies as-is.
             return new PointerAndCodeUnits(allocateAndWrite(dest, 2, bytes), bytes.length);
         }
@@ -2171,9 +2111,8 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Accepts exactly what a strict {@link StandardCharsets#UTF_16LE} decoder accepts.
-     * Every high surrogate must be followed by a low surrogate, and no low surrogate may
-     * stand alone.
+     * Accepts exactly what a strict {@link StandardCharsets#UTF_16LE} decoder accepts. Every high
+     * surrogate must be followed by a low surrogate, and no low surrogate may stand alone.
      */
     static void validateUtf16Le(byte[] bytes) {
         int i = 0;
@@ -2208,25 +2147,24 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Transfers a flat parameter or result list. Because neither context is async (since
-     * async is not supported yet) and both share a pointer width, the two sides always
-     * agree on whether the values spill into linear memory. Either both pass them flat,
-     * or both pass a pointer to the same tuple layout, which reduces to a single
-     * {@link #transfer} of that tuple.
+     * Transfers a flat parameter or result list. Because neither context is async (since async is
+     * not supported yet) and both share a pointer width, the two sides always agree on whether the
+     * values spill into linear memory. Either both pass them flat, or both pass a pointer to the
+     * same tuple layout, which reduces to a single {@link #transfer} of that tuple.
      */
     private static long[] transferFlatValues(
             LiftLowerContext source,
             LiftLowerContext dest,
             int maxFlat,
             CoreValues coreValues,
-            List<run.endive.cm.types.ValType> types,
+            List<ResolvedType> types,
             long[] outParam) {
         if (types.isEmpty()) {
             return EMPTY_CORE_VALUES;
         }
         List<ValType> flatTypes = flattenTypes(source, types);
         if (flatTypes.size() > maxFlat) {
-            var tupleType = resolvedTupleOf(source, types);
+            var tupleType = ResolvedType.tupleOf(types);
             return transferSpilledValues(
                     source,
                     dest,
@@ -2238,17 +2176,16 @@ public final class CanonicalAbi {
                             transfer(s, d, sourcePointer, destPointer, tupleType));
         }
         LongBuffer out = new LongBuffer();
-        for (run.endive.cm.types.ValType t : types) {
-            transferFlat(source, dest, coreValues, out, source.resolve(t));
+        for (ResolvedType t : types) {
+            transferFlat(source, dest, coreValues, out, t);
         }
         return out.toArray();
     }
 
     /**
-     * Handles the spilled case shared by the interpreted and compiled transfer paths. Reads
-     * the source's spill pointer, obtains the destination's (freshly allocated, or the
-     * caller-provided out-param), validates both, and hands them to {@code step} to move the
-     * tuple across.
+     * Handles the spilled case shared by the interpreted and compiled transfer paths. Reads the
+     * source's spill pointer, obtains the destination's (freshly allocated, or the caller-provided
+     * out-param), validates both, and hands them to {@code step}, which moves the tuple.
      */
     static long[] transferSpilledValues(
             LiftLowerContext source,
@@ -2287,12 +2224,12 @@ public final class CanonicalAbi {
     /**
      * Transfers one value's worth of flat core values from {@code coreValues} to {@code out}.
      *
-     * <p>Scalars mostly pass straight through, but not unconditionally: lifting narrows
-     * {@code u8}/{@code u16} to their type's width and sign-extends {@code s8}/{@code s16}
-     * before lowering re-encodes them, so a source core value with bits set above the type's
-     * width must be normalized here rather than forwarded. {@code bool} collapses to
-     * {@code 0}/{@code 1}, {@code char} is validated, {@code flags} drops its slack bits,
-     * and {@code f32}/{@code f64} keep their exact bit pattern.
+     * <p>Scalars mostly pass straight through, but not unconditionally. Lifting narrows
+     * {@code u8}/{@code u16} to their type's width and sign-extends {@code s8}/{@code s16} before
+     * lowering re-encodes them, so a source core value with bits set above the type's width must be
+     * normalized here rather than forwarded. {@code bool} collapses to {@code 0}/{@code 1},
+     * {@code char} is validated, {@code flags} drops its slack bits, and {@code f32}/{@code f64}
+     * keep their exact bit pattern.
      */
     static void transferFlat(
             LiftLowerContext source,
@@ -2397,10 +2334,10 @@ public final class CanonicalAbi {
     }
 
     /**
-     * Transfers a variant across the joined flat layout, consuming and producing exactly the
-     * slots {@code flatten_variant} defines regardless of which case is present. The source
-     * cursor skips the joined slots the chosen case left unused, and the destination pads
-     * them with {@code 0}, mirroring {@link #liftFlatVariant} and {@link #lowerFlatVariant}.
+     * Transfers a variant across the joined flat layout, consuming and producing exactly the slots
+     * {@code flatten_variant} defines regardless of which case is present. The source cursor skips
+     * the joined slots the chosen case left unused, and the destination pads them with {@code 0},
+     * mirroring {@link #liftFlatVariant} and {@link #lowerFlatVariant}.
      */
     private static void transferFlatVariant(
             LiftLowerContext source,

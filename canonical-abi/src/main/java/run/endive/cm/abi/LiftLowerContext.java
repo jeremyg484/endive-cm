@@ -1,81 +1,63 @@
 package run.endive.cm.abi;
 
-import static java.util.Objects.requireNonNull;
-
-import java.util.IdentityHashMap;
-import java.util.Map;
-import run.endive.cm.types.DefValType;
 import run.endive.cm.types.PointerType;
-import run.endive.cm.types.ResolvedType;
-import run.endive.cm.types.TypeResolver;
-import run.endive.cm.types.TypeSpace;
-import run.endive.cm.types.ValType;
 import run.endive.runtime.Memory;
 
+/**
+ * Everything a lift or lower needs beyond the values and their types. That means the memory the two
+ * sides share, how strings are encoded, where handles live, and which call owns the transfer.
+ *
+ * <p>Notably absent is any type index space. A type reaches the Canonical ABI already resolved,
+ * against the space in which it was written, so nothing here has to say what an index means.
+ */
 public final class LiftLowerContext {
 
     private final Memory memory;
     private final PointerType ptrType;
     private final StringEncoding stringEncoding;
-    private final TypeResolver typeResolver;
-    private final TypeSpace typeSpace;
-    private final Map<DefValType, ResolvedType> resolvedTypes;
     private final PostReturn postReturn;
     private final Realloc realloc;
     private final boolean async;
     private final Callback callback;
     private final HandleTable handles;
-    private final ResourceTypeRef.Resolver resourceTypes;
     private final BorrowScope borrowScope;
 
     private LiftLowerContext(
             Memory memory,
             PointerType ptrType,
             StringEncoding stringEncoding,
-            TypeResolver typeResolver,
-            TypeSpace typeSpace,
-            Map<DefValType, ResolvedType> resolvedTypes,
             PostReturn postReturn,
             Realloc realloc,
             boolean async,
             Callback callback,
             HandleTable handles,
-            ResourceTypeRef.Resolver resourceTypes,
             BorrowScope borrowScope) {
         this.memory = memory;
         this.ptrType = ptrType == null ? PointerType.I32 : ptrType;
         this.stringEncoding = stringEncoding == null ? StringEncoding.UTF8 : stringEncoding;
-        this.typeResolver = requireNonNull(typeResolver, "typeResolver");
-        this.typeSpace = typeSpace == null ? TypeSpace.of(this.typeResolver) : typeSpace;
-        this.resolvedTypes = resolvedTypes == null ? new IdentityHashMap<>() : resolvedTypes;
         this.postReturn = postReturn;
         this.realloc = realloc;
         this.async = async;
         this.callback = callback;
         this.handles = handles;
-        this.resourceTypes = resourceTypes;
         this.borrowScope = borrowScope;
     }
 
     /**
      * This context with its borrow scope replaced. The rest of a context is fixed by the
-     * {@code canonopt}s of a canonical definition and so is built once at link time, but the
-     * scope belongs to an individual call and has to be supplied per invocation.
+     * {@code canonopt}s of a canonical definition and so is built once at link time, but the scope
+     * belongs to an individual call and has to be supplied per invocation.
      */
     public LiftLowerContext withBorrowScope(BorrowScope borrowScope) {
         return new LiftLowerContext(
                 memory,
                 ptrType,
                 stringEncoding,
-                typeResolver,
-                typeSpace,
-                resolvedTypes,
                 postReturn,
                 realloc,
                 async,
                 callback,
                 handles,
-                resourceTypes,
                 borrowScope);
     }
 
@@ -89,10 +71,6 @@ public final class LiftLowerContext {
 
     public StringEncoding stringEncoding() {
         return stringEncoding;
-    }
-
-    public TypeSpace typeSpace() {
-        return typeSpace;
     }
 
     public PostReturn postReturn() {
@@ -115,31 +93,8 @@ public final class LiftLowerContext {
         return handles;
     }
 
-    public ResourceTypeRef.Resolver resourceTypes() {
-        return resourceTypes;
-    }
-
     public BorrowScope borrowScope() {
         return borrowScope;
-    }
-
-    /**
-     * Resolves {@code t} against this context's space, following every type index once so the
-     * result can be laid out and walked without a resolver.
-     */
-    public ResolvedType resolve(DefValType t) {
-        if (t == null) {
-            return null;
-        }
-        return resolvedTypes.computeIfAbsent(t, node -> ResolvedType.of(node, typeSpace));
-    }
-
-    /** Resolves {@code valType} against this context's space. */
-    public ResolvedType resolve(ValType valType) {
-        TypeSpace.Resolved resolved = typeSpace.resolve(valType);
-        return resolved.space() == typeSpace
-                ? resolve(resolved.type())
-                : ResolvedType.of(resolved.type(), resolved.space());
     }
 
     public static Builder builder() {
@@ -150,14 +105,11 @@ public final class LiftLowerContext {
         private Memory memory;
         private PointerType ptrType;
         private StringEncoding stringEncoding;
-        private TypeResolver typeResolver;
-        private TypeSpace typeSpace;
         private PostReturn postReturn;
         private Realloc realloc;
         private boolean async;
         private Callback callback;
         private HandleTable handles;
-        private ResourceTypeRef.Resolver resourceTypes;
         private BorrowScope borrowScope;
 
         private Builder() {}
@@ -174,16 +126,6 @@ public final class LiftLowerContext {
 
         public Builder withStringEncoding(StringEncoding stringEncoding) {
             this.stringEncoding = stringEncoding;
-            return this;
-        }
-
-        public Builder withTypeResolver(TypeResolver typeResolver) {
-            this.typeResolver = typeResolver;
-            return this;
-        }
-
-        public Builder withTypeSpace(TypeSpace typeSpace) {
-            this.typeSpace = typeSpace;
             return this;
         }
 
@@ -212,11 +154,6 @@ public final class LiftLowerContext {
             return this;
         }
 
-        public Builder withResourceTypes(ResourceTypeRef.Resolver resourceTypes) {
-            this.resourceTypes = resourceTypes;
-            return this;
-        }
-
         public Builder withBorrowScope(BorrowScope borrowScope) {
             this.borrowScope = borrowScope;
             return this;
@@ -227,15 +164,11 @@ public final class LiftLowerContext {
                     memory,
                     ptrType,
                     stringEncoding,
-                    typeResolver,
-                    typeSpace,
-                    null,
                     postReturn,
                     realloc,
                     async,
                     callback,
                     handles,
-                    resourceTypes,
                     borrowScope);
         }
     }

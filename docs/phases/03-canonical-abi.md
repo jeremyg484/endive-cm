@@ -1,7 +1,26 @@
 # Phase 3: Canonical ABI
 
-**Status**: Not started
+**Status**: Complete for the sync ABI
 **Depends on**: Phase 0 (Type Model)
+
+Every deliverable below is implemented. Layout, lifting, lowering, realloc and
+all three string encodings are done, and the exit criteria are met for every
+type the sync ABI reaches.
+
+Three things were added beyond the original plan:
+
+- A **transfer** path, which moves a value from one instance's memory to
+  another's without materialising it as a Java object in between. `TransferPlan`
+  and `FlatTransferPlan` compile the decisions once per function type rather
+  than re-deciding them per call.
+- **Borrow scopes**, which hold a lent handle to account for the duration of a
+  call so the caller cannot give the resource away while the callee still has a
+  borrow of it.
+- **Handle tables**, which the runtime owns but which the ABI mints into and
+  drops from.
+
+The async built-ins are represented in the type model but are not implemented
+here.
 
 ## Goal
 
@@ -73,8 +92,7 @@ All three must be implemented.
 - **Layout computation**: unit tests for size, alignment, and flattening for
   all type forms
 - **Round-trip**: lower a Java value, lift it back, verify equality
-- **Cross-validation**: compare against the Python reference implementation
-  from the Component Model spec repository
+- **Cross-validation**: the generated spec suites exercise this end to end
 - **Edge cases**: empty strings, empty lists, deeply nested records, variant
   discriminants at alignment boundaries, flags with >32 bits
 

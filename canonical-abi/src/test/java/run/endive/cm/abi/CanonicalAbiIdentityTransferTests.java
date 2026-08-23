@@ -29,7 +29,7 @@ import run.endive.wasm.types.MemoryLimits;
 class CanonicalAbiIdentityTransferTests {
 
     private static LiftLowerContext memoryless(TransferTestSupport.Types types) {
-        return LiftLowerContext.builder().withTypeResolver(types).build();
+        return LiftLowerContext.builder().build();
     }
 
     private static LabelValType param(String label, ValType t) {
@@ -58,8 +58,8 @@ class CanonicalAbiIdentityTransferTests {
     // --- accepted -----------------------------------------------------------------------
 
     /**
-     * Each entry is a function the predicate must accept, paired with flat core arguments in
-     * the canonical (zero-extended) form that the Canonical ABI produces.
+     * Each entry is a function the predicate must accept, paired with flat core arguments in the
+     * canonical (zero-extended) form that the Canonical ABI produces.
      */
     private static Map<String, Supplier<Accepted>> accepted() {
         Map<String, Supplier<Accepted>> cases = new LinkedHashMap<>();
@@ -158,8 +158,11 @@ class CanonicalAbiIdentityTransferTests {
     @MethodSource("acceptedCases")
     void acceptsFunctionsWhoseValuesNeedNoWork(String name, Accepted sample) {
         assertThat(
-                        ValueTransfer.isIdentityTransfer(
-                                memoryless(sample.types), memoryless(sample.types), sample.ft))
+                        new AbiHelper(sample.types)
+                                .isIdentityTransfer(
+                                        memoryless(sample.types),
+                                        memoryless(sample.types),
+                                        sample.ft))
                 .isTrue();
     }
 
@@ -170,7 +173,9 @@ class CanonicalAbiIdentityTransferTests {
         var callee = memoryless(sample.types);
 
         long[] transferred =
-                ValueTransfer.compile(caller, callee, sample.ft).transferParams(sample.args);
+                new AbiHelper(sample.types)
+                        .compile(caller, callee, sample.ft)
+                        .transferParams(sample.args);
 
         assertThat(transferred).isEqualTo(sample.args);
     }
@@ -192,7 +197,7 @@ class CanonicalAbiIdentityTransferTests {
                         PrimValType.S16);
 
         for (PrimValType t : needWork) {
-            assertThat(ValueTransfer.isIdentityTransfer(caller, callee, func(null, prim(t))))
+            assertThat(new AbiHelper(types).isIdentityTransfer(caller, callee, func(null, prim(t))))
                     .as("%s needs masking, sign extension or validation", t.kind())
                     .isFalse();
         }
@@ -200,18 +205,24 @@ class CanonicalAbiIdentityTransferTests {
 
     @Test
     void rejectsSparseFlagsButAcceptsAFullSlot() {
-        // In memory, 8 labels fill their byte and copy verbatim; flattened, they sit in an
+        // In memory 8 labels fill their byte and copy verbatim. Flattened, they sit in an
         // i32 with 24 slack bits that lifting discards.
         var types = new TransferTestSupport.Types();
         var caller = memoryless(types);
         var callee = memoryless(types);
 
-        assertThat(ValueTransfer.isIdentityTransfer(caller, callee, func(null, flags(types, 5))))
+        assertThat(
+                        new AbiHelper(types)
+                                .isIdentityTransfer(caller, callee, func(null, flags(types, 5))))
                 .isFalse();
-        assertThat(ValueTransfer.isIdentityTransfer(caller, callee, func(null, flags(types, 8))))
+        assertThat(
+                        new AbiHelper(types)
+                                .isIdentityTransfer(caller, callee, func(null, flags(types, 8))))
                 .as("bitwise-copyable in memory, but not flat-identity")
                 .isFalse();
-        assertThat(ValueTransfer.isIdentityTransfer(caller, callee, func(null, flags(types, 32))))
+        assertThat(
+                        new AbiHelper(types)
+                                .isIdentityTransfer(caller, callee, func(null, flags(types, 32))))
                 .isTrue();
     }
 
@@ -223,8 +234,8 @@ class CanonicalAbiIdentityTransferTests {
         var caller = memoryless(types);
         var callee = memoryless(types);
 
-        assertThat(ValueTransfer.canTransfer(caller, callee, ft)).isTrue();
-        assertThat(ValueTransfer.isIdentityTransfer(caller, callee, ft)).isFalse();
+        assertThat(new AbiHelper(types).canTransfer(caller, callee, ft)).isTrue();
+        assertThat(new AbiHelper(types).isIdentityTransfer(caller, callee, ft)).isFalse();
     }
 
     @Test
@@ -235,10 +246,12 @@ class CanonicalAbiIdentityTransferTests {
         var list = types.add(ListType.builder().withElementType(prim(PrimValType.U32)).build());
 
         assertThat(
-                        ValueTransfer.isIdentityTransfer(
-                                caller, callee, func(null, prim(PrimValType.STRING))))
+                        new AbiHelper(types)
+                                .isIdentityTransfer(
+                                        caller, callee, func(null, prim(PrimValType.STRING))))
                 .isFalse();
-        assertThat(ValueTransfer.isIdentityTransfer(caller, callee, func(null, list))).isFalse();
+        assertThat(new AbiHelper(types).isIdentityTransfer(caller, callee, func(null, list)))
+                .isFalse();
     }
 
     @Test
@@ -251,7 +264,7 @@ class CanonicalAbiIdentityTransferTests {
         for (int i = 0; i < manyParams.length; i++) {
             manyParams[i] = prim(PrimValType.U32);
         }
-        assertThat(ValueTransfer.isIdentityTransfer(caller, callee, func(null, manyParams)))
+        assertThat(new AbiHelper(types).isIdentityTransfer(caller, callee, func(null, manyParams)))
                 .as("parameters spill into memory")
                 .isFalse();
 
@@ -262,7 +275,7 @@ class CanonicalAbiIdentityTransferTests {
                         .addField(param("a", prim(PrimValType.U32)))
                         .addField(param("b", prim(PrimValType.U32)))
                         .build();
-        assertThat(ValueTransfer.isIdentityTransfer(caller, callee, func(types.add(wide))))
+        assertThat(new AbiHelper(types).isIdentityTransfer(caller, callee, func(types.add(wide))))
                 .as("result spills into memory")
                 .isFalse();
     }
@@ -273,25 +286,20 @@ class CanonicalAbiIdentityTransferTests {
         var ft = func(prim(PrimValType.U32), prim(PrimValType.U32));
         var async =
                 LiftLowerContext.builder()
-                        .withTypeResolver(types)
                         .withMemory(new ByteArrayMemory(new MemoryLimits(1)))
                         .withAsync(true)
                         .build();
-        var wide =
-                LiftLowerContext.builder()
-                        .withTypeResolver(types)
-                        .withPtrType(PointerType.I64)
-                        .build();
+        var wide = LiftLowerContext.builder().withPtrType(PointerType.I64).build();
 
-        assertThat(ValueTransfer.isIdentityTransfer(memoryless(types), async, ft)).isFalse();
-        assertThat(ValueTransfer.isIdentityTransfer(memoryless(types), wide, ft)).isFalse();
+        assertThat(new AbiHelper(types).isIdentityTransfer(memoryless(types), async, ft)).isFalse();
+        assertThat(new AbiHelper(types).isIdentityTransfer(memoryless(types), wide, ft)).isFalse();
     }
 
     @Test
     void identityHoldsOnlyToTheWidthOfAnI32Slot() {
         var types = new TransferTestSupport.Types();
         var ft = func(null, prim(PrimValType.U32));
-        var transfer = ValueTransfer.compile(memoryless(types), memoryless(types), ft);
+        var transfer = new AbiHelper(types).compile(memoryless(types), memoryless(types), ft);
 
         long signExtended = -1L; // what InterpreterMachine pushes for i32.const -1
         long[] transferred = transfer.transferParams(new long[] {signExtended});

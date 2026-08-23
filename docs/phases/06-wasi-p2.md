@@ -4,6 +4,15 @@
 **Depends on**: Phase 5 (Instantiation), Phase 0 (Type Model),
 Phase 3 (Canonical ABI)
 
+The runtime support this needs is in place. Phase 5 is complete for the sync
+ABI, which is the level WASI P2 requires, and resources and handle tables work.
+This is the next major phase of work.
+
+Two things it will want that do not exist yet. Phase 4 has not started, so
+bindings would have to be written by hand until it does. And imports are
+supplied to the linker explicitly rather than resolved from the store, so a WASI
+host will be handed over as an explicit map of instances.
+
 ## Goal
 
 Implement WASI Preview 2 interfaces so that components targeting

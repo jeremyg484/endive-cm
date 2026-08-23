@@ -77,12 +77,18 @@ CI (`.github/workflows/ci.yml`) runs on every push.
 
 ## Phases
 
-| Phase | Name | Module | Document |
-|-------|------|--------|----------|
-| 0 | Type Model Foundation | `types` | [00-type-model.md](phases/00-type-model.md) |
-| 1 | Binary Parser | `parser` | [01-binary-parser.md](phases/01-binary-parser.md) |
-| 2 | wasm-tools Integration | `wasm-tools` | [02-wasm-tools.md](phases/02-wasm-tools.md) |
-| 3 | Canonical ABI | `canonical-abi` | [03-canonical-abi.md](phases/03-canonical-abi.md) |
-| 4 | WIT Bindgen | `bindgen` | [04-wit-bindgen.md](phases/04-wit-bindgen.md) |
-| 5 | Component Instantiation | `runtime` | [05-instantiation.md](phases/05-instantiation.md) |
-| 6 | WASI Preview 2 | `wasi-p2` | [06-wasi-p2.md](phases/06-wasi-p2.md) |
+| Phase | Name | Module | Status | Document |
+|-------|------|--------|--------|----------|
+| 0 | Type Model Foundation | `types` | Complete | [00-type-model.md](phases/00-type-model.md) |
+| 1 | Binary Parser | `parser` | Complete but for gated sections | [01-binary-parser.md](phases/01-binary-parser.md) |
+| 2 | wasm-tools Integration | `wasm-tools` | In progress | [02-wasm-tools.md](phases/02-wasm-tools.md) |
+| 3 | Canonical ABI | `canonical-abi` | Complete for the sync ABI | [03-canonical-abi.md](phases/03-canonical-abi.md) |
+| 4 | WIT Bindgen | `bindgen` | Not started | [04-wit-bindgen.md](phases/04-wit-bindgen.md) |
+| 5 | Component Instantiation | `runtime` | Complete for the sync ABI | [05-instantiation.md](phases/05-instantiation.md) |
+| 6 | WASI Preview 2 | `wasi-p2` | Not started | [06-wasi-p2.md](phases/06-wasi-p2.md) |
+
+Async is not implemented anywhere. The type model and the parser both carry the
+async definitions, and the runtime rejects them.
+
+`docs/misc.md` holds findings that shaped the implementation but do not belong
+to any one phase.

@@ -17,8 +17,8 @@ import run.endive.runtime.Memory;
 import run.endive.wasm.types.MemoryLimits;
 
 /**
- * Shared scaffolding for the transfer tests: a type table, bump-allocating contexts, and the
- * differential assertions that hold the transfer path to the lift/lower pair it replaces.
+ * Shared scaffolding for the transfer tests. Provides a type table, bump-allocating contexts, and
+ * the differential assertions that hold the transfer path to the lift/lower pair it replaces.
  */
 final class TransferTestSupport {
 
@@ -61,7 +61,6 @@ final class TransferTestSupport {
                 .withMemory(memory)
                 .withPtrType(PointerType.I32)
                 .withStringEncoding(encoding)
-                .withTypeResolver(resolver)
                 .withRealloc(realloc)
                 .build();
     }
@@ -71,12 +70,12 @@ final class TransferTestSupport {
     }
 
     /**
-     * Assert that transferring a value produces the same result as lifting it out of
-     * the source and lowering it into an identically configured destination.
+     * Assert that transferring a value produces the same result as lifting it out of the source and
+     * lowering it into an identically configured destination.
      *
      * <p>Byte equality holds here because the source is written into a zeroed memory, so the
-     * padding the transfer path copies is zero, which is also what the destination allocator
-     * hands back.
+     * padding the transfer path copies is zero, which is also what the destination allocator hands
+     * back.
      */
     static void assertTransferMatchesLiftLower(
             Types types,
@@ -88,13 +87,13 @@ final class TransferTestSupport {
         var dst = newContext(types, dstEncoding);
         var reference = newContext(types, dstEncoding);
 
-        CanonicalAbi.store(src, v, t, 0);
-        CanonicalAbi.transfer(src, dst, 0, 0, t);
-        CanonicalAbi.store(reference, CanonicalAbi.load(src, 0, t), t, 0);
+        new AbiHelper(types).store(src, v, t, 0);
+        new AbiHelper(types).transfer(src, dst, 0, 0, t);
+        new AbiHelper(types).store(reference, new AbiHelper(types).load(src, 0, t), t, 0);
 
-        assertThat(CanonicalAbi.load(dst, 0, t))
+        assertThat(new AbiHelper(types).load(dst, 0, t))
                 .as("value read back from the destination")
-                .isEqualTo(CanonicalAbi.load(reference, 0, t));
+                .isEqualTo(new AbiHelper(types).load(reference, 0, t));
         assertMemoryEquals(dst.memory(), reference.memory());
     }
 
@@ -113,9 +112,10 @@ final class TransferTestSupport {
         var interpreted = newContext(types, dstEncoding);
         var compiled = newContext(types, dstEncoding);
 
-        CanonicalAbi.store(src, v, t, 0);
-        CanonicalAbi.transfer(src, interpreted, 0, 0, t);
-        TransferPlan.compile(PointerType.I32, src.resolve(t)).run(src, compiled, 0, 0);
+        new AbiHelper(types).store(src, v, t, 0);
+        new AbiHelper(types).transfer(src, interpreted, 0, 0, t);
+        TransferPlan.compile(PointerType.I32, new AbiHelper(types).resolve(t))
+                .run(src, compiled, 0, 0);
 
         assertMemoryEquals(compiled.memory(), interpreted.memory());
     }

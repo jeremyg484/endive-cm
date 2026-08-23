@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import run.endive.log.Logger;
 import run.endive.log.SystemLogger;
@@ -37,7 +38,7 @@ public final class ComponentValidate {
 
     private static final WasmModule MODULE = WasmToolsModule.load();
 
-    public static void validate(InputStream is) {
+    public static void validate(InputStream is, String... features) {
         try (var stdinStream = new ByteArrayInputStream(new byte[0]);
                 var stdoutStream = new ByteArrayOutputStream();
                 var stderrStream = new ByteArrayOutputStream();
@@ -52,13 +53,19 @@ public final class ComponentValidate {
             Path inputFile = inputDir.resolve("input.wasm");
             Files.write(inputFile, is.readAllBytes());
 
+            List<String> args = new ArrayList<>(List.of("wasm-tools", "validate"));
+            if (features != null && features.length > 0) {
+                args.add("--features=" + String.join(",", features));
+            }
+            args.add(inputFile.toString());
+
             var options =
                     WasiOptions.builder()
                             .withStdin(stdinStream, false)
                             .withStdout(stdoutStream, false)
                             .withStderr(stderrStream, false)
                             .withDirectory(inputDir.toString(), inputDir)
-                            .withArguments(List.of("wasm-tools", "validate", inputFile.toString()))
+                            .withArguments(args)
                             .build();
 
             try (var wasi =
