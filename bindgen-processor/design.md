@@ -298,8 +298,28 @@ Imports are wired through `HostFunction.of` with a generated `FuncType`, and eac
 constructor with `ComponentFunction.typed`, so a descriptor that the component's type could never satisfy fails at
 instantiation rather than at the first call.
 
-Only functions over primitives and `string` are read so far. Records, variants, resources, interfaces and a world's
-`use` are each rejected with a message naming what is unsupported.
+A world may also import an interface, which the encoding carries as an instance rather than a bare function. Each one
+becomes a nested Java interface plus an accessor on `Imports`, so that `instantiate` stays a three argument call however
+many interfaces a world imports, and one embedder object can implement the world and its interfaces together.
+
+```java
+public interface Imports {
+    String greet();
+    void log(String msg);
+
+    MyCustomHost myCustomHost();
+}
+
+public interface MyCustomHost {
+    void tick();
+}
+```
+
+The interface is resolved from `Imports` once at instantiation rather than per call, and wired in with `HostInstance`.
+Function type constants are prefixed by the interface they belong to, so two interfaces may each declare a `tick`.
+
+Only functions over primitives and `string` are read so far. Records, variants, resources, a world's `use` and an
+interface that uses types from elsewhere are each rejected with a message naming what is unsupported.
 
 ## Module Layout
 
@@ -323,8 +343,8 @@ Only functions over primitives and `string` are read so far. Records, variants, 
 
 Following the order of the bindgen! examples.
 
-0. A world with one imported function and one exported function over primitives and strings.
-1. World imports, both top-level functions and an inline interface.
+0. ~~A world with one imported function and one exported function over primitives and strings.~~ Done.
+1. ~~World imports, both top-level functions and an inline interface.~~ Done.
 2. World exports.
 3. Imported interfaces.
 4. Imported resources.
@@ -341,6 +361,5 @@ The async example is out of scope. Async is unimplemented across the whole proje
 3. ~~`ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module.~~ Done.
 4. ~~`bindgen-processor-tests`, so that the end-to-end path is checked by a test rather than by hand.~~ Done.
 
-Stage 0 of the staging list is complete and checked end to end. Stage 1 is next, which is a world importing an inline
-interface alongside its top-level functions, and that is where an import becomes an instance rather than a bare
-function.
+Stages 0 and 1 are complete and checked end to end. Stage 2 is next, which is a world's exports in all the shapes they
+take, and that is where an export becomes an instance rather than a bare function.

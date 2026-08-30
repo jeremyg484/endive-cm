@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import javax.annotation.processing.Generated;
 import run.endive.cm.types.FuncType;
 import run.endive.cm.types.LabelValType;
@@ -38,10 +39,21 @@ final class WorldGenerator {
         type.setJavadocComment("Bindings for the WIT world {@code " + world.qualifiedName() + "}.");
 
         for (WitFunction imported : world.imports()) {
-            type.addMember(StaticJavaParser.parseBodyDeclaration(funcTypeField(imported)));
+            type.addMember(StaticJavaParser.parseBodyDeclaration(funcTypeField("", imported)));
+        }
+        for (WitInterface imported : world.importedInterfaces()) {
+            for (WitFunction function : imported.functions()) {
+                type.addMember(
+                        StaticJavaParser.parseBodyDeclaration(
+                                funcTypeField(imported.simpleName(), function)));
+            }
         }
 
         type.addMember(StaticJavaParser.parseBodyDeclaration(importsInterface(world)));
+
+        for (WitInterface imported : world.importedInterfaces()) {
+            type.addMember(StaticJavaParser.parseBodyDeclaration(hostInterface(imported)));
+        }
 
         type.addMember(
                 StaticJavaParser.parseBodyDeclaration("private final ComponentInstance instance;"));
@@ -74,21 +86,28 @@ final class WorldGenerator {
     private static void addImports(CompilationUnit unit, WitWorld world) {
         unit.addImport("java.util.LinkedHashMap");
         unit.addImport("java.util.Map");
-        unit.addImport("run.endive.cm.runtime.ComponentFunction");
         unit.addImport("run.endive.cm.runtime.ComponentInstance");
         unit.addImport("run.endive.cm.runtime.ComponentLinker");
         unit.addImport("run.endive.cm.runtime.ComponentStore");
-        unit.addImport("run.endive.cm.runtime.HostFunction");
         unit.addImport("run.endive.cm.types.FuncType");
         unit.addImport("run.endive.cm.types.WasmComponent");
 
         // Only what the generated body actually names, so that nothing is imported unused.
-        if (world.imports().stream().anyMatch(f -> f.type().hasResult() || hasParams(f))) {
+        if (allImports(world).anyMatch(f -> f.type().hasResult() || hasParams(f))) {
             unit.addImport("run.endive.cm.types.PrimValType");
             unit.addImport("run.endive.cm.types.ValType");
         }
-        if (world.imports().stream().anyMatch(WorldGenerator::hasParams)) {
+        if (allImports(world).anyMatch(WorldGenerator::hasParams)) {
             unit.addImport("run.endive.cm.types.LabelValType");
+        }
+        if (!world.importedInterfaces().isEmpty()) {
+            unit.addImport("run.endive.cm.runtime.HostInstance");
+        }
+        if (!world.imports().isEmpty()) {
+            unit.addImport("run.endive.cm.runtime.HostFunction");
+        }
+        if (!world.exports().isEmpty()) {
+            unit.addImport("run.endive.cm.runtime.ComponentFunction");
         }
         if (world.exports().stream().anyMatch(f -> f.type().hasResult() || hasParams(f))) {
             unit.addImport("run.endive.cm.runtime.PrimitiveHostTypeDescriptor");
@@ -105,6 +124,13 @@ final class WorldGenerator {
         return !function.type().params().isEmpty();
     }
 
+    /** Everything the world imports, however it is reached. */
+    private static Stream<WitFunction> allImports(WitWorld world) {
+        return Stream.concat(
+                world.imports().stream(),
+                world.importedInterfaces().stream().flatMap(i -> i.functions().stream()));
+    }
+
     private static boolean usesCharValue(WitWorld world) {
         List<WitFunction> all = new ArrayList<>(world.imports());
         all.addAll(world.exports());
@@ -118,7 +144,7 @@ final class WorldGenerator {
     }
 
     /** The function type a host import is registered with, rebuilt as source. */
-    private static String funcTypeField(WitFunction function) {
+    private static String funcTypeField(String prefix, WitFunction function) {
         StringBuilder builder = new StringBuilder("FuncType.builder()");
         for (LabelValType param : function.type().params()) {
             builder.append("\n    .addParam(LabelValType.builder().withLabel(\"")
@@ -135,7 +161,7 @@ final class WorldGenerator {
         builder.append("\n    .build()");
 
         return "private static final FuncType "
-                + constantName(function.name())
+                + constantName(prefix, function.name())
                 + " =\n    "
                 + builder
                 + ";";
@@ -152,6 +178,33 @@ final class WorldGenerator {
                     .append(Names.member(imported.name()))
                     .append('(')
                     .append(parameterList(imported.type()))
+                    .append(");\n");
+        }
+        for (WitInterface imported : world.importedInterfaces()) {
+            body.append("\n    /** The imported interface {@code ")
+                    .append(imported.name())
+                    .append("}. */\n    ")
+                    .append(Names.type(imported.simpleName()))
+                    .append(' ')
+                    .append(Names.member(imported.simpleName()))
+                    .append("();\n");
+        }
+        body.append("}");
+        return body.toString();
+    }
+
+    /** One Java interface per imported WIT interface, implemented by the embedder. */
+    private static String hostInterface(WitInterface imported) {
+        StringBuilder body = new StringBuilder();
+        body.append("/** The imported interface {@code ").append(imported.name()).append("}. */\n");
+        body.append("public interface ").append(Names.type(imported.simpleName())).append(" {\n");
+        for (WitFunction function : imported.functions()) {
+            body.append("    ")
+                    .append(returnType(function.type()))
+                    .append(' ')
+                    .append(Names.member(function.name()))
+                    .append('(')
+                    .append(parameterList(function.type()))
                     .append(");\n");
         }
         body.append("}");
@@ -190,10 +243,34 @@ final class WorldGenerator {
             body.append("    values.put(\"")
                     .append(imported.name())
                     .append("\", HostFunction.of(store, ")
-                    .append(constantName(imported.name()))
+                    .append(constantName("", imported.name()))
                     .append(", ")
-                    .append(importLambda(imported))
+                    .append(importLambda("imports", imported))
                     .append("));\n");
+        }
+        for (WitInterface imported : world.importedInterfaces()) {
+            // Resolved once rather than per call, so the embedder is asked for it a single time.
+            String local = Names.member(imported.simpleName());
+            body.append("    ")
+                    .append(Names.type(imported.simpleName()))
+                    .append(' ')
+                    .append(local)
+                    .append(" = imports.")
+                    .append(local)
+                    .append("();\n");
+            body.append("    values.put(\"")
+                    .append(imported.name())
+                    .append("\", HostInstance.builder(store)\n");
+            for (WitFunction function : imported.functions()) {
+                body.append("        .addFunction(\"")
+                        .append(function.name())
+                        .append("\", ")
+                        .append(constantName(imported.simpleName(), function.name()))
+                        .append(", ")
+                        .append(importLambda(local, function))
+                        .append(")\n");
+            }
+            body.append("        .build());\n");
         }
         body.append("    return new ")
                 .append(className)
@@ -205,9 +282,14 @@ final class WorldGenerator {
     }
 
     /** Adapts the embedder's method to the array of values a component function is called with. */
-    private static String importLambda(WitFunction function) {
+    private static String importLambda(String receiver, WitFunction function) {
         String call =
-                "imports." + Names.member(function.name()) + "(" + arguments(function.type()) + ")";
+                receiver
+                        + "."
+                        + Names.member(function.name())
+                        + "("
+                        + arguments(function.type())
+                        + ")";
         if (function.type().hasResult()) {
             return "args -> new Object[] {" + call + "}";
         }
@@ -273,7 +355,9 @@ final class WorldGenerator {
         return String.join(", ", casts);
     }
 
-    private static String constantName(String witName) {
-        return witName.toUpperCase().replace('-', '_') + "_FUNC";
+    /** Prefixed by the interface, so that two interfaces may each declare a {@code tick}. */
+    private static String constantName(String prefix, String witName) {
+        String qualified = prefix.isEmpty() ? witName : prefix + "-" + witName;
+        return qualified.toUpperCase().replace('-', '_') + "_FUNC";
     }
 }

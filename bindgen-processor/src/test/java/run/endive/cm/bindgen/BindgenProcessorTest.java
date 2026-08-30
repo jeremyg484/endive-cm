@@ -31,6 +31,17 @@ class BindgenProcessorTest {
                 .hasSourceEquivalentTo(JavaFileObjects.forResource("HelloWorldGenerated.java"));
     }
 
+    /** A world importing an interface as well as bare functions. */
+    @Test
+    void generatesWorldImportBindings() {
+        Compilation compilation = compile("WorldImportsHost.java");
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.MyWorld")
+                .hasSourceEquivalentTo(JavaFileObjects.forResource("MyWorldGenerated.java"));
+    }
+
     @Test
     void inlineWitNeedsNoFile() {
         Compilation compilation =

@@ -9,16 +9,19 @@ final class WitWorld {
     private final String name;
     private final String qualifiedName;
     private final List<WitFunction> imports;
+    private final List<WitInterface> importedInterfaces;
     private final List<WitFunction> exports;
 
     WitWorld(
             String name,
             String qualifiedName,
             List<WitFunction> imports,
+            List<WitInterface> importedInterfaces,
             List<WitFunction> exports) {
         this.name = Objects.requireNonNull(name, "name");
         this.qualifiedName = Objects.requireNonNull(qualifiedName, "qualifiedName");
         this.imports = List.copyOf(imports);
+        this.importedInterfaces = List.copyOf(importedInterfaces);
         this.exports = List.copyOf(exports);
     }
 
@@ -32,8 +35,13 @@ final class WitWorld {
         return qualifiedName;
     }
 
+    /** The functions the world imports in its own right, rather than through an interface. */
     List<WitFunction> imports() {
         return imports;
+    }
+
+    List<WitInterface> importedInterfaces() {
+        return importedInterfaces;
     }
 
     List<WitFunction> exports() {

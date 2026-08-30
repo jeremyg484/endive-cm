@@ -13,6 +13,7 @@ import run.endive.cm.types.ExportSection;
 import run.endive.cm.types.ExternDesc;
 import run.endive.cm.types.ImportDecl;
 import run.endive.cm.types.InstanceDecl;
+import run.endive.cm.types.InstanceType;
 import run.endive.cm.types.Section;
 import run.endive.cm.types.Sort;
 import run.endive.cm.types.Type;
@@ -107,7 +108,7 @@ final class WorldReader {
                 ExternDesc desc = instanceDecl.exportDecl().externDesc();
                 if (desc.kind() != ExternDesc.Kind.COMPONENT) {
                     throw new BindgenException(
-                            "\"" + name + "\" is an interface, which is not yet supported");
+                            "\"" + name + "\" is an interface rather than a world");
                 }
                 qualifiedName = instanceDecl.exportDecl().name();
                 world = componentTypeAt(declared, desc, name);
@@ -117,20 +118,60 @@ final class WorldReader {
         if (world == null) {
             throw new BindgenException("world \"" + name + "\" holds no declarations");
         }
-        return new WitWorld(name, qualifiedName, imports(world), exports(world));
+
+        List<WitFunction> importedFunctions = new ArrayList<>();
+        List<WitInterface> importedInterfaces = new ArrayList<>();
+        readImports(world, importedFunctions, importedInterfaces);
+        return new WitWorld(
+                name, qualifiedName, importedFunctions, importedInterfaces, exports(world));
     }
 
-    private static List<WitFunction> imports(ComponentType world) {
+    /**
+     * A world imports either a bare function or an instance, and an instance is what an interface
+     * becomes, whether it was written inline in the world or elsewhere.
+     */
+    private static void readImports(
+            ComponentType world, List<WitFunction> functions, List<WitInterface> interfaces) {
         List<Type> declared = new ArrayList<>();
-        List<WitFunction> functions = new ArrayList<>();
         for (ComponentDecl decl : world.getComponentDecls()) {
             track(declared, decl);
             ImportDecl importDecl = decl.importDecl();
-            if (importDecl != null) {
-                functions.add(function(declared, importDecl.name(), importDecl.externDesc()));
+            if (importDecl == null) {
+                continue;
+            }
+            ExternDesc desc = importDecl.externDesc();
+            if (desc.kind() == ExternDesc.Kind.INSTANCE) {
+                interfaces.add(
+                        readInterface(
+                                importDecl.name(),
+                                instanceTypeAt(declared, desc, importDecl.name())));
+            } else {
+                functions.add(function(declared, importDecl.name(), desc));
             }
         }
-        return functions;
+    }
+
+    /** An interface's functions are the functions its instance type exports. */
+    private static WitInterface readInterface(String name, InstanceType type) {
+        List<Type> declared = new ArrayList<>();
+        List<WitFunction> functions = new ArrayList<>();
+        for (InstanceDecl decl : type.getInstanceDecls()) {
+            if (decl.kind() == InstanceDecl.Kind.TYPE) {
+                declared.add(decl.type());
+            } else if (decl.kind() == InstanceDecl.Kind.ALIAS) {
+                throw new BindgenException(
+                        "interface \""
+                                + name
+                                + "\" uses types from elsewhere, which is not yet supported");
+            } else if (decl.exportDecl() != null) {
+                functions.add(
+                        function(
+                                declared,
+                                decl.exportDecl().name(),
+                                decl.exportDecl().externDesc()));
+            }
+        }
+        return new WitInterface(name, functions);
     }
 
     private static List<WitFunction> exports(ComponentType world) {
@@ -184,6 +225,14 @@ final class WorldReader {
             throw new BindgenException("\"" + name + "\" does not name a function type");
         }
         return new WitFunction(name, type.funcType());
+    }
+
+    private static InstanceType instanceTypeAt(List<Type> declared, ExternDesc desc, String name) {
+        Type type = typeAt(declared, desc, name);
+        if (type.instanceType() == null) {
+            throw new BindgenException("\"" + name + "\" does not name an interface");
+        }
+        return type.instanceType();
     }
 
     private static ComponentType componentTypeAt(
