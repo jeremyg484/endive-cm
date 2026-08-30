@@ -84,8 +84,8 @@ One non-obvious detail costs time if it is not known. A core module satisfies a 
 from the core module name `$root`, not from the interface or world id. Imports that come through a WIT interface use the
 interface id as the core module name.
 
-Neither `ComponentEmbed` nor `ComponentNew` exists in the wasm-tools module yet. Both are Phase 2 deliverables and both
-are prerequisites for the end-to-end module.
+`ComponentEmbed` and `ComponentNew` now wrap both commands. Each accepts its input as text or binary, so a fixture
+written as `.wat` goes straight through both.
 
 ### The runtime cannot currently be driven from outside its own package
 
@@ -330,5 +330,6 @@ The async example is out of scope. Async is unimplemented across the whole proje
 1. ~~`HostInstance`, the public host-linking facade, with `SpecTestImports` rewritten onto it and the spec suite
    green.~~ Done, along with `HostFunction` and `HostResource`.
 2. ~~WIT-to-binary encoding on the wasm-tools module.~~ Done, as `WitParser.encode`.
-3. `ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module. Until these land the
-   end-to-end path is verified by hand rather than by a test, since building a component needs both.
+3. ~~`ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module.~~ Done.
+4. `bindgen-processor-tests`, so that the end-to-end path is checked by a test rather than by hand. The processor runs
+   over that module's own test sources, so the generated bindings are ordinary compiled classes a test can call.

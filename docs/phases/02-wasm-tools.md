@@ -1,13 +1,14 @@
 # Phase 2: wasm-tools Integration (Component Commands)
 
-**Status**: In progress
+**Status**: Complete but for `ComponentLink`
 
-Implemented so far are `ComponentValidate`, which the test suites use to validate
-every binary before parsing it, and `JsonFromWast`, which the spec test generator
-uses to read `.wast` scripts. `WitParser` was already present.
+Implemented are `ComponentValidate`, which the test suites use to validate every
+binary before parsing it, `JsonFromWast`, which the spec test generator uses to
+read `.wast` scripts, `WitParser`, which both reads and now encodes WIT, and
+`ComponentEmbed` and `ComponentNew`, which together build a component from a core
+module and a world.
 
-`ComponentNew`, `ComponentEmbed` and `ComponentLink` are not implemented. None of
-them is needed until Phase 4.
+`ComponentLink` is not implemented and nothing needs it yet.
 
 `wasm-tools parse`, for turning `.wat` into a binary, is already wrapped upstream
 as `run.endive.tools.wasm.Wat2Wasm` and is reused rather than duplicated here.
@@ -49,13 +50,21 @@ generator.
 
 ### ComponentNew.java
 
-Wraps `wasm-tools component new`. Takes a core Wasm module + WIT and produces
-a component binary.
+Wraps `wasm-tools component new`. Implemented. Takes a core module carrying
+embedded component types and produces a component binary.
 
 ### ComponentEmbed.java
 
-Wraps `wasm-tools component embed`. Embeds component type information into
-a core module.
+Wraps `wasm-tools component embed`. Implemented. Records a world inside a core
+module as a `component-type` custom section.
+
+Both accept their input in either the binary or the text format, because
+wasm-tools tells the two apart by content rather than by file name. That is what
+lets a test fixture be written as `.wat` and go straight through both commands
+without a guest language toolchain in the way.
+
+A world's top-level import binds to the core module name `$root` rather than to
+the world's own id, which is what a core module has to import it from.
 
 ### ComponentLink.java
 
@@ -84,3 +93,6 @@ The existing `WitParser` in this repo is the exact template.
 
 All four wasm-tools component commands are wrapped and tested. `ComponentNew`
 output feeds into `ComponentParser` successfully.
+
+Met but for `ComponentLink`. `ComponentNew` output validates and round-trips
+back through `WitParser` as the world it was built from.

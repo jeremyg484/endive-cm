@@ -4,10 +4,7 @@ import io.roastedroot.zerofs.Configuration;
 import io.roastedroot.zerofs.ZeroFs;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
@@ -27,14 +24,14 @@ import run.endive.wasi.WasiPreview1;
 import run.endive.wasm.WasmModule;
 
 /**
- * Wraps {@code wasm-tools component wit}, which reads a WIT package and writes it back out in
- * either form.
+ * Wraps {@code wasm-tools component embed}, which records a world inside a core module as a custom
+ * section describing what the module imports and exports.
  *
- * <p>Input may be WIT text or the binary encoding of a package, since wasm-tools tells them apart
- * by content rather than by file name.
+ * <p>The result is still a core module. {@link ComponentNew} turns one into a component.
  */
-public final class WitParser {
-    private WitParser() {}
+public final class ComponentEmbed {
+
+    private ComponentEmbed() {}
 
     private static final Logger logger =
             new SystemLogger() {
@@ -43,65 +40,20 @@ public final class WitParser {
                     return false;
                 }
             };
+
     private static final WasmModule MODULE = WasmToolsModule.load();
 
-    /** The form a WIT package is written out in. */
-    private enum Form {
-        TEXT,
-        BINARY
-    }
-
-    public static String parse(File file) {
-        try (var is = new FileInputStream(file)) {
-            return parse(is);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    public static String parse(String wit) {
-        try (var is = new ByteArrayInputStream(wit.getBytes(StandardCharsets.UTF_8))) {
-            return parse(is);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    public static String parse(InputStream is) {
-        return new String(run(is, Form.TEXT), StandardCharsets.UTF_8);
+    /** Embeds the only world the package declares. */
+    public static byte[] embed(byte[] module, String wit) {
+        return embed(module, wit, "");
     }
 
     /**
-     * Encodes a WIT package into its binary form, which is a component whose exports name the
-     * package's worlds and interfaces and carry their types.
-     *
-     * @see <a href="https://github.com/WebAssembly/component-model/blob/706074c96bc14cfc58469e1bdc452bb4d91921c7/design/mvp/Binary.md">Binary.md</a>
+     * @param module a core module, in either the binary or the text format
+     * @param wit WIT text declaring the world
+     * @param world the world to embed, empty when the package declares exactly one
      */
-    public static byte[] encode(File file) {
-        try (var is = new FileInputStream(file)) {
-            return encode(is);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    public static byte[] encode(String wit) {
-        try (var is = new ByteArrayInputStream(wit.getBytes(StandardCharsets.UTF_8))) {
-            return encode(is);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    public static byte[] encode(InputStream is) {
-        return run(is, Form.BINARY);
-    }
-
-    /**
-     * Text goes to stdout and binary goes to a file, so the requested form decides both the command
-     * and where the result is read back from.
-     */
-    private static byte[] run(InputStream is, Form form) {
+    public static byte[] embed(byte[] module, String wit, String world) {
         try (var stdinStream = new ByteArrayInputStream(new byte[0]);
                 var stdoutStream = new ByteArrayOutputStream();
                 var stderrStream = new ByteArrayOutputStream();
@@ -113,17 +65,21 @@ public final class WitParser {
 
             Path inputDir = fs.getPath("input");
             Files.createDirectory(inputDir);
-            Path inputFile = inputDir.resolve("input.wit");
-            Files.write(inputFile, is.readAllBytes());
+            Path witFile = inputDir.resolve("input.wit");
+            Files.write(witFile, wit.getBytes(StandardCharsets.UTF_8));
+            Path moduleFile = inputDir.resolve("module.wasm");
+            Files.write(moduleFile, module);
             Path outputFile = inputDir.resolve("output.wasm");
 
-            List<String> args = new ArrayList<>(List.of("wasm-tools", "component", "wit"));
-            if (form == Form.BINARY) {
-                args.add("--wasm");
-                args.add("-o");
-                args.add(outputFile.toString());
+            List<String> args = new ArrayList<>(List.of("wasm-tools", "component", "embed"));
+            if (!world.isEmpty()) {
+                args.add("--world");
+                args.add(world);
             }
-            args.add(inputFile.toString());
+            args.add("-o");
+            args.add(outputFile.toString());
+            args.add(witFile.toString());
+            args.add(moduleFile.toString());
 
             var options =
                     WasiOptions.builder()
@@ -146,7 +102,7 @@ public final class WitParser {
                             .build();
                 } catch (WasiExitException e) {
                     if (e.exitCode() != 0) {
-                        throw new WitParseException(
+                        throw new ComponentEmbedException(
                                 stdoutStream.toString(StandardCharsets.UTF_8)
                                         + stderrStream.toString(StandardCharsets.UTF_8),
                                 e);
@@ -154,12 +110,9 @@ public final class WitParser {
                 }
             }
 
-            if (form == Form.TEXT) {
-                return stdoutStream.toByteArray();
-            }
             if (!Files.exists(outputFile)) {
-                throw new WitParseException(
-                        "wasm-tools produced no binary: "
+                throw new ComponentEmbedException(
+                        "wasm-tools produced no module: "
                                 + stdoutStream.toString(StandardCharsets.UTF_8)
                                 + stderrStream.toString(StandardCharsets.UTF_8));
             }
