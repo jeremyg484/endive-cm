@@ -2,7 +2,9 @@ package run.endive.cm.bindgen;
 
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import run.endive.cm.parser.ComponentParser;
 import run.endive.cm.tools.WitParser;
@@ -178,27 +180,110 @@ final class WorldReader {
         }
     }
 
-    /** An interface's functions are the functions its instance type exports. */
+    /**
+     * An interface's functions are the functions its instance type exports.
+     *
+     * <p>A resource is exported as a type rather than defined as one, and that export grows the
+     * type index space just as a definition does, so it has to be counted or every index after it
+     * names the wrong type.
+     */
     private static WitInterface readInterface(String name, InstanceType type) {
         List<Type> declared = new ArrayList<>();
         List<WitFunction> functions = new ArrayList<>();
+        Map<String, ResourceFunctions> resources = new LinkedHashMap<>();
+
         for (InstanceDecl decl : type.getInstanceDecls()) {
             if (decl.kind() == InstanceDecl.Kind.TYPE) {
                 declared.add(decl.type());
-            } else if (decl.kind() == InstanceDecl.Kind.ALIAS) {
+                continue;
+            }
+            if (decl.kind() == InstanceDecl.Kind.ALIAS) {
                 throw new BindgenException(
                         "interface \""
                                 + name
                                 + "\" uses types from elsewhere, which is not yet supported");
-            } else if (decl.exportDecl() != null) {
-                functions.add(
-                        function(
-                                declared,
-                                decl.exportDecl().name(),
-                                decl.exportDecl().externDesc()));
+            }
+            if (decl.exportDecl() == null) {
+                continue;
+            }
+            String exportName = decl.exportDecl().name();
+            ExternDesc desc = decl.exportDecl().externDesc();
+            if (desc.kind() == ExternDesc.Kind.TYPE) {
+                // A resource declaration, which takes the next index in the space.
+                declared.add(null);
+                resources.computeIfAbsent(exportName, ResourceFunctions::new);
+                continue;
+            }
+            WitFunction function = function(declared, exportName, desc);
+            ResourceFunctions owner = ownerOf(resources, exportName);
+            if (owner == null) {
+                functions.add(function);
+            } else {
+                owner.add(exportName, function);
             }
         }
-        return new WitInterface(name, functions);
+
+        List<WitResource> read = new ArrayList<>();
+        for (ResourceFunctions resource : resources.values()) {
+            read.add(resource.toResource());
+        }
+        return new WitInterface(name, functions, read);
+    }
+
+    /** The resource a {@code [constructor]}, {@code [method]} or {@code [static]} name belongs to. */
+    private static ResourceFunctions ownerOf(
+            Map<String, ResourceFunctions> resources, String exportName) {
+        int close = exportName.indexOf(']');
+        if (!exportName.startsWith("[") || close < 0) {
+            return null;
+        }
+        String target = exportName.substring(close + 1);
+        int dot = target.indexOf('.');
+        String resourceName = dot < 0 ? target : target.substring(0, dot);
+        ResourceFunctions owner = resources.get(resourceName);
+        if (owner == null) {
+            throw new BindgenException(
+                    "\""
+                            + exportName
+                            + "\" names resource \""
+                            + resourceName
+                            + "\", which was never declared");
+        }
+        return owner;
+    }
+
+    /** Gathers a resource's functions as they are met, since they arrive as separate exports. */
+    private static final class ResourceFunctions {
+
+        private final String name;
+        private WitFunction constructor;
+        private final List<WitFunction> methods = new ArrayList<>();
+
+        ResourceFunctions(String name) {
+            this.name = name;
+        }
+
+        void add(String exportName, WitFunction function) {
+            if (exportName.startsWith("[constructor]")) {
+                constructor = new WitFunction(name, function.type());
+            } else if (exportName.startsWith("[method]")) {
+                methods.add(new WitFunction(memberName(exportName), function.type()));
+            } else {
+                throw new BindgenException(
+                        "\""
+                                + exportName
+                                + "\" is a static resource function, which is not yet supported");
+            }
+        }
+
+        /** {@code [method]file.get-name} names the method {@code get-name}. */
+        private static String memberName(String exportName) {
+            return exportName.substring(exportName.indexOf('.') + 1);
+        }
+
+        WitResource toResource() {
+            return new WitResource(name, constructor, methods);
+        }
     }
 
     /**
@@ -231,7 +316,7 @@ final class WorldReader {
                             + ", and only functions are supported so far");
         }
         Type type = typeAt(declared, desc, name);
-        if (type.funcType() == null) {
+        if (type == null || type.funcType() == null) {
             throw new BindgenException("\"" + name + "\" does not name a function type");
         }
         return new WitFunction(name, type.funcType());

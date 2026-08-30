@@ -74,6 +74,10 @@ Finding a world therefore takes four steps, which `WitBinaryTests` fixes in plac
 Every nesting level restarts its type numbering, so resolution is index bookkeeping over each decl list rather than a
 lookup in one flat space.
 
+An instance type's space grows the same way. A resource is exported as a type rather than defined as one, and that
+export takes an index just as a definition does, so a resource declaration has to be counted or every index after it
+names the wrong type.
+
 The package's own type index space needs the same care and is easy to get wrong, because it grows both by the types the
 package defines and by the exports naming them. A package declaring one interface and one world numbers them 0 and 2,
 not 0 and 1, so the section walk has to count the exports as well. A package with a single item hides this, since the
@@ -346,8 +350,36 @@ Two generated types can still collide, because everything a world generates land
 the same name, or an imported and an exported interface of the same name, would each produce one Java type. Neither is
 silent, since the result fails to compile, and putting exports under a nested holder is the fix when one turns up.
 
-Only functions over primitives and `string` are read so far. Records, variants, resources, a world's `use` and an
-interface that uses types from elsewhere are each rejected with a message naming what is unsupported.
+An interface may declare a resource the host implements. The Canonical ABI names a resource's functions rather than
+nesting them, so `[constructor]file` and `[method]file.get-name` are split apart again and become a nested Java
+interface with a factory on the interface that owns it.
+
+```java
+public interface Types {
+
+    interface File {
+        String getName();
+
+        default void drop() {}
+    }
+
+    File file(String name);
+}
+```
+
+A method's borrowed receiver is what Java carries as `this`, so it is dropped from the signature. A handle carries an
+integer rather than an object, so the bindings keep a `HostResourceTable` per resource type mapping one to the other,
+and the generated destructor hands the object to `drop` before forgetting it. `drop` is a default method, so observing
+a drop is optional rather than forced on every embedder.
+
+An interface declaring a resource is built through a local rather than in one chained expression, because a resource
+has to be declared before anything names it. That is also why its constructor and method types are built inside
+`instantiate` rather than held as constants. `own` and `borrow` name the resource by index, and the index is only known
+once `declareResource` has run.
+
+Only functions over primitives and `string` are read so far. Records, variants, a resource's static functions, a
+world's `use` and an interface that uses types from elsewhere are each rejected with a message naming what is
+unsupported.
 
 ## Module Layout
 
@@ -376,7 +408,7 @@ Following the order of the bindgen! examples.
 2. ~~World exports, including an exported interface.~~ Done. A named interface import came with it, since it is the
    same shape as an inline one.
 3. ~~Imported interfaces.~~ Done, alongside stage 2.
-4. Imported resources.
+4. ~~Imported resources.~~ Done.
 5. All kinds of world export.
 6. Exported resources.
 
@@ -390,5 +422,5 @@ The async example is out of scope. Async is unimplemented across the whole proje
 3. ~~`ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module.~~ Done.
 4. ~~`bindgen-processor-tests`, so that the end-to-end path is checked by a test rather than by hand.~~ Done.
 
-Stages 0 to 2 are complete and checked end to end, and stage 3 came with stage 2. Stage 4 is next, which is imported
-resources, and that is the first stage needing a WIT type that is not a function signature.
+Stages 0 to 4 are complete and checked end to end. Stage 5 is next, which is the remaining shapes a world's exports
+take, and stage 6 is exported resources, where the resource is implemented by the guest rather than by the host.

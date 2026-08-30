@@ -1,0 +1,13 @@
+package example:resources;
+
+world resource-world {
+  import types: interface {
+    resource file {
+      constructor(name: string);
+      name-length: func() -> u32;
+      is-open: func() -> bool;
+    }
+  }
+  export open-and-measure: func(name: string) -> u32;
+  export open-and-leak: func(name: string);
+}

@@ -1,0 +1,12 @@
+package example:resources;
+
+world resources-world {
+  import types: interface {
+    resource file {
+      constructor(name: string);
+      get-name: func() -> string;
+      is-open: func() -> bool;
+    }
+  }
+  export run: func();
+}

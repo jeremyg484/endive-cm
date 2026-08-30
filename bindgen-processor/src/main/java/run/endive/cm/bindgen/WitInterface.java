@@ -14,10 +14,12 @@ final class WitInterface {
 
     private final String name;
     private final List<WitFunction> functions;
+    private final List<WitResource> resources;
 
-    WitInterface(String name, List<WitFunction> functions) {
+    WitInterface(String name, List<WitFunction> functions, List<WitResource> resources) {
         this.name = Objects.requireNonNull(name, "name");
         this.functions = List.copyOf(functions);
+        this.resources = List.copyOf(resources);
     }
 
     /** The name the world imports this under, which is the key the linker matches. */
@@ -25,8 +27,13 @@ final class WitInterface {
         return name;
     }
 
+    /** The functions belonging to the interface itself, rather than to one of its resources. */
     List<WitFunction> functions() {
         return functions;
+    }
+
+    List<WitResource> resources() {
+        return resources;
     }
 
     /** The interface's own name, with any package qualification dropped. */

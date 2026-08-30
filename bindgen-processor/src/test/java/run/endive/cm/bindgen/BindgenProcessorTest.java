@@ -53,6 +53,17 @@ class BindgenProcessorTest {
                 .hasSourceEquivalentTo(JavaFileObjects.forResource("ExportsWorldGenerated.java"));
     }
 
+    /** An imported interface declaring a resource the host implements. */
+    @Test
+    void generatesImportedResourceBindings() {
+        Compilation compilation = compile("ImportedResourceHost.java");
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.ResourcesWorld")
+                .hasSourceEquivalentTo(JavaFileObjects.forResource("ResourcesWorldGenerated.java"));
+    }
+
     @Test
     void inlineWitNeedsNoFile() {
         Compilation compilation =

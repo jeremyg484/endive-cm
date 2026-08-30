@@ -129,6 +129,12 @@ final class WorldGenerator {
         if (!world.importedInterfaces().isEmpty()) {
             unit.addImport("run.endive.cm.runtime.HostInstance");
         }
+        if (world.importedInterfaces().stream().anyMatch(i -> !i.resources().isEmpty())) {
+            unit.addImport("run.endive.cm.abi.ResourceValue");
+            unit.addImport("run.endive.cm.runtime.HostResource");
+            unit.addImport("run.endive.cm.runtime.HostResourceTable");
+            unit.addImport("run.endive.cm.types.LabelValType");
+        }
         if (!world.imports().isEmpty()) {
             unit.addImport("run.endive.cm.runtime.HostFunction");
         }
@@ -150,11 +156,24 @@ final class WorldGenerator {
         return !function.type().params().isEmpty();
     }
 
-    /** Everything the world imports, however it is reached. */
+    /** Everything the world imports, however it is reached, resource functions included. */
     private static Stream<WitFunction> allImports(WitWorld world) {
         return Stream.concat(
                 world.imports().stream(),
-                world.importedInterfaces().stream().flatMap(i -> i.functions().stream()));
+                world.importedInterfaces().stream().flatMap(WorldGenerator::interfaceFunctions));
+    }
+
+    private static Stream<WitFunction> interfaceFunctions(WitInterface imported) {
+        return Stream.concat(
+                imported.functions().stream(),
+                imported.resources().stream()
+                        .flatMap(
+                                r ->
+                                        Stream.concat(
+                                                r.constructor() == null
+                                                        ? Stream.empty()
+                                                        : Stream.of(r.constructor()),
+                                                r.methods().stream())));
     }
 
     /** Everything the world exports, however it is reached. */
@@ -241,6 +260,44 @@ final class WorldGenerator {
                     .append(parameterList(function.type()))
                     .append(");\n");
         }
+        for (WitResource resource : imported.resources()) {
+            body.append('\n').append(indent(resourceInterface(resource))).append('\n');
+            if (resource.constructor() != null) {
+                body.append("\n    /** Makes a {@code ")
+                        .append(resource.name())
+                        .append("}. */\n    ")
+                        .append(Names.type(resource.name()))
+                        .append(' ')
+                        .append(Names.member(resource.name()))
+                        .append('(')
+                        .append(parameterList(resource.constructor().type()))
+                        .append(");\n");
+            }
+        }
+        body.append("}");
+        return body.toString();
+    }
+
+    /**
+     * One Java interface per WIT resource. A method's borrowed receiver is what Java carries as
+     * {@code this}, so it is dropped from the signature.
+     */
+    private static String resourceInterface(WitResource resource) {
+        StringBuilder body = new StringBuilder();
+        body.append("/** The resource {@code ").append(resource.name()).append("}. */\n");
+        body.append("interface ").append(Names.type(resource.name())).append(" {\n");
+        for (WitFunction method : resource.methods()) {
+            body.append("    ")
+                    .append(returnType(method.type()))
+                    .append(' ')
+                    .append(Names.member(method.name()))
+                    .append('(')
+                    .append(parameterList(method.type(), 1))
+                    .append(");\n");
+        }
+        body.append(
+                "\n    /** Called when the guest drops an owned handle to this resource. */\n"
+                        + "    default void drop() {\n    }\n");
         body.append("}");
         return body.toString();
     }
@@ -338,19 +395,11 @@ final class WorldGenerator {
                     .append(" = imports.")
                     .append(local)
                     .append("();\n");
-            body.append("    values.put(\"")
-                    .append(imported.name())
-                    .append("\", HostInstance.builder(store)\n");
-            for (WitFunction function : imported.functions()) {
-                body.append("        .addFunction(\"")
-                        .append(function.name())
-                        .append("\", ")
-                        .append(constantName(imported.simpleName(), function.name()))
-                        .append(", ")
-                        .append(importLambda(local, function))
-                        .append(")\n");
+            if (imported.resources().isEmpty()) {
+                appendChainedInterface(body, imported, local);
+            } else {
+                appendResourcefulInterface(body, imported, local);
             }
-            body.append("        .build());\n");
         }
         body.append("    return new ")
                 .append(className)
@@ -359,6 +408,171 @@ final class WorldGenerator {
                                 + " values));\n");
         body.append("}");
         return body.toString();
+    }
+
+    /** An interface of plain functions needs no local, so it is built in one expression. */
+    private static void appendChainedInterface(
+            StringBuilder body, WitInterface imported, String receiver) {
+        body.append("    values.put(\"")
+                .append(imported.name())
+                .append("\", HostInstance.builder(store)\n");
+        for (WitFunction function : imported.functions()) {
+            body.append("        .addFunction(\"")
+                    .append(function.name())
+                    .append("\", ")
+                    .append(constantName(imported.simpleName(), function.name()))
+                    .append(", ")
+                    .append(importLambda(receiver, function))
+                    .append(")\n");
+        }
+        body.append("        .build());\n");
+    }
+
+    /**
+     * A resource has to be declared before anything naming it, and its {@code own} and
+     * {@code borrow} are only known once it is, so an interface declaring one is built through a
+     * local rather than in a single expression. That is also why the function types of its
+     * constructor and methods are built here rather than held as constants.
+     */
+    private static void appendResourcefulInterface(
+            StringBuilder body, WitInterface imported, String receiver) {
+        String prefix = Names.member(imported.simpleName());
+        String builder = prefix + "Builder";
+        body.append("    HostInstance.Builder ")
+                .append(builder)
+                .append(" = HostInstance.builder(store);\n");
+
+        for (WitResource resource : imported.resources()) {
+            String type = Names.type(imported.simpleName()) + "." + Names.type(resource.name());
+            String table = prefix + Names.type(resource.name()) + "Table";
+            String handle = prefix + Names.type(resource.name());
+
+            body.append("    HostResourceTable<")
+                    .append(type)
+                    .append("> ")
+                    .append(table)
+                    .append(" = new HostResourceTable<>();\n");
+            body.append("    HostResource ")
+                    .append(handle)
+                    .append(" = ")
+                    .append(builder)
+                    .append(".declareResource(rep -> ")
+                    .append(table)
+                    .append(".drop(rep, ")
+                    .append(type)
+                    .append("::drop));\n");
+            body.append("    ")
+                    .append(builder)
+                    .append(".addResource(\"")
+                    .append(resource.name())
+                    .append("\", ")
+                    .append(handle)
+                    .append(");\n");
+
+            if (resource.constructor() != null) {
+                body.append("    ")
+                        .append(builder)
+                        .append(".addFunction(\"[constructor]")
+                        .append(resource.name())
+                        .append("\", ")
+                        .append(constructorFuncType(resource.constructor(), handle))
+                        .append(", args -> new Object[] {ResourceValue.owned(")
+                        .append(handle)
+                        .append(".type(), ")
+                        .append(table)
+                        .append(".add(")
+                        .append(receiver)
+                        .append('.')
+                        .append(Names.member(resource.name()))
+                        .append('(')
+                        .append(arguments(resource.constructor().type(), 0))
+                        .append(")))});\n");
+            }
+
+            for (WitFunction method : resource.methods()) {
+                String call =
+                        table
+                                + ".get((ResourceValue) args[0])."
+                                + Names.member(method.name())
+                                + "("
+                                + arguments(method.type(), 1)
+                                + ")";
+                body.append("    ")
+                        .append(builder)
+                        .append(".addFunction(\"[method]")
+                        .append(resource.name())
+                        .append('.')
+                        .append(method.name())
+                        .append("\", ")
+                        .append(methodFuncType(method, handle))
+                        .append(", ")
+                        .append(
+                                method.type().hasResult()
+                                        ? "args -> new Object[] {" + call + "}"
+                                        : "args -> {\n        "
+                                                + call
+                                                + ";\n        return new Object[0];\n    }")
+                        .append(");\n");
+            }
+        }
+
+        for (WitFunction function : imported.functions()) {
+            body.append("    ")
+                    .append(builder)
+                    .append(".addFunction(\"")
+                    .append(function.name())
+                    .append("\", ")
+                    .append(constantName(imported.simpleName(), function.name()))
+                    .append(", ")
+                    .append(importLambda(receiver, function))
+                    .append(");\n");
+        }
+
+        body.append("    values.put(\"")
+                .append(imported.name())
+                .append("\", ")
+                .append(builder)
+                .append(".build());\n");
+    }
+
+    /** A constructor takes the resource's declared parameters and hands back an {@code own}. */
+    private static String constructorFuncType(WitFunction constructor, String handle) {
+        return "FuncType.builder()"
+                + params(constructor.type(), 0)
+                + ".withResult("
+                + handle
+                + ".own()).build()";
+    }
+
+    /** A method borrows its receiver, which is what its first parameter always is. */
+    private static String methodFuncType(WitFunction method, String handle) {
+        String self = method.type().params().get(0).label();
+        StringBuilder source = new StringBuilder("FuncType.builder()");
+        source.append(".addParam(LabelValType.builder().withLabel(\"")
+                .append(self)
+                .append("\").withValType(")
+                .append(handle)
+                .append(".borrow()).build())");
+        source.append(params(method.type(), 1));
+        if (method.type().hasResult()) {
+            source.append(".withResult(")
+                    .append(WitTypes.valTypeSource(method.type().result()))
+                    .append(")");
+        }
+        return source.append(".build()").toString();
+    }
+
+    /** Parameter sources for a function type, past whatever the caller has already written. */
+    private static String params(FuncType type, int skip) {
+        StringBuilder source = new StringBuilder();
+        for (LabelValType param : type.params().subList(skip, type.params().size())) {
+            source.append(".addParam(LabelValType.builder().withLabel(\"")
+                    .append(param.label())
+                    .append("\").withValType(")
+                    .append(WitTypes.valTypeSource(param.valType()))
+                    .append(").build())");
+        }
+        return source.toString();
     }
 
     /** Adapts the embedder's method to the array of values a component function is called with. */
@@ -414,7 +628,15 @@ final class WorldGenerator {
     }
 
     private static String parameterList(FuncType type) {
+        return parameterList(type, 0);
+    }
+
+    /**
+     * @param skip leading parameters the Java signature does not carry, such as a receiver
+     */
+    private static String parameterList(FuncType type, int skip) {
         return type.params().stream()
+                .skip(skip)
                 .map(p -> WitTypes.javaType(p.valType()) + " " + Names.member(p.label()))
                 .collect(Collectors.joining(", "));
     }
@@ -427,9 +649,16 @@ final class WorldGenerator {
 
     /** Casts each element of the incoming array to what the embedder's method declares. */
     private static String arguments(FuncType type) {
+        return arguments(type, 0);
+    }
+
+    /**
+     * @param skip leading arguments the embedder's method does not take, such as a receiver
+     */
+    private static String arguments(FuncType type, int skip) {
         List<LabelValType> params = type.params();
         List<String> casts = new ArrayList<>();
-        for (int i = 0; i < params.size(); i++) {
+        for (int i = skip; i < params.size(); i++) {
             casts.add("(" + WitTypes.javaType(params.get(i).valType()) + ") args[" + i + "]");
         }
         return String.join(", ", casts);
