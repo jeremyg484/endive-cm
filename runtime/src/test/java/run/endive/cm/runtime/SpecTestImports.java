@@ -3,13 +3,9 @@ package run.endive.cm.runtime;
 import java.util.HashMap;
 import java.util.Map;
 import run.endive.cm.abi.ResourceValue;
-import run.endive.cm.types.BorrowType;
 import run.endive.cm.types.FuncType;
 import run.endive.cm.types.LabelValType;
-import run.endive.cm.types.OwnType;
 import run.endive.cm.types.PrimValType;
-import run.endive.cm.types.ResourceType;
-import run.endive.cm.types.Type;
 import run.endive.cm.types.ValType;
 import run.endive.runtime.TrapException;
 import run.endive.tools.wasm.Wat2Wasm;
@@ -37,66 +33,36 @@ public final class SpecTestImports {
         return Map.copyOf(imports);
     }
 
-    /**
-     * A bare host function, imported under a name of its own rather than through an instance. It
-     * still belongs to an instance, which is what a call into it enters, so the instance is built
-     * here even though nothing is exported from it.
-     */
+    /** A bare host function, imported under a name of its own rather than through an instance. */
     private static ComponentFunction buildHostReturnTwo(ComponentStore store) {
-        ComponentInstance instance = ComponentInstance.builder(store).build();
-
-        FuncType funcType =
-                FuncType.builder()
-                        .withResult(ValType.builder().withPrimValType(PrimValType.U32).build())
-                        .build();
-
-        ComponentFunctionCall call = (args) -> new Object[] {2};
-
-        return ComponentFunctionInstance.builder()
-                .withInstance(instance)
-                .withTypeResolver(instance)
-                .withFuncType(funcType)
-                .withCall(call)
-                .withHostProvided(true)
-                .build();
+        return HostFunction.of(store, func().withResult(u32()).build(), args -> new Object[] {2});
     }
 
     private static ComponentInstance buildFoo(ComponentStore store) {
-        var builder = ComponentInstance.builder(store);
-        WasmModule module = WasmModule.builder().build();
-        builder.addExport("a-module", module);
-        return builder.build();
+        return HostInstance.builder(store)
+                .addModule("a-module", WasmModule.builder().build())
+                .build();
     }
 
     private static ComponentInstance buildSrc(ComponentStore store) {
-        var builder = ComponentInstance.builder(store);
-        WasmModule module = WasmModule.builder().build();
-        builder.addExport("m", module);
-        return builder.build();
+        return HostInstance.builder(store).addModule("m", WasmModule.builder().build()).build();
     }
 
     private static ComponentInstance buildReexport(ComponentStore store) {
-        var builder = ComponentInstance.builder(store);
-
-        var modules = new WasmModule[3];
-        for (int i = 0; i < modules.length; i++) {
+        var builder = HostInstance.builder(store);
+        for (int i = 0; i < 3; i++) {
             var moduleWat =
                     "(module\n"
                             + "  (global (export \"g\") i32 (i32.const "
                             + (i + 1)
                             + "))\n"
                             + ")";
-            modules[i] = moduleFromWat(moduleWat);
+            builder.addModule("m" + (i + 1), moduleFromWat(moduleWat));
         }
-
-        builder.addExport("m1", modules[0]);
-        builder.addExport("m2", modules[1]);
-        builder.addExport("m3", modules[2]);
         return builder.build();
     }
 
     private static ComponentInstance buildProvider(ComponentStore store) {
-        var builder = ComponentInstance.builder(store);
         var moduleWat =
                 "(module\n"
                         + "    (global (export \"g1\") i32 (i32.const 100))\n"
@@ -104,9 +70,7 @@ public final class SpecTestImports {
                         + "    (global (export \"g3\") i32 (i32.const 102))\n"
                         + "    (global (export \"g4\") i32 (i32.const 103))\n"
                         + ")";
-        var module = moduleFromWat(moduleWat);
-        builder.addExport("m", module);
-        return builder.build();
+        return HostInstance.builder(store).addModule("m", moduleFromWat(moduleWat)).build();
     }
 
     /**
@@ -120,22 +84,18 @@ public final class SpecTestImports {
      * a guest calls {@code resource.drop} on an owned handle, the drop lands here.
      */
     private static ComponentInstance buildHost(ComponentStore store) {
-        var builder = ComponentInstance.builder(store);
+        var builder = HostInstance.builder(store);
         var state = new Resource1State();
-        var types = new HostTypes(builder);
 
-        Type resource1 = hostResourceType();
-        ResourceTypeInstance rt1 = builder.declareHostResourceType(resource1, state::recordDrop);
-        types.add(resource1, rt1); // 0
-        ValType ownR1 = types.add(Type.of(OwnType.builder().withTypeIdx(0).build()));
-        ValType borrowR1 = types.add(Type.of(BorrowType.builder().withTypeIdx(0).build()));
+        HostResource resource1 = builder.declareResource(state::recordDrop);
 
         // A second, distinct resource type. Its identity differs from resource1's even though
         // the two declarations are identical, which is what the "mismatched resource types"
         // test exercises.
-        Type resource2 = hostResourceType();
-        ResourceTypeInstance rt2 = builder.declareHostResourceType(resource2, null);
-        types.add(resource2, rt2);
+        HostResource resource2 = builder.declareResource(null);
+
+        ValType ownR1 = resource1.own();
+        ValType borrowR1 = resource1.borrow();
 
         FuncType constructor = func().addParam(param("r", u32())).withResult(ownR1).build();
         FuncType staticAssert =
@@ -148,53 +108,41 @@ public final class SpecTestImports {
         FuncType takeOwn =
                 func().addParam(param("self", borrowR1)).addParam(param("b", ownR1)).build();
 
-        builder.addExport("resource1", rt1);
-        builder.addExport("resource2", rt2);
-        builder.addExport("resource1-again", rt1);
+        builder.addResource("resource1", resource1);
+        builder.addResource("resource2", resource2);
+        builder.addResource("resource1-again", resource1);
 
         // A function, deliberately not a resource, so that an import declaring it as one is
         // rejected with "expected resource found func", and callable, because another test
         // imports it for what it is and checks that it returns three.
-        builder.addExport("return-three", hostFunc(builder, u32Getter, args -> new Object[] {3L}));
-        builder.addExport("nested", buildNestedHost(store));
-        builder.addExport("simple-module", moduleFromWat(SIMPLE_MODULE_WAT));
+        builder.addFunction("return-three", u32Getter, args -> new Object[] {3L});
+        builder.addInstance("nested", buildNestedHost(store));
+        builder.addModule("simple-module", moduleFromWat(SIMPLE_MODULE_WAT));
 
-        builder.addExport(
+        builder.addFunction(
                 "[constructor]resource1",
-                hostFunc(
-                        builder,
-                        constructor,
-                        args ->
-                                new Object[] {
-                                    ResourceValue.owned(
-                                            builder.instance().requireResourceType(0), rep(args[0]))
-                                }));
+                constructor,
+                args -> new Object[] {ResourceValue.owned(resource1.type(), rep(args[0]))});
 
         // Taking an `own` argument consumes the caller's handle during lifting, so these two
         // leave the guest's table one entry shorter and never see a destructor run, because a drop
-        // is
-        // what `resource.drop` does, and that is what the counters below track.
-        builder.addExport(
-                "[static]resource1.assert",
-                hostFunc(builder, staticAssert, args -> assertRep(args[0], args[1])));
-        builder.addExport(
-                "[method]resource1.take-own", hostFunc(builder, takeOwn, args -> EMPTY_RESULT));
+        // is what `resource.drop` does, and that is what the counters below track.
+        builder.addFunction(
+                "[static]resource1.assert", staticAssert, args -> assertRep(args[0], args[1]));
+        builder.addFunction("[method]resource1.take-own", takeOwn, args -> EMPTY_RESULT);
 
-        builder.addExport(
+        builder.addFunction(
                 "[static]resource1.last-drop",
-                hostFunc(builder, u32Getter, args -> new Object[] {(long) state.lastDrop}));
-        builder.addExport(
-                "[static]resource1.drops",
-                hostFunc(builder, u32Getter, args -> new Object[] {(long) state.drops}));
+                u32Getter,
+                args -> new Object[] {(long) state.lastDrop});
+        builder.addFunction(
+                "[static]resource1.drops", u32Getter, args -> new Object[] {(long) state.drops});
 
-        builder.addExport(
-                "[method]resource1.simple",
-                hostFunc(builder, simple, args -> assertRep(args[0], args[1])));
+        builder.addFunction(
+                "[method]resource1.simple", simple, args -> assertRep(args[0], args[1]));
         // Borrowing proves itself by the lifting that got us here, since both handles were checked
         // against resource1 and marked lent for the duration of this call.
-        builder.addExport(
-                "[method]resource1.take-borrow",
-                hostFunc(builder, takeBorrow, args -> EMPTY_RESULT));
+        builder.addFunction("[method]resource1.take-borrow", takeBorrow, args -> EMPTY_RESULT);
 
         return builder.build();
     }
@@ -204,11 +152,10 @@ public final class SpecTestImports {
      * itself exports one and reach through both to call {@code return-four}.
      */
     private static ComponentInstance buildNestedHost(ComponentStore store) {
-        var builder = ComponentInstance.builder(store);
-        builder.addExport(
-                "return-four",
-                hostFunc(builder, func().withResult(u32()).build(), args -> new Object[] {4L}));
-        return builder.build();
+        return HostInstance.builder(store)
+                .addFunction(
+                        "return-four", func().withResult(u32()).build(), args -> new Object[] {4L})
+                .build();
     }
 
     /**
@@ -231,44 +178,6 @@ public final class SpecTestImports {
             drops++;
             lastDrop = rep;
         }
-    }
-
-    /**
-     * Hands out consecutive indices as types are added, so that a {@code ValType} naming one is
-     * built from the index it actually landed at rather than a hand-counted guess.
-     */
-    private static final class HostTypes {
-
-        private final ComponentInstance.Builder builder;
-        private int count;
-
-        HostTypes(ComponentInstance.Builder builder) {
-            this.builder = builder;
-        }
-
-        ValType add(Type type) {
-            return add(type, null);
-        }
-
-        ValType add(Type type, ResourceTypeInstance resourceType) {
-            builder.addType(type, resourceType);
-            return ValType.builder().withTypeIdx(count++).build();
-        }
-    }
-
-    private static Type hostResourceType() {
-        return Type.of(ResourceType.builder().withRep(run.endive.wasm.types.ValType.I32).build());
-    }
-
-    private static ComponentFunction hostFunc(
-            ComponentInstance.Builder builder, FuncType funcType, ComponentFunctionCall call) {
-        return ComponentFunctionInstance.builder()
-                .withInstance(builder.instance())
-                .withTypeResolver(builder.instance())
-                .withFuncType(funcType)
-                .withCall(call)
-                .withHostProvided(true)
-                .build();
     }
 
     /** Checks a handle's representation against what the caller says it should be. */

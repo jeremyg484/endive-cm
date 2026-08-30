@@ -138,8 +138,8 @@ into ZeroFs rather than write the single `input.wit` it writes today.
 
 ### A public host-linking facade in the runtime
 
-Rather than widen the visibility of `ComponentInstance.Builder` and expose index-space mechanics as supported API, the
-runtime module gains a public facade for building a host-provided instance.
+Implemented. Rather than widen the visibility of `ComponentInstance.Builder` and expose index-space mechanics as
+supported API, the runtime module gained a public facade for building a host-provided instance.
 
 ```java
 var host = HostInstance.builder(store)
@@ -155,8 +155,20 @@ It has to cover everything `SpecTestImports` does, which is declaring value type
 handing back `ValType`s that name them, declaring host resource types with a Java destructor, adding functions from a
 `FuncType` and a `ComponentFunctionCall`, and exporting functions, resource types, nested instances, and core modules.
 
-Rewriting `SpecTestImports` onto the facade is the proof that it is sufficient, and the sync ABI spec suite staying
-green is the proof that it is correct. That rewrite should land before any code generation does.
+A world's imports come in two shapes, so the facade has two entry points. An import declared as an instance, which is
+what a WIT interface becomes, is built through `HostInstance`. An import declared as a bare function, which is what a
+top-level function in a world becomes, is built through `HostFunction`, because such a function belongs to no instance
+the importer can name. `HostFunction.of` builds and seals an instance to hold it, since a call still has to enter
+something. A bare function's type may name only primitives, as the instance holding it declares no types.
+
+`declareResource` declares the resource type together with its `own` and `borrow` in one step and hands back a
+`HostResource` carrying all three. That folds away the index bookkeeping the previous hand-written code needed, at the
+cost of two type slots for a resource that is only ever owned, which nothing indexes into and nothing pays for.
+`ResourceTypeInstance` stays package-private, so `HostResource.type()` hands out the public `ResourceTypeRef` that
+`ResourceValue.owned` wants.
+
+`SpecTestImports` is rewritten onto the facade and the sync ABI spec suite stays green, 1287 tests passing with the 8
+pre-existing `@Disabled` gates untouched. `HostInstanceTests` covers the facade directly.
 
 ### Generated types are nominal, and cross the boundary through descriptors
 
@@ -255,6 +267,7 @@ The async example is out of scope. Async is unimplemented across the whole proje
 
 ## Prerequisites
 
-1. `HostInstance`, the public host-linking facade, with `SpecTestImports` rewritten onto it and the spec suite green.
+1. ~~`HostInstance`, the public host-linking facade, with `SpecTestImports` rewritten onto it and the spec suite
+   green.~~ Done, along with `HostFunction` and `HostResource`.
 2. WIT-to-binary encoding on the wasm-tools module.
 3. `ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module.
