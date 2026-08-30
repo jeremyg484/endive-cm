@@ -18,6 +18,7 @@
   </licenses>
 
   <modules>
+    <module>bindgen-processor</module>
     <module>canonical-abi</module>
     <module>cm-test-gen-lib</module>
     <module>cm-test-gen-plugin</module>
@@ -50,6 +51,7 @@
     <jackson.version>2.22.2</jackson.version>
     <assertj.version>3.27.7</assertj.version>
     <junit.version>5.14.4</junit.version>
+    <google-compile-testing.version>0.23.0</google-compile-testing.version>
   </properties>
 
   <dependencyManagement>
@@ -98,6 +100,11 @@
         <groupId>run.endive</groupId>
         <artifactId>wasm-tools</artifactId>
         <version>${endive.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>run.endive.cm</groupId>
+        <artifactId>bindgen-processor</artifactId>
+        <version>${project.version}</version>
       </dependency>
       <dependency>
         <groupId>run.endive.cm</groupId>
@@ -152,6 +159,12 @@
         <artifactId>maven-plugin-annotations</artifactId>
         <version>${maven-plugin-annotations.version}</version>
         <scope>provided</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.google.testing.compile</groupId>
+        <artifactId>compile-testing</artifactId>
+        <version>${google-compile-testing.version}</version>
+        <scope>test</scope>
       </dependency>
       <dependency>
         <groupId>org.assertj</groupId>
