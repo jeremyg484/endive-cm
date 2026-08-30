@@ -42,26 +42,28 @@ class BindgenProcessorTest {
                 .hasSourceEquivalentTo(JavaFileObjects.forResource("MyWorldGenerated.java"));
     }
 
-    /** A world exporting an interface as well as functions of its own. */
+    /** The world of wasmtime's world-exports example, which also imports a named interface. */
     @Test
     void generatesWorldExportBindings() {
         Compilation compilation = compile("WorldExportsHost.java");
 
         assertThat(compilation).succeededWithoutWarnings();
         assertThat(compilation)
-                .generatedSourceFile("endive.testing.ExportsWorld")
-                .hasSourceEquivalentTo(JavaFileObjects.forResource("ExportsWorldGenerated.java"));
+                .generatedSourceFile("endive.testing.HelloWorld")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource("HelloWorldExportsGenerated.java"));
     }
 
-    /** An imported interface declaring a resource the host implements. */
+    /** The world of wasmtime's imported-resources example, whose resource uses an enum. */
     @Test
     void generatesImportedResourceBindings() {
         Compilation compilation = compile("ImportedResourceHost.java");
 
         assertThat(compilation).succeededWithoutWarnings();
         assertThat(compilation)
-                .generatedSourceFile("endive.testing.ResourcesWorld")
-                .hasSourceEquivalentTo(JavaFileObjects.forResource("ResourcesWorldGenerated.java"));
+                .generatedSourceFile("endive.testing.ImportSomeResources")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource("ImportSomeResourcesGenerated.java"));
     }
 
     @Test

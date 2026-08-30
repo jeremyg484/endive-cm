@@ -10,6 +10,8 @@ import run.endive.cm.parser.ComponentParser;
 import run.endive.cm.tools.WitParser;
 import run.endive.cm.types.ComponentDecl;
 import run.endive.cm.types.ComponentType;
+import run.endive.cm.types.DefValType;
+import run.endive.cm.types.EnumType;
 import run.endive.cm.types.Export;
 import run.endive.cm.types.ExportSection;
 import run.endive.cm.types.ExternDesc;
@@ -19,6 +21,7 @@ import run.endive.cm.types.InstanceType;
 import run.endive.cm.types.Section;
 import run.endive.cm.types.Sort;
 import run.endive.cm.types.Type;
+import run.endive.cm.types.TypeBound;
 import run.endive.cm.types.TypeSection;
 import run.endive.cm.types.WasmComponent;
 
@@ -95,7 +98,7 @@ final class WorldReader {
      * The wrapper holds the world as a type declaration and then exports it under its qualified id.
      */
     private static WitWorld readWorld(String name, ComponentType wrapper) {
-        List<Type> declared = new ArrayList<>();
+        WitScope declared = new WitScope();
         String qualifiedName = null;
         ComponentType world = null;
 
@@ -129,7 +132,7 @@ final class WorldReader {
      * walk goes, so an index in a declaration is resolved against what came before it.
      */
     private static WitWorld build(String name, String qualifiedName, ComponentType world) {
-        List<Type> declared = new ArrayList<>();
+        WitScope declared = new WitScope();
         List<WitFunction> importedFunctions = new ArrayList<>();
         List<WitInterface> importedInterfaces = new ArrayList<>();
         List<WitFunction> exportedFunctions = new ArrayList<>();
@@ -168,7 +171,7 @@ final class WorldReader {
 
     /** A world reaches a function directly and an interface as an instance, both ways round. */
     private static void collect(
-            List<Type> declared,
+            WitScope declared,
             String name,
             ExternDesc desc,
             List<WitFunction> functions,
@@ -188,13 +191,15 @@ final class WorldReader {
      * names the wrong type.
      */
     private static WitInterface readInterface(String name, InstanceType type) {
-        List<Type> declared = new ArrayList<>();
+        WitScope scope = new WitScope();
+        scope.withOwner(simpleNameOf(name));
         List<WitFunction> functions = new ArrayList<>();
+        List<WitEnum> enums = new ArrayList<>();
         Map<String, ResourceFunctions> resources = new LinkedHashMap<>();
 
         for (InstanceDecl decl : type.getInstanceDecls()) {
             if (decl.kind() == InstanceDecl.Kind.TYPE) {
-                declared.add(decl.type());
+                scope.add(decl.type());
                 continue;
             }
             if (decl.kind() == InstanceDecl.Kind.ALIAS) {
@@ -209,12 +214,10 @@ final class WorldReader {
             String exportName = decl.exportDecl().name();
             ExternDesc desc = decl.exportDecl().externDesc();
             if (desc.kind() == ExternDesc.Kind.TYPE) {
-                // A resource declaration, which takes the next index in the space.
-                declared.add(null);
-                resources.computeIfAbsent(exportName, ResourceFunctions::new);
+                declareType(scope, enums, resources, exportName, desc);
                 continue;
             }
-            WitFunction function = function(declared, exportName, desc);
+            WitFunction function = function(scope, exportName, desc);
             ResourceFunctions owner = ownerOf(resources, exportName);
             if (owner == null) {
                 functions.add(function);
@@ -227,7 +230,41 @@ final class WorldReader {
         for (ResourceFunctions resource : resources.values()) {
             read.add(resource.toResource());
         }
-        return new WitInterface(name, functions, read);
+        return new WitInterface(name, functions, read, enums, scope);
+    }
+
+    /**
+     * A type an interface exports takes an index of its own, whether it names a resource or a type
+     * defined just above it, so both have to be recorded or every index after them is wrong.
+     *
+     * <p>A {@code sub} bound is a resource, which has no structure to read. An {@code eq} bound
+     * names a type the interface defined, and that is where a record or an enum gets its name.
+     */
+    private static void declareType(
+            WitScope scope,
+            List<WitEnum> enums,
+            Map<String, ResourceFunctions> resources,
+            String exportName,
+            ExternDesc desc) {
+        TypeBound bound = desc.typeBound();
+        if (bound == null || bound.kind() != TypeBound.Kind.EQ) {
+            scope.add(null);
+            resources.computeIfAbsent(exportName, ResourceFunctions::new);
+            return;
+        }
+        Type named = scope.at((int) bound.typeIdx());
+        scope.add(named, exportName);
+        if (named != null
+                && named.defValType() != null
+                && named.defValType().kind() == DefValType.Kind.ENUM) {
+            enums.add(new WitEnum(exportName, ((EnumType) named.defValType()).labels()));
+        }
+    }
+
+    /** An interface's own name, with any package qualification dropped. */
+    private static String simpleNameOf(String name) {
+        int slash = name.lastIndexOf('/');
+        return slash < 0 ? name : name.substring(slash + 1);
     }
 
     /** The resource a {@code [constructor]}, {@code [method]} or {@code [static]} name belongs to. */
@@ -265,9 +302,10 @@ final class WorldReader {
 
         void add(String exportName, WitFunction function) {
             if (exportName.startsWith("[constructor]")) {
-                constructor = new WitFunction(name, function.type());
+                constructor = new WitFunction(name, function.type(), function.scope());
             } else if (exportName.startsWith("[method]")) {
-                methods.add(new WitFunction(memberName(exportName), function.type()));
+                methods.add(
+                        new WitFunction(memberName(exportName), function.type(), function.scope()));
             } else {
                 throw new BindgenException(
                         "\""
@@ -290,7 +328,7 @@ final class WorldReader {
      * Grows the type index space by whatever {@code decl} contributes to it. An alias would also
      * grow it, and silently mis-numbering every index after one is worse than refusing to read it.
      */
-    private static void track(List<Type> declared, ComponentDecl decl) {
+    private static void track(WitScope declared, ComponentDecl decl) {
         InstanceDecl instanceDecl = decl.instanceDecl();
         if (instanceDecl == null) {
             return;
@@ -306,7 +344,7 @@ final class WorldReader {
         }
     }
 
-    private static WitFunction function(List<Type> declared, String name, ExternDesc desc) {
+    private static WitFunction function(WitScope declared, String name, ExternDesc desc) {
         if (desc.kind() != ExternDesc.Kind.FUNC) {
             throw new BindgenException(
                     "\""
@@ -319,10 +357,10 @@ final class WorldReader {
         if (type == null || type.funcType() == null) {
             throw new BindgenException("\"" + name + "\" does not name a function type");
         }
-        return new WitFunction(name, type.funcType());
+        return new WitFunction(name, type.funcType(), declared);
     }
 
-    private static InstanceType instanceTypeAt(List<Type> declared, ExternDesc desc, String name) {
+    private static InstanceType instanceTypeAt(WitScope declared, ExternDesc desc, String name) {
         Type type = typeAt(declared, desc, name);
         if (type.instanceType() == null) {
             throw new BindgenException("\"" + name + "\" does not name an interface");
@@ -330,8 +368,7 @@ final class WorldReader {
         return type.instanceType();
     }
 
-    private static ComponentType componentTypeAt(
-            List<Type> declared, ExternDesc desc, String name) {
+    private static ComponentType componentTypeAt(WitScope declared, ExternDesc desc, String name) {
         Type type = typeAt(declared, desc, name);
         if (type.componentType() == null) {
             throw new BindgenException("\"" + name + "\" does not name a component type");
@@ -339,13 +376,12 @@ final class WorldReader {
         return type.componentType();
     }
 
-    private static Type typeAt(List<Type> declared, ExternDesc desc, String name) {
-        int index = (int) desc.typeIdx();
-        if (index < 0 || index >= declared.size()) {
-            throw new BindgenException(
-                    "\"" + name + "\" names type " + index + ", which was never declared");
+    private static Type typeAt(WitScope declared, ExternDesc desc, String name) {
+        try {
+            return declared.at((int) desc.typeIdx());
+        } catch (BindgenException e) {
+            throw new BindgenException("\"" + name + "\" names a type that was never declared", e);
         }
-        return declared.get(index);
     }
 
     private static String describe(ExternDesc.Kind kind) {

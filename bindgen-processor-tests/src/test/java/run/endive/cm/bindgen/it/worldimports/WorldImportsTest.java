@@ -1,4 +1,4 @@
-package run.endive.cm.bindgen.it;
+package run.endive.cm.bindgen.it.worldimports;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

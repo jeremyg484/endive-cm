@@ -15,11 +15,20 @@ final class WitInterface {
     private final String name;
     private final List<WitFunction> functions;
     private final List<WitResource> resources;
+    private final List<WitEnum> enums;
+    private final WitScope scope;
 
-    WitInterface(String name, List<WitFunction> functions, List<WitResource> resources) {
+    WitInterface(
+            String name,
+            List<WitFunction> functions,
+            List<WitResource> resources,
+            List<WitEnum> enums,
+            WitScope scope) {
         this.name = Objects.requireNonNull(name, "name");
         this.functions = List.copyOf(functions);
         this.resources = List.copyOf(resources);
+        this.enums = List.copyOf(enums);
+        this.scope = scope;
     }
 
     /** The name the world imports this under, which is the key the linker matches. */
@@ -34,6 +43,15 @@ final class WitInterface {
 
     List<WitResource> resources() {
         return resources;
+    }
+
+    List<WitEnum> enums() {
+        return enums;
+    }
+
+    /** The index space this interface's value types resolve against. */
+    WitScope scope() {
+        return scope;
     }
 
     /** The interface's own name, with any package qualification dropped. */

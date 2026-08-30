@@ -1,0 +1,23 @@
+package example:imported-resources;
+
+interface logging {
+    enum level {
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    resource logger {
+        constructor(max-level: level);
+
+        get-max-level: func() -> level;
+        set-max-level: func(level: level);
+
+        log: func(level: level, msg: string);
+    }
+}
+
+world import-some-resources {
+    import logging;
+}

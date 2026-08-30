@@ -24,8 +24,6 @@ public final class MyWorld {
 
     private static final FuncType LOG_FUNC = FuncType.builder().addParam(LabelValType.builder().withLabel("msg").withValType(ValType.builder().withPrimValType(PrimValType.STRING).build()).build()).build();
 
-    private static final FuncType MY_CUSTOM_HOST_TICK_FUNC = FuncType.builder().build();
-
     /**
      * The world's imports, which the embedder implements.
      */
@@ -66,10 +64,12 @@ public final class MyWorld {
             return new Object[0];
         }));
         MyCustomHost myCustomHost = imports.myCustomHost();
-        values.put("my-custom-host", HostInstance.builder(store).addFunction("tick", MY_CUSTOM_HOST_TICK_FUNC, args -> {
+        HostInstance.Builder myCustomHostBuilder = HostInstance.builder(store);
+        myCustomHostBuilder.addFunction("tick", FuncType.builder().build(), args -> {
             myCustomHost.tick();
             return new Object[0];
-        }).build());
+        });
+        values.put("my-custom-host", myCustomHostBuilder.build());
         return new MyWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 

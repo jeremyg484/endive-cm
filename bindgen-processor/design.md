@@ -346,9 +346,9 @@ Whether an interface is written inline in the world or named by its package make
 as an instance, differing only in whether the name carries a package qualification, and the Java name comes from the
 last segment either way.
 
-Two generated types can still collide, because everything a world generates lands in one Java package. Two worlds of
-the same name, or an imported and an exported interface of the same name, would each produce one Java type. Neither is
-silent, since the result fails to compile, and putting exports under a nested holder is the fix when one turns up.
+Two worlds of the same name, or an imported and an exported interface of the same name, would each produce one Java
+type. Neither is silent, since the result fails to compile. Two of the bindgen! examples do declare a `hello-world`
+each, which is why the end-to-end tests give every example a package of its own.
 
 An interface may declare a resource the host implements. The Canonical ABI names a resource's functions rather than
 nesting them, so `[constructor]file` and `[method]file.get-name` are split apart again and become a nested Java
@@ -377,9 +377,35 @@ has to be declared before anything names it. That is also why its constructor an
 `instantiate` rather than held as constants. `own` and `borrow` name the resource by index, and the index is only known
 once `declareResource` has run.
 
-Only functions over primitives and `string` are read so far. Records, variants, a resource's static functions, a
-world's `use` and an interface that uses types from elsewhere are each rejected with a message naming what is
-unsupported.
+An interface may also declare a `list` or an `enum`. A list is carried by `java.util.List` of whatever carries its
+element, so `list<u8>` arrives as `List<Short>`. An enum becomes a Java enum carrying the label the ABI knows it by,
+and converts at the boundary, because the ABI despecializes an enum to a variant and lifts it as a `VariantValue`
+rather than as anything nominal.
+
+Both have to be declared into the host instance before a function type can name them, the same as a resource, which is
+why every imported interface is built through a local rather than in one chained expression. A `WitScope` carries an
+interface's type index space together with the names its exports give those types, since only the export says what a
+type is called and a Java type has to be called something.
+
+Records, variants, flags, a resource's static functions, a world's `use`, an interface that uses types from elsewhere,
+and a compound type on a world's bare function import are each rejected with a message naming what is unsupported. The
+last of those is a limit of `HostFunction`, which builds an instance with no type space for an index to resolve
+against.
+
+Two generated types can still collide, because everything a world generates lands in one Java package.
+
+## Fidelity to the bindgen! examples
+
+The WIT under `src/test/resources/wit` in `bindgen-processor` is the bindgen! example world for that stage, verbatim.
+That is what the golden files are generated from, so a difference from the example is visible rather than assumed.
+
+The end-to-end fixtures use the same WIT, with one exception that has to be stated wherever it appears. A world that
+imports without exporting cannot be driven, since nothing enters the guest, so `import-some-resources` carries an added
+`export run: func()`. Nothing else differs, and each fixture says so at the top.
+
+Earlier fixtures were adapted rather than copied, because both `sha256: func(bytes: list<u8>) -> string` and the
+`logging` interface's `enum level` needed types the generator could not yet read. Adapting them hid that, which is the
+thing to avoid. A WIT type that is not supported belongs in the unsupported list above, not worked around in a fixture.
 
 ## Module Layout
 
