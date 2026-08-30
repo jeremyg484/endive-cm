@@ -1,7 +1,5 @@
 package run.endive.cm.tools;
 
-import io.roastedroot.zerofs.Configuration;
-import io.roastedroot.zerofs.ZeroFs;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -13,7 +11,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import io.roastedroot.zerofs.Configuration;
+import io.roastedroot.zerofs.ZeroFs;
 import run.endive.log.Logger;
 import run.endive.log.SystemLogger;
 import run.endive.runtime.ByteArrayMemory;
@@ -25,6 +26,13 @@ import run.endive.wasi.WasiOptions;
 import run.endive.wasi.WasiPreview1;
 import run.endive.wasm.WasmModule;
 
+/**
+ * Wraps {@code wasm-tools component wit}, which reads a WIT package and writes it back out in
+ * either form.
+ *
+ * <p>Input may be WIT text or the binary encoding of a package, since wasm-tools tells them apart
+ * by content rather than by file name.
+ */
 public final class WitParser {
     private WitParser() {}
 
@@ -36,6 +44,12 @@ public final class WitParser {
                 }
             };
     private static final WasmModule MODULE = WasmToolsModule.load();
+
+    /** The form a WIT package is written out in. */
+    private enum Form {
+        TEXT,
+        BINARY
+    }
 
     public static String parse(File file) {
         try (var is = new FileInputStream(file)) {
@@ -54,6 +68,40 @@ public final class WitParser {
     }
 
     public static String parse(InputStream is) {
+        return new String(run(is, Form.TEXT), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Encodes a WIT package into its binary form, which is a component whose exports name the
+     * package's worlds and interfaces and carry their types.
+     *
+     * @see <a href="https://github.com/WebAssembly/component-model/blob/706074c96bc14cfc58469e1bdc452bb4d91921c7/design/mvp/Binary.md">Binary.md</a>
+     */
+    public static byte[] encode(File file) {
+        try (var is = new FileInputStream(file)) {
+            return encode(is);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    public static byte[] encode(String wit) {
+        try (var is = new ByteArrayInputStream(wit.getBytes(StandardCharsets.UTF_8))) {
+            return encode(is);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    public static byte[] encode(InputStream is) {
+        return run(is, Form.BINARY);
+    }
+
+    /**
+     * Text goes to stdout and binary goes to a file, so the requested form decides both the command
+     * and where the result is read back from.
+     */
+    private static byte[] run(InputStream is, Form form) {
         try (var stdinStream = new ByteArrayInputStream(new byte[0]);
                 var stdoutStream = new ByteArrayOutputStream();
                 var stderrStream = new ByteArrayOutputStream();
@@ -67,6 +115,15 @@ public final class WitParser {
             Files.createDirectory(inputDir);
             Path inputFile = inputDir.resolve("input.wit");
             Files.write(inputFile, is.readAllBytes());
+            Path outputFile = inputDir.resolve("output.wasm");
+
+            List<String> args = new ArrayList<>(List.of("wasm-tools", "component", "wit"));
+            if (form == Form.BINARY) {
+                args.add("--wasm");
+                args.add("-o");
+                args.add(outputFile.toString());
+            }
+            args.add(inputFile.toString());
 
             var options =
                     WasiOptions.builder()
@@ -74,8 +131,7 @@ public final class WitParser {
                             .withStdout(stdoutStream, false)
                             .withStderr(stderrStream, false)
                             .withDirectory(inputDir.toString(), inputDir)
-                            .withArguments(
-                                    List.of("wasm-tools", "component", "wit", inputFile.toString()))
+                            .withArguments(args)
                             .build();
 
             try (var wasi =
@@ -97,7 +153,17 @@ public final class WitParser {
                     }
                 }
             }
-            return stdoutStream.toString(StandardCharsets.UTF_8);
+
+            if (form == Form.TEXT) {
+                return stdoutStream.toByteArray();
+            }
+            if (!Files.exists(outputFile)) {
+                throw new WitParseException(
+                        "wasm-tools produced no binary: "
+                                + stdoutStream.toString(StandardCharsets.UTF_8)
+                                + stderrStream.toString(StandardCharsets.UTF_8));
+            }
+            return Files.readAllBytes(outputFile);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

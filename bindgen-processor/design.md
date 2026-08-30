@@ -38,10 +38,14 @@ established fact rather than expectation.
 
 ### WIT text converts to binary through the wasm-tools module already present
 
-The embedded wasm-tools guest accepts `component wit --wasm -o <out> <in>`, driven through the same ZeroFs and
-WasiPreview1 plumbing `WitParser` already uses. Its output is byte-identical to the output of a native wasm-tools
-1.245.1 on the same input. So this is a new entry point on the existing wasm-tools wrapper rather than new toolchain
-work.
+Implemented as `WitParser.encode`, alongside the `parse` that was already there. Both drive
+`wasm-tools component wit`, which writes text to stdout and binary to a file, so the requested form picks both the
+command and where the result is read back from. Output is byte-identical to a native wasm-tools 1.245.1 on the same
+input.
+
+wasm-tools tells WIT text and the binary encoding apart by content rather than by file name, so `parse` reads either.
+That gives the encoder a round-trip test needing nothing outside this module, encoding WIT and reading the binary back
+as the same package.
 
 ### ComponentParser reads the WIT binary unchanged
 
@@ -57,6 +61,18 @@ A WIT package encodes as a component whose exports name the package's top-level 
 
 Records, enums, variants, flags, function types, and their parameter names all survive the round trip into the
 type model.
+
+Finding a world therefore takes four steps, which `WitBinaryTests` fixes in place.
+
+1. The export section entry named for the world, whose sort is `TYPE`, gives a type index.
+2. That type is the package item, a `ComponentType` wrapper.
+3. The wrapper holds two declarations, a `ComponentType` for the world itself and an export declaration naming it under
+   its fully qualified id. The export's `typeIdx` indexes the wrapper's own nested type space, where the declarations
+   preceding it are numbered from zero.
+4. The world's `ImportDecl`s and `ExportDecl`s name their function types by index into that same nested space.
+
+Every nesting level restarts its type numbering, so resolution is index bookkeeping over each decl list rather than a
+lookup in one flat space.
 
 ### Component binaries for end-to-end tests are buildable from .wat
 
@@ -269,5 +285,5 @@ The async example is out of scope. Async is unimplemented across the whole proje
 
 1. ~~`HostInstance`, the public host-linking facade, with `SpecTestImports` rewritten onto it and the spec suite
    green.~~ Done, along with `HostFunction` and `HostResource`.
-2. WIT-to-binary encoding on the wasm-tools module.
+2. ~~WIT-to-binary encoding on the wasm-tools module.~~ Done, as `WitParser.encode`.
 3. `ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module.
