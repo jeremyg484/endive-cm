@@ -275,9 +275,9 @@ conversion.
 `WorldReader` refuses what it cannot yet read rather than guessing. An alias that introduces a type would shift every
 index after it, so a world using types from an interface is rejected by name instead of being mis-numbered in silence.
 
-The Hello World world generates this, verified against a checked-in expected source and confirmed by hand against a
-component built with `component embed` and `component new`. Instantiating it linked, calling `greet` entered the guest,
-and the guest's call back into `name` returned the host's string through the ABI.
+The Hello World world generates this, verified against a checked-in expected source and run end to end in
+`bindgen-processor-tests` against a component built with `component embed` and `component new`. Instantiating it links,
+calling `greet` enters the guest, and the guest's call back into `name` returns the host's string through the ABI.
 
 ```java
 public final class HelloWorld {
@@ -307,9 +307,17 @@ Only functions over primitives and `string` are read so far. Records, variants, 
   built with JavaParser, written through the `Filer`, and compared against checked-in expected sources with
   `compile-testing`. WIT for those tests lives in `src/test/resources/wit/` and reaches the processor through
   `withClasspath`.
-- `bindgen-processor-tests` holds the end-to-end tests, where a `.wat` fixture and a `.wit` file are turned into a
-  component, the generated bindings are compiled against it, and host and guest call each other. This module is blocked
-  on `ComponentEmbed` and `ComponentNew`.
+- `bindgen-processor-tests` holds the end-to-end tests. A `.wat` fixture and a `.wit` file are turned into a component
+  by `ComponentEmbed` and `ComponentNew`, and the same WIT generates the bindings that call it, so nothing is written
+  by hand twice.
+
+  The processor runs over this module's own test sources, named through the compiler plugin's
+  `annotationProcessorPaths` rather than discovered on the class path. Naming it keeps processing explicit, which
+  matters because the build fails on warnings and implicit discovery warns. Maven copies test resources before
+  compiling test sources, so the WIT is on the class output by the time the processor looks for it.
+
+  The fixture traps unless the host's string reaches guest memory intact, and a test feeding it a different string
+  asserts that trap. Without that second test the first would pass on bindings whose value never arrived.
 
 ## Staging
 
@@ -331,5 +339,8 @@ The async example is out of scope. Async is unimplemented across the whole proje
    green.~~ Done, along with `HostFunction` and `HostResource`.
 2. ~~WIT-to-binary encoding on the wasm-tools module.~~ Done, as `WitParser.encode`.
 3. ~~`ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module.~~ Done.
-4. `bindgen-processor-tests`, so that the end-to-end path is checked by a test rather than by hand. The processor runs
-   over that module's own test sources, so the generated bindings are ordinary compiled classes a test can call.
+4. ~~`bindgen-processor-tests`, so that the end-to-end path is checked by a test rather than by hand.~~ Done.
+
+Stage 0 of the staging list is complete and checked end to end. Stage 1 is next, which is a world importing an inline
+interface alongside its top-level functions, and that is where an import becomes an instance rather than a bare
+function.

@@ -19,6 +19,7 @@
 
   <modules>
     <module>bindgen-processor</module>
+    <module>bindgen-processor-tests</module>
     <module>canonical-abi</module>
     <module>cm-test-gen-lib</module>
     <module>cm-test-gen-plugin</module>

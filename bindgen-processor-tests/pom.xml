@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>run.endive.cm</groupId>
+    <artifactId>endive-cm</artifactId>
+    <version>999-SNAPSHOT</version>
+  </parent>
+  <artifactId>bindgen-processor-tests</artifactId>
+  <packaging>jar</packaging>
+
+  <name>Endive CM - Bindgen End-to-End Tests</name>
+  <description>Generated bindings compiled and run against components built from WIT.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-api</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>run.endive</groupId>
+      <artifactId>runtime</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
+      <artifactId>parser</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
+      <artifactId>runtime</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
+      <artifactId>types</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
+      <artifactId>wasm-tools</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!-- Named rather than discovered, so that processing is explicit and warning-free. -->
+          <annotationProcessorPaths>
+            <path>
+              <groupId>run.endive.cm</groupId>
+              <artifactId>bindgen-processor</artifactId>
+              <version>${project.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>
