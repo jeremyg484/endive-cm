@@ -5,20 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import run.endive.cm.parser.ComponentParser;
+import run.endive.cm.bindgen.it.Components;
 import run.endive.cm.runtime.Bindgen;
 import run.endive.cm.runtime.ComponentStore;
-import run.endive.cm.tools.ComponentEmbed;
-import run.endive.cm.tools.ComponentNew;
-import run.endive.cm.tools.ComponentValidate;
 import run.endive.cm.types.WasmComponent;
 import run.endive.runtime.TrapException;
 
@@ -38,16 +30,11 @@ public class HelloWorldTest {
     /** Built the way a test fixture is built, from a core module and the world it implements. */
     @BeforeAll
     static void buildComponent() {
-        byte[] embedded =
-                ComponentEmbed.embed(resource("/hello-world.wat"), text("/wit/hello-world.wit"));
-        byte[] binary = ComponentNew.create(embedded);
-
-        ComponentValidate.validate(new ByteArrayInputStream(binary), "component-model");
         component =
-                ComponentParser.builder()
-                        .withValidation(false)
-                        .build()
-                        .parse(() -> new ByteArrayInputStream(binary));
+                Components.build(
+                        Components.bytes("/hello-world.wat"),
+                        Components.text("/wit/hello-world.wit"),
+                        "hello-world");
     }
 
     @Test
@@ -86,18 +73,5 @@ public class HelloWorldTest {
 
     private static HelloWorld instantiate(HelloWorld.Imports imports) {
         return HelloWorld.instantiate(new ComponentStore(), component, imports);
-    }
-
-    private static String text(String path) {
-        return new String(resource(path), StandardCharsets.UTF_8);
-    }
-
-    private static byte[] resource(String path) {
-        try (InputStream is = HelloWorldTest.class.getResourceAsStream(path)) {
-            assertNotNull(is, "resource not found: " + path);
-            return is.readAllBytes();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
     }
 }

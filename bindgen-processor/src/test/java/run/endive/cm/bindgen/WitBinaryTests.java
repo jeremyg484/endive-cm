@@ -153,7 +153,8 @@ public class WitBinaryTests {
     private static WasmComponent parse(String wit) {
         byte[] encoded = WitParser.encode(wit);
         return ComponentParser.builder()
-                .withValidation(false)
+                .withValidation(true)
+                .withValidator(WitValidator.INSTANCE)
                 .build()
                 .parse(() -> new ByteArrayInputStream(encoded));
     }

@@ -2,24 +2,15 @@ package run.endive.cm.bindgen.it.worldimports;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import run.endive.cm.parser.ComponentParser;
+import run.endive.cm.bindgen.it.Components;
 import run.endive.cm.runtime.Bindgen;
 import run.endive.cm.runtime.ComponentStore;
-import run.endive.cm.tools.ComponentEmbed;
-import run.endive.cm.tools.ComponentNew;
-import run.endive.cm.tools.ComponentValidate;
 import run.endive.cm.types.WasmComponent;
 
 /**
@@ -37,16 +28,11 @@ public class WorldImportsTest {
 
     @BeforeAll
     static void buildComponent() {
-        byte[] binary =
-                ComponentNew.create(
-                        ComponentEmbed.embed(resource("/my-world.wat"), text("/wit/my-world.wit")));
-
-        ComponentValidate.validate(new ByteArrayInputStream(binary), "component-model");
         component =
-                ComponentParser.builder()
-                        .withValidation(false)
-                        .build()
-                        .parse(() -> new ByteArrayInputStream(binary));
+                Components.build(
+                        Components.bytes("/my-world.wat"),
+                        Components.text("/wit/my-world.wit"),
+                        "my-world");
     }
 
     @Test
@@ -126,19 +112,6 @@ public class WorldImportsTest {
         @Override
         public void tick() {
             ticks++;
-        }
-    }
-
-    private static String text(String path) {
-        return new String(resource(path), StandardCharsets.UTF_8);
-    }
-
-    private static byte[] resource(String path) {
-        try (InputStream is = WorldImportsTest.class.getResourceAsStream(path)) {
-            assertNotNull(is, "resource not found: " + path);
-            return is.readAllBytes();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
         }
     }
 }

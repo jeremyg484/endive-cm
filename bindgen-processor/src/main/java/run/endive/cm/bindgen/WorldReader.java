@@ -52,7 +52,8 @@ final class WorldReader {
 
         WasmComponent pkg =
                 ComponentParser.builder()
-                        .withValidation(false)
+                        .withValidation(true)
+                        .withValidator(WitValidator.INSTANCE)
                         .build()
                         .parse(() -> new ByteArrayInputStream(encoded));
 

@@ -1,24 +1,15 @@
 package run.endive.cm.bindgen.it.importedresources;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import run.endive.cm.parser.ComponentParser;
+import run.endive.cm.bindgen.it.Components;
 import run.endive.cm.runtime.Bindgen;
 import run.endive.cm.runtime.ComponentStore;
-import run.endive.cm.tools.ComponentEmbed;
-import run.endive.cm.tools.ComponentNew;
-import run.endive.cm.tools.ComponentValidate;
 import run.endive.cm.types.WasmComponent;
 
 /**
@@ -36,19 +27,11 @@ public class ImportedResourceTest {
 
     @BeforeAll
     static void buildComponent() {
-        byte[] binary =
-                ComponentNew.create(
-                        ComponentEmbed.embed(
-                                resource("/import-some-resources.wat"),
-                                text("/wit/import-some-resources.wit"),
-                                "import-some-resources"));
-
-        ComponentValidate.validate(new ByteArrayInputStream(binary), "component-model");
         component =
-                ComponentParser.builder()
-                        .withValidation(false)
-                        .build()
-                        .parse(() -> new ByteArrayInputStream(binary));
+                Components.build(
+                        Components.bytes("/import-some-resources.wat"),
+                        Components.text("/wit/import-some-resources.wit"),
+                        "import-some-resources");
     }
 
     /** The guest constructs a host resource, passing an enum the bindings convert on the way in. */
@@ -146,19 +129,6 @@ public class ImportedResourceTest {
         @Override
         public void drop() {
             dropped = true;
-        }
-    }
-
-    private static String text(String path) {
-        return new String(resource(path), StandardCharsets.UTF_8);
-    }
-
-    private static byte[] resource(String path) {
-        try (InputStream is = ImportedResourceTest.class.getResourceAsStream(path)) {
-            assertNotNull(is, "resource not found: " + path);
-            return is.readAllBytes();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
         }
     }
 }

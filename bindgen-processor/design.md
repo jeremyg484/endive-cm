@@ -62,6 +62,12 @@ A WIT package encodes as a component whose exports name the package's top-level 
 Records, enums, variants, flags, function types, and their parameter names all survive the round trip into the
 type model.
 
+The encoded package is validated before it is read, through `ComponentValidate`, the same way every other parse in
+this project is. The binary comes from wasm-tools moments earlier so nothing is expected to fail, but the parser
+accepting whatever wasm-tools produces is a rule the project holds itself to, and it costs one already-loaded
+wasm-tools run at compile time. Without it, a wasm-tools version encoding something this parser read differently would
+surface as a puzzling generation failure rather than as a validation error.
+
 Finding a world therefore takes four steps, which `WitBinaryTests` fixes in place.
 
 1. The export section entry named for the world, whose sort is `TYPE`, gives a type index.
@@ -424,6 +430,10 @@ thing to avoid. A WIT type that is not supported belongs in the unsupported list
 
   The fixture traps unless the host's string reaches guest memory intact, and a test feeding it a different string
   asserts that trap. Without that second test the first would pass on bindings whose value never arrived.
+
+  Components are built and parsed through `Components`, which wires `TestValidator` into the parser rather than
+  validating in a call of its own. Every parse in this project reaches wasm-tools the same way, so there is one place
+  to look when that has to change.
 
 ## Staging
 
