@@ -122,19 +122,23 @@ them rather than inventing its own.
 
 ### The Bindgen annotation
 
-WIT is found the way the bindgen! macro finds it. A `wit` root directory holds the WIT, which in a conventional Maven
-project means `src/main/resources/wit/`.
+Implemented. WIT is found the way the bindgen! macro finds it. A `wit` root directory holds the WIT, which in a
+conventional Maven project means `src/main/resources/wit/`.
 
 ```java
-@Bindgen(world = "calculator")                            // reads wit/
-@Bindgen(path = "wit/calc", world = "calculator")         // an explicit root
+@Bindgen(world = "hello-world")                           // reads wit/hello-world.wit
+@Bindgen(world = "calculator", path = "wit/calc.wit")
 @Bindgen(inline = "package ex:calc;\nworld calculator { ... }")
 ```
 
-- `path` defaults to `wit` and is resolved as a resource path. Naming a directory takes the whole directory as the WIT
-  package, naming a single file takes just that file.
-- `world` names the world to generate for and may be omitted when the package declares exactly one.
+- `world` names the world to generate for and may be omitted when the package declares exactly one, in which case
+  `path` or `inline` has to say where the WIT is.
+- `path` is a resource path, defaulting to `wit/<world>.wit`.
 - `inline` carries WIT text directly and is mutually exclusive with `path`.
+
+`path` names a single file rather than a directory. The `Filer` fetches a named resource and cannot list a directory,
+so taking a whole directory as one package needs a route to a real filesystem path, which multi-file package support
+will have to bring with it.
 
 Resources are looked up through the `Filer`, trying `CLASS_OUTPUT` and then `CLASS_PATH`. Maven's `process-resources`
 phase populates `target/classes` before `compile`, so `CLASS_OUTPUT` is what resolves during a normal build.
@@ -208,8 +212,12 @@ is the right trade for now and can be revisited once there is something to measu
 
 ### Type metadata is generated as builder code
 
-Generated code reconstructs the `ValType` and `FuncType` graph with the existing builders, in one package-private static
-holder per world so that nothing is duplicated across the generated classes, with structurally identical types shared.
+Generated code reconstructs the `ValType` and `FuncType` graph with the existing builders. Value types are written
+inline inside the function type that names them, and one `FuncType` constant is generated per imported function. Only
+imports need one, because an export's type is read off the instance it is exported from.
+
+A separate holder class per world, and sharing structurally identical types across it, is deferred until a world spans
+more than one generated class. Neither buys anything while a world generates a single file.
 
 ```java
 final class Calculator_Types {
@@ -257,6 +265,42 @@ public final class Calculator {
 }
 ```
 
+## What Is Built
+
+`BindgenProcessor` reads the annotation, loads the WIT, and hands it to `WorldReader`, which encodes it, parses it, and
+resolves the named world into a `WitWorld` of imported and exported functions. `WorldGenerator` turns that into a
+`CompilationUnit`, with `WitTypes` mapping component value types onto Java ones and `Names` doing the kebab-case
+conversion.
+
+`WorldReader` refuses what it cannot yet read rather than guessing. An alias that introduces a type would shift every
+index after it, so a world using types from an interface is rejected by name instead of being mis-numbered in silence.
+
+The Hello World world generates this, verified against a checked-in expected source and confirmed by hand against a
+component built with `component embed` and `component new`. Instantiating it linked, calling `greet` entered the guest,
+and the guest's call back into `name` returned the host's string through the ABI.
+
+```java
+public final class HelloWorld {
+
+    public interface Imports {
+        String name();
+    }
+
+    public static HelloWorld instantiate(ComponentStore store, WasmComponent component, Imports imports);
+
+    public ComponentInstance instance();
+
+    public void greet();
+}
+```
+
+Imports are wired through `HostFunction.of` with a generated `FuncType`, and each export is narrowed once in the
+constructor with `ComponentFunction.typed`, so a descriptor that the component's type could never satisfy fails at
+instantiation rather than at the first call.
+
+Only functions over primitives and `string` are read so far. Records, variants, resources, interfaces and a world's
+`use` are each rejected with a message naming what is unsupported.
+
 ## Module Layout
 
 - `bindgen-processor` holds the processor and its golden-file tests, following `HostModuleProcessorTest`. Sources are
@@ -286,4 +330,5 @@ The async example is out of scope. Async is unimplemented across the whole proje
 1. ~~`HostInstance`, the public host-linking facade, with `SpecTestImports` rewritten onto it and the spec suite
    green.~~ Done, along with `HostFunction` and `HostResource`.
 2. ~~WIT-to-binary encoding on the wasm-tools module.~~ Done, as `WitParser.encode`.
-3. `ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module.
+3. `ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module. Until these land the
+   end-to-end path is verified by hand rather than by a test, since building a component needs both.
