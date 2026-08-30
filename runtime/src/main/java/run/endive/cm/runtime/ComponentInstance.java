@@ -106,6 +106,24 @@ public final class ComponentInstance implements TypeResolver {
         return (ComponentFunction) value;
     }
 
+    /**
+     * The instance exported under {@code name}, which is what an exported interface is.
+     *
+     * @throws LinkageException if the export is something other than an instance
+     */
+    public ComponentInstance exportedInstance(String name) {
+        Object value = getExport(name);
+        if (!(value instanceof ComponentInstance)) {
+            throw new LinkageException(
+                    "Export \""
+                            + name
+                            + "\" is not an instance (got "
+                            + value.getClass().getName()
+                            + ")");
+        }
+        return (ComponentInstance) value;
+    }
+
     public Set<String> exportNames() {
         return Collections.unmodifiableSet(exports.keySet());
     }

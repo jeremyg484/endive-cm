@@ -1,0 +1,14 @@
+package my:project;
+
+interface host {
+  gen-random-integer: func() -> u32;
+}
+
+world exports-world {
+  import host;
+  export demo: interface {
+    run: func();
+  }
+  export add: func(a: u32, b: u32) -> u32;
+  export count-bytes: func(s: string) -> u32;
+}

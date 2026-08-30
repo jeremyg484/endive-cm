@@ -42,6 +42,17 @@ class BindgenProcessorTest {
                 .hasSourceEquivalentTo(JavaFileObjects.forResource("MyWorldGenerated.java"));
     }
 
+    /** A world exporting an interface as well as functions of its own. */
+    @Test
+    void generatesWorldExportBindings() {
+        Compilation compilation = compile("WorldExportsHost.java");
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.ExportsWorld")
+                .hasSourceEquivalentTo(JavaFileObjects.forResource("ExportsWorldGenerated.java"));
+    }
+
     @Test
     void inlineWitNeedsNoFile() {
         Compilation compilation =

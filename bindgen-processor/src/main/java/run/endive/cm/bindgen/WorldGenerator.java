@@ -54,6 +54,9 @@ final class WorldGenerator {
         for (WitInterface imported : world.importedInterfaces()) {
             type.addMember(StaticJavaParser.parseBodyDeclaration(hostInterface(imported)));
         }
+        for (WitInterface exported : world.exportedInterfaces()) {
+            type.addMember(StaticJavaParser.parseBodyDeclaration(guestInterface(exported)));
+        }
 
         type.addMember(
                 StaticJavaParser.parseBodyDeclaration("private final ComponentInstance instance;"));
@@ -62,6 +65,15 @@ final class WorldGenerator {
                     StaticJavaParser.parseBodyDeclaration(
                             "private final ComponentFunction "
                                     + Names.member(exported.name())
+                                    + ";"));
+        }
+        for (WitInterface exported : world.exportedInterfaces()) {
+            type.addMember(
+                    StaticJavaParser.parseBodyDeclaration(
+                            "private final "
+                                    + Names.type(exported.simpleName())
+                                    + " "
+                                    + Names.member(exported.simpleName())
                                     + ";"));
         }
 
@@ -76,6 +88,20 @@ final class WorldGenerator {
 
         for (WitFunction exported : world.exports()) {
             type.addMember(StaticJavaParser.parseBodyDeclaration(exportMethod(exported)));
+        }
+        for (WitInterface exported : world.exportedInterfaces()) {
+            String name = Names.member(exported.simpleName());
+            type.addMember(
+                    StaticJavaParser.parseBodyDeclaration(
+                            "/** The exported interface {@code "
+                                    + exported.name()
+                                    + "}. */\npublic "
+                                    + Names.type(exported.simpleName())
+                                    + " "
+                                    + name
+                                    + "() {\n    return "
+                                    + name
+                                    + ";\n}"));
         }
 
         // Sorted so that regenerating an unchanged world produces an unchanged file.
@@ -106,13 +132,13 @@ final class WorldGenerator {
         if (!world.imports().isEmpty()) {
             unit.addImport("run.endive.cm.runtime.HostFunction");
         }
-        if (!world.exports().isEmpty()) {
+        if (allExports(world).findAny().isPresent()) {
             unit.addImport("run.endive.cm.runtime.ComponentFunction");
         }
-        if (world.exports().stream().anyMatch(f -> f.type().hasResult() || hasParams(f))) {
+        if (allExports(world).anyMatch(f -> f.type().hasResult() || hasParams(f))) {
             unit.addImport("run.endive.cm.runtime.PrimitiveHostTypeDescriptor");
         }
-        if (world.exports().stream().anyMatch(f -> !f.type().hasResult())) {
+        if (allExports(world).anyMatch(f -> !f.type().hasResult())) {
             unit.addImport("run.endive.cm.runtime.VoidHostTypeDescriptor");
         }
         if (usesCharValue(world)) {
@@ -131,9 +157,17 @@ final class WorldGenerator {
                 world.importedInterfaces().stream().flatMap(i -> i.functions().stream()));
     }
 
+    /** Everything the world exports, however it is reached. */
+    private static Stream<WitFunction> allExports(WitWorld world) {
+        return Stream.concat(
+                world.exports().stream(),
+                world.exportedInterfaces().stream().flatMap(i -> i.functions().stream()));
+    }
+
     private static boolean usesCharValue(WitWorld world) {
-        List<WitFunction> all = new ArrayList<>(world.imports());
-        all.addAll(world.exports());
+        List<WitFunction> all = new ArrayList<>();
+        allImports(world).forEach(all::add);
+        allExports(world).forEach(all::add);
         return all.stream()
                 .anyMatch(
                         f ->
@@ -224,8 +258,54 @@ final class WorldGenerator {
                     .append(descriptors(exported.type()))
                     .append(");\n");
         }
+        for (WitInterface exported : world.exportedInterfaces()) {
+            body.append("    this.")
+                    .append(Names.member(exported.simpleName()))
+                    .append(" = new ")
+                    .append(Names.type(exported.simpleName()))
+                    .append("(instance.exportedInstance(\"")
+                    .append(exported.name())
+                    .append("\"));\n");
+        }
         body.append("}");
         return body.toString();
+    }
+
+    /** One wrapper class per exported WIT interface, narrowing each of its functions once. */
+    private static String guestInterface(WitInterface exported) {
+        String className = Names.type(exported.simpleName());
+        StringBuilder body = new StringBuilder();
+        body.append("/** The exported interface {@code ").append(exported.name()).append("}. */\n");
+        body.append("public static final class ").append(className).append(" {\n");
+        for (WitFunction function : exported.functions()) {
+            body.append("    private final ComponentFunction ")
+                    .append(Names.member(function.name()))
+                    .append(";\n");
+        }
+        body.append("\n    private ").append(className).append("(ComponentInstance instance) {\n");
+        for (WitFunction function : exported.functions()) {
+            body.append("        this.")
+                    .append(Names.member(function.name()))
+                    .append(" = instance.export(\"")
+                    .append(function.name())
+                    .append("\").typed(")
+                    .append(descriptors(function.type()))
+                    .append(");\n");
+        }
+        body.append("    }\n");
+        for (WitFunction function : exported.functions()) {
+            body.append("\n").append(indent(exportMethod(function))).append("\n");
+        }
+        body.append("}");
+        return body.toString();
+    }
+
+    private static String indent(String block) {
+        StringBuilder result = new StringBuilder();
+        for (String line : block.split("\n", -1)) {
+            result.append(line.isEmpty() ? line : "    " + line).append('\n');
+        }
+        return result.substring(0, result.length() - 1);
     }
 
     private static String instantiate(WitWorld world, String className) {

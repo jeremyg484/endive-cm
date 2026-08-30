@@ -74,6 +74,11 @@ Finding a world therefore takes four steps, which `WitBinaryTests` fixes in plac
 Every nesting level restarts its type numbering, so resolution is index bookkeeping over each decl list rather than a
 lookup in one flat space.
 
+The package's own type index space needs the same care and is easy to get wrong, because it grows both by the types the
+package defines and by the exports naming them. A package declaring one interface and one world numbers them 0 and 2,
+not 0 and 1, so the section walk has to count the exports as well. A package with a single item hides this, since the
+only index in play is zero either way.
+
 ### Component binaries for end-to-end tests are buildable from .wat
 
 `wasm-tools component embed --world <w> <wit> <core.wasm>` followed by `wasm-tools component new` produces a component
@@ -318,6 +323,29 @@ public interface MyCustomHost {
 The interface is resolved from `Imports` once at instantiation rather than per call, and wired in with `HostInstance`.
 Function type constants are prefixed by the interface they belong to, so two interfaces may each declare a `tick`.
 
+An interface a world exports is an instance too, and becomes a wrapper class reached through an accessor, mirroring
+`bindgen!`'s `bindings.demo().call_run()`.
+
+```java
+public static final class Demo {
+    public void run();
+}
+
+public Demo demo();
+```
+
+Each of its functions is narrowed once when the wrapper is built, the same as a world's own exports. Reaching a nested
+exported instance needed `ComponentInstance.exportedInstance`, since the only public accessor before it insisted the
+export was a function.
+
+Whether an interface is written inline in the world or named by its package makes no structural difference. Both arrive
+as an instance, differing only in whether the name carries a package qualification, and the Java name comes from the
+last segment either way.
+
+Two generated types can still collide, because everything a world generates lands in one Java package. Two worlds of
+the same name, or an imported and an exported interface of the same name, would each produce one Java type. Neither is
+silent, since the result fails to compile, and putting exports under a nested holder is the fix when one turns up.
+
 Only functions over primitives and `string` are read so far. Records, variants, resources, a world's `use` and an
 interface that uses types from elsewhere are each rejected with a message naming what is unsupported.
 
@@ -345,8 +373,9 @@ Following the order of the bindgen! examples.
 
 0. ~~A world with one imported function and one exported function over primitives and strings.~~ Done.
 1. ~~World imports, both top-level functions and an inline interface.~~ Done.
-2. World exports.
-3. Imported interfaces.
+2. ~~World exports, including an exported interface.~~ Done. A named interface import came with it, since it is the
+   same shape as an inline one.
+3. ~~Imported interfaces.~~ Done, alongside stage 2.
 4. Imported resources.
 5. All kinds of world export.
 6. Exported resources.
@@ -361,5 +390,5 @@ The async example is out of scope. Async is unimplemented across the whole proje
 3. ~~`ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module.~~ Done.
 4. ~~`bindgen-processor-tests`, so that the end-to-end path is checked by a test rather than by hand.~~ Done.
 
-Stages 0 and 1 are complete and checked end to end. Stage 2 is next, which is a world's exports in all the shapes they
-take, and that is where an export becomes an instance rather than a bare function.
+Stages 0 to 2 are complete and checked end to end, and stage 3 came with stage 2. Stage 4 is next, which is imported
+resources, and that is the first stage needing a WIT type that is not a function signature.

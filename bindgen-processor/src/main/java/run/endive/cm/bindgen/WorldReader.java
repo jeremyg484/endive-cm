@@ -52,7 +52,7 @@ final class WorldReader {
                         .parse(() -> new ByteArrayInputStream(encoded));
 
         Export item = packageItem(pkg, world);
-        Type wrapper = types(pkg).get((int) item.sortIdx().idx());
+        Type wrapper = typeSpace(pkg).get((int) item.sortIdx().idx());
         if (wrapper.componentType() == null) {
             throw new BindgenException("\"" + item.name() + "\" is not a world");
         }
@@ -119,35 +119,62 @@ final class WorldReader {
             throw new BindgenException("world \"" + name + "\" holds no declarations");
         }
 
-        List<WitFunction> importedFunctions = new ArrayList<>();
-        List<WitInterface> importedInterfaces = new ArrayList<>();
-        readImports(world, importedFunctions, importedInterfaces);
-        return new WitWorld(
-                name, qualifiedName, importedFunctions, importedInterfaces, exports(world));
+        return build(name, qualifiedName, world);
     }
 
     /**
-     * A world imports either a bare function or an instance, and an instance is what an interface
-     * becomes, whether it was written inline in the world or elsewhere.
+     * One walk of the world's declarations, filling every list. The type index space grows as the
+     * walk goes, so an index in a declaration is resolved against what came before it.
      */
-    private static void readImports(
-            ComponentType world, List<WitFunction> functions, List<WitInterface> interfaces) {
+    private static WitWorld build(String name, String qualifiedName, ComponentType world) {
         List<Type> declared = new ArrayList<>();
+        List<WitFunction> importedFunctions = new ArrayList<>();
+        List<WitInterface> importedInterfaces = new ArrayList<>();
+        List<WitFunction> exportedFunctions = new ArrayList<>();
+        List<WitInterface> exportedInterfaces = new ArrayList<>();
+
         for (ComponentDecl decl : world.getComponentDecls()) {
             track(declared, decl);
             ImportDecl importDecl = decl.importDecl();
-            if (importDecl == null) {
+            if (importDecl != null) {
+                collect(
+                        declared,
+                        importDecl.name(),
+                        importDecl.externDesc(),
+                        importedFunctions,
+                        importedInterfaces);
                 continue;
             }
-            ExternDesc desc = importDecl.externDesc();
-            if (desc.kind() == ExternDesc.Kind.INSTANCE) {
-                interfaces.add(
-                        readInterface(
-                                importDecl.name(),
-                                instanceTypeAt(declared, desc, importDecl.name())));
-            } else {
-                functions.add(function(declared, importDecl.name(), desc));
+            InstanceDecl instanceDecl = decl.instanceDecl();
+            if (instanceDecl != null && instanceDecl.exportDecl() != null) {
+                collect(
+                        declared,
+                        instanceDecl.exportDecl().name(),
+                        instanceDecl.exportDecl().externDesc(),
+                        exportedFunctions,
+                        exportedInterfaces);
             }
+        }
+        return new WitWorld(
+                name,
+                qualifiedName,
+                importedFunctions,
+                importedInterfaces,
+                exportedFunctions,
+                exportedInterfaces);
+    }
+
+    /** A world reaches a function directly and an interface as an instance, both ways round. */
+    private static void collect(
+            List<Type> declared,
+            String name,
+            ExternDesc desc,
+            List<WitFunction> functions,
+            List<WitInterface> interfaces) {
+        if (desc.kind() == ExternDesc.Kind.INSTANCE) {
+            interfaces.add(readInterface(name, instanceTypeAt(declared, desc, name)));
+        } else {
+            functions.add(function(declared, name, desc));
         }
     }
 
@@ -172,23 +199,6 @@ final class WorldReader {
             }
         }
         return new WitInterface(name, functions);
-    }
-
-    private static List<WitFunction> exports(ComponentType world) {
-        List<Type> declared = new ArrayList<>();
-        List<WitFunction> functions = new ArrayList<>();
-        for (ComponentDecl decl : world.getComponentDecls()) {
-            track(declared, decl);
-            InstanceDecl instanceDecl = decl.instanceDecl();
-            if (instanceDecl != null && instanceDecl.exportDecl() != null) {
-                functions.add(
-                        function(
-                                declared,
-                                instanceDecl.exportDecl().name(),
-                                instanceDecl.exportDecl().externDesc()));
-            }
-        }
-        return functions;
     }
 
     /**
@@ -270,15 +280,27 @@ final class WorldReader {
         }
     }
 
-    /** A WIT package encodes into a single type section, which every index here counts into. */
-    private static List<Type> types(WasmComponent pkg) {
-        List<Type> all = new ArrayList<>();
+    /**
+     * The package component's type index space.
+     *
+     * <p>It grows both by the types the package defines and by the exports naming them, so an
+     * exported world sits at a higher index than its position among the defined types. Walking the
+     * sections in order is what puts an index on the type it actually names.
+     */
+    private static List<Type> typeSpace(WasmComponent pkg) {
+        List<Type> space = new ArrayList<>();
         for (Section section : pkg.sections()) {
             if (section instanceof TypeSection) {
-                all.addAll(((TypeSection) section).types());
+                space.addAll(((TypeSection) section).types());
+            } else if (section instanceof ExportSection) {
+                for (Export export : ((ExportSection) section).exports()) {
+                    if (export.sortIdx().sort().kind() == Sort.Kind.TYPE) {
+                        space.add(space.get((int) export.sortIdx().idx()));
+                    }
+                }
             }
         }
-        return all;
+        return space;
     }
 
     private static String names(List<Export> exports) {
