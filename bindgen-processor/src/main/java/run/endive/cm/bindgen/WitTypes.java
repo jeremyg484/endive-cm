@@ -110,9 +110,9 @@ final class WitTypes {
             case LIST:
                 return "ListHostTypeDescriptor.instance()";
             case ENUM:
-                return "EnumHostTypeDescriptor.forClass("
-                        + enumJavaType(scope, valType.typeIdx())
-                        + ".class)";
+                // What crosses is the variant an enum despecializes to, not the Java enum the
+                // embedder holds, because the generated code converts before it calls.
+                return "VariantHostTypeDescriptor.instance()";
             default:
                 throw unsupported(defined.kind().name());
         }
@@ -130,6 +130,18 @@ final class WitTypes {
         return valType != null
                 && valType.primValType() == null
                 && definedAt(scope, valType.typeIdx()).kind() == DefValType.Kind.LIST;
+    }
+
+    /** The kind {@code valType} resolves to, or {@code null} when it names nothing structural. */
+    static DefValType.Kind kindOf(ValType valType, WitScope scope) {
+        if (valType == null) {
+            return null;
+        }
+        if (valType.primValType() != null) {
+            return valType.primValType().kind();
+        }
+        Type type = scope.at(valType.typeIdx());
+        return type == null || type.defValType() == null ? null : type.defValType().kind();
     }
 
     /** Written whole, since a reference from outside the interface has to name it. */

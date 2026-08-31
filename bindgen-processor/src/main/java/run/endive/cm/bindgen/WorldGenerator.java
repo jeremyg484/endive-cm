@@ -27,6 +27,9 @@ final class WorldGenerator {
 
     private WorldGenerator() {}
 
+    /** A handle is carried by its value rather than by its Java class, whichever way it goes. */
+    private static final String RESOURCE_DESCRIPTOR = "ResourceHostTypeDescriptor.instance()";
+
     static CompilationUnit generate(WitWorld world, String packageName, String generatedBy) {
         String className = Names.type(world.name());
 
@@ -159,6 +162,22 @@ final class WorldGenerator {
         }
         if (allExports(world).anyMatch(f -> !f.type().hasResult())) {
             unit.addImport("run.endive.cm.runtime.VoidHostTypeDescriptor");
+        }
+        if (world.exportedInterfaces().stream().anyMatch(i -> !i.resources().isEmpty())) {
+            unit.addImport("run.endive.cm.abi.ResourceValue");
+            unit.addImport("run.endive.cm.runtime.GuestResource");
+            unit.addImport("run.endive.cm.runtime.ResourceHostTypeDescriptor");
+        }
+        if (world.exportedInterfaces().stream().anyMatch(i -> !i.enums().isEmpty())) {
+            unit.addImport("run.endive.cm.abi.VariantValue");
+        }
+        // A descriptor is only written for an export, so these follow what the exports mention.
+        if (exportsMention(world, DefValType.Kind.ENUM)) {
+            unit.addImport("run.endive.cm.runtime.VariantHostTypeDescriptor");
+        }
+        if (exportsMention(world, DefValType.Kind.LIST)) {
+            unit.addImport("run.endive.cm.runtime.ListHostTypeDescriptor");
+            unit.addImport("java.util.List");
         }
         if (anyValue(world, WitTypes::needsCharValue)) {
             unit.addImport("run.endive.cm.abi.CharValue");
@@ -299,11 +318,27 @@ final class WorldGenerator {
         StringBuilder body = new StringBuilder();
         body.append("/** The exported interface {@code ").append(exported.name()).append("}. */\n");
         body.append("public static final class ").append(className).append(" {\n");
+
+        for (WitEnum declared : exported.enums()) {
+            body.append(indent(enumType(declared))).append('\n');
+        }
+        for (WitResource resource : exported.resources()) {
+            body.append('\n').append(indent(guestResource(className, resource))).append('\n');
+        }
+
         for (WitFunction function : exported.functions()) {
             body.append("    private final ComponentFunction ")
                     .append(Names.member(function.name()))
                     .append(";\n");
         }
+        for (WitResource resource : exported.resources()) {
+            for (WitFunction function : resourceFunctions(resource)) {
+                body.append("    private final ComponentFunction ")
+                        .append(resourceField(resource, function))
+                        .append(";\n");
+            }
+        }
+
         body.append("\n    private ").append(className).append("(ComponentInstance instance) {\n");
         for (WitFunction function : exported.functions()) {
             body.append("        this.")
@@ -311,14 +346,145 @@ final class WorldGenerator {
                     .append(" = instance.export(\"")
                     .append(function.name())
                     .append("\").typed(")
-                    .append(descriptors(function))
+                    .append(descriptors(function, null, null))
                     .append(");\n");
         }
+        for (WitResource resource : exported.resources()) {
+            if (resource.constructor() != null) {
+                body.append("        this.")
+                        .append(resourceField(resource, resource.constructor()))
+                        .append(" = instance.export(\"[constructor]")
+                        .append(resource.name())
+                        .append("\").typed(")
+                        .append(descriptors(resource.constructor(), RESOURCE_DESCRIPTOR, null))
+                        .append(");\n");
+            }
+            for (WitFunction method : resource.methods()) {
+                body.append("        this.")
+                        .append(resourceField(resource, method))
+                        .append(" = instance.export(\"[method]")
+                        .append(resource.name())
+                        .append('.')
+                        .append(method.name())
+                        .append("\").typed(")
+                        .append(descriptors(method, null, RESOURCE_DESCRIPTOR))
+                        .append(");\n");
+            }
+        }
         body.append("    }\n");
+
         for (WitFunction function : exported.functions()) {
             body.append('\n').append(indent(exportMethod(function))).append('\n');
         }
+        for (WitResource resource : exported.resources()) {
+            if (resource.constructor() != null) {
+                body.append('\n').append(indent(guestResourceFactory(resource))).append('\n');
+            }
+        }
         return body.append("}").toString();
+    }
+
+    /**
+     * A resource the guest implements becomes a handle the embedder holds. Nothing destroys it on
+     * the embedder's behalf, so the wrapper is {@link AutoCloseable} and closing it twice is
+     * harmless.
+     */
+    private static String guestResource(String owner, WitResource resource) {
+        String className = Names.type(resource.name());
+        StringBuilder body = new StringBuilder();
+        body.append("/** The exported resource {@code ").append(resource.name()).append("}. */\n");
+        body.append("public static final class ")
+                .append(className)
+                .append(" implements AutoCloseable {\n\n");
+        body.append("    private final ").append(owner).append(" owner;\n");
+        body.append("    private final ResourceValue handle;\n");
+        body.append("    private boolean dropped;\n\n");
+        body.append("    private ")
+                .append(className)
+                .append('(')
+                .append(owner)
+                .append(" owner, ResourceValue handle) {\n")
+                .append("        this.owner = owner;\n        this.handle = handle;\n    }\n");
+
+        for (WitFunction method : resource.methods()) {
+            body.append("\n    public ").append(signature(method, 1)).append(" {\n");
+            String call =
+                    "owner."
+                            + resourceField(resource, method)
+                            + ".apply("
+                            + String.join(", ", prepend("handle", callArgumentsFrom(method, 1)))
+                            + ")";
+            if (method.type().hasResult()) {
+                body.append("        return ")
+                        .append(
+                                WitTypes.fromComponent(
+                                        call + "[0]", method.type().result(), method.scope()))
+                        .append(";\n");
+            } else {
+                body.append("        ").append(call).append(";\n");
+            }
+            body.append("    }\n");
+        }
+
+        body.append(
+                "\n"
+                    + "    /** Runs the guest's destructor. Doing so more than once does nothing."
+                    + " */\n");
+        body.append("    @Override\n    public void close() {\n");
+        body.append("        if (!dropped) {\n            dropped = true;\n");
+        body.append("            GuestResource.drop(handle);\n        }\n    }\n");
+        return body.append("}").toString();
+    }
+
+    private static String guestResourceFactory(WitResource resource) {
+        String className = Names.type(resource.name());
+        WitFunction constructor = resource.constructor();
+        return "/** Makes a {@code "
+                + resource.name()
+                + "} inside the component. */\npublic "
+                + className
+                + " "
+                + Names.member(resource.name())
+                + "("
+                + parameterList(constructor, 0)
+                + ") {\n    return new "
+                + className
+                + "(this, (ResourceValue) this."
+                + resourceField(resource, constructor)
+                + ".apply("
+                + callArguments(constructor)
+                + ")[0]);\n}";
+    }
+
+    private static List<WitFunction> resourceFunctions(WitResource resource) {
+        List<WitFunction> all = new ArrayList<>();
+        if (resource.constructor() != null) {
+            all.add(resource.constructor());
+        }
+        all.addAll(resource.methods());
+        return all;
+    }
+
+    /** Field names are prefixed by the resource, so two resources may each have a {@code log}. */
+    private static String resourceField(WitResource resource, WitFunction function) {
+        return Names.member(resource.name()) + Names.type(function.name());
+    }
+
+    private static List<String> prepend(String first, List<String> rest) {
+        List<String> all = new ArrayList<>();
+        all.add(first);
+        all.addAll(rest);
+        return all;
+    }
+
+    private static List<String> callArgumentsFrom(WitFunction function, int skip) {
+        return function.type().params().stream()
+                .skip(skip)
+                .map(
+                        p ->
+                                WitTypes.toComponent(
+                                        Names.member(p.label()), p.valType(), function.scope()))
+                .collect(Collectors.toList());
     }
 
     private static String exportMethod(WitFunction function) {
@@ -349,13 +515,29 @@ final class WorldGenerator {
     }
 
     private static String descriptors(WitFunction function) {
+        return descriptors(function, null, null);
+    }
+
+    /**
+     * @param result written in place of the computed result descriptor, for a constructor handing
+     *     back a handle
+     * @param firstParam written in place of the first parameter's, for a method borrowing its
+     *     receiver
+     */
+    private static String descriptors(WitFunction function, String result, String firstParam) {
         List<String> all = new ArrayList<>();
         FuncType type = function.type();
         all.add(
-                WitTypes.descriptorSource(
-                        type.hasResult() ? type.result() : null, function.scope()));
-        for (LabelValType param : type.params()) {
-            all.add(WitTypes.descriptorSource(param.valType(), function.scope()));
+                result != null
+                        ? result
+                        : WitTypes.descriptorSource(
+                                type.hasResult() ? type.result() : null, function.scope()));
+        List<LabelValType> params = type.params();
+        for (int i = 0; i < params.size(); i++) {
+            all.add(
+                    i == 0 && firstParam != null
+                            ? firstParam
+                            : WitTypes.descriptorSource(params.get(i).valType(), function.scope()));
         }
         return String.join(", ", all);
     }
@@ -685,6 +867,21 @@ final class WorldGenerator {
         return "type-" + index;
     }
 
+    /** Whether anything the world exports names a type of {@code kind}. */
+    private static boolean exportsMention(WitWorld world, DefValType.Kind kind) {
+        return allExports(world)
+                .anyMatch(
+                        f ->
+                                WitTypes.kindOf(f.type().result(), f.scope()) == kind
+                                        || f.type().params().stream()
+                                                .anyMatch(
+                                                        p ->
+                                                                WitTypes.kindOf(
+                                                                                p.valType(),
+                                                                                f.scope())
+                                                                        == kind));
+    }
+
     private static boolean hasParams(WitFunction function) {
         return !function.type().params().isEmpty();
     }
@@ -713,7 +910,7 @@ final class WorldGenerator {
     private static Stream<WitFunction> allExports(WitWorld world) {
         return Stream.concat(
                 world.exports().stream(),
-                world.exportedInterfaces().stream().flatMap(i -> i.functions().stream()));
+                world.exportedInterfaces().stream().flatMap(WorldGenerator::interfaceFunctions));
     }
 
     /** Prefixed by the interface, so that two interfaces may each declare a {@code tick}. */

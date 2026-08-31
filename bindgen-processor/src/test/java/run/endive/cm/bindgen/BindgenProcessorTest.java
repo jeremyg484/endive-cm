@@ -77,6 +77,18 @@ class BindgenProcessorTest {
                 .hasSourceEquivalentTo(JavaFileObjects.forResource("WithExportsGenerated.java"));
     }
 
+    /** The world of wasmtime's exported-resources example, whose resource the guest implements. */
+    @Test
+    void generatesExportedResourceBindings() {
+        Compilation compilation = compile("ExportedResourceHost.java");
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.ExportSomeResources")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource("ExportSomeResourcesGenerated.java"));
+    }
+
     @Test
     void inlineWitNeedsNoFile() {
         Compilation compilation =

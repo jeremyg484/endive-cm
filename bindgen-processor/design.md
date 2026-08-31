@@ -340,6 +340,30 @@ public interface MyCustomHost {
 The interface is resolved from `Imports` once at instantiation rather than per call, and wired in with `HostInstance`.
 Function type constants are prefixed by the interface they belong to, so two interfaces may each declare a `tick`.
 
+A resource a world exports is implemented by the guest rather than by the host, so the handle runs the other way. It
+becomes an {@code AutoCloseable} wrapper holding the handle the constructor returned.
+
+```java
+public static final class Logger implements AutoCloseable {
+    public Level getMaxLevel();
+    public void log(Level level, String msg);
+
+    @Override public void close();
+}
+
+public Logger logger(Level maxLevel);
+```
+
+Lifting an `own` out of a component takes the handle out of that component's table, so what the embedder ends up
+holding is the last thing naming the resource and nothing will destroy it on the embedder's behalf. `close` runs the
+guest's destructor through `GuestResource.drop`, and doing it twice is harmless so the wrapper suits
+try-with-resources.
+
+A descriptor has to describe what actually crosses rather than what the embedder holds. An enum crosses as the variant
+it despecializes to, because the generated code converts before it calls, so the descriptor is
+`VariantHostTypeDescriptor` and not `EnumHostTypeDescriptor`. The latter sanctions a Java enum that lowering would then
+refuse, which is worth knowing before reaching for it.
+
 An interface a world exports is an instance too, and becomes a wrapper class reached through an accessor, mirroring
 `bindgen!`'s `bindings.demo().call_run()`.
 
@@ -431,6 +455,10 @@ thing to avoid. A WIT type that is not supported belongs in the unsupported list
   by `ComponentEmbed` and `ComponentNew`, and the same WIT generates the bindings that call it, so nothing is written
   by hand twice.
 
+  The processor is also declared as an ordinary `provided` dependency. `annotationProcessorPaths` is not a dependency
+  edge the reactor knows about, so without that declaration a build of this module alone runs whatever processor was
+  last installed, and these tests can pass against a stale one.
+
   The processor runs over this module's own test sources, named through the compiler plugin's
   `annotationProcessorPaths` rather than discovered on the class path. Naming it keeps processing explicit, which
   matters because the build fails on warnings and implicit discovery warns. Maven copies test resources before
@@ -454,7 +482,9 @@ Following the order of the bindgen! examples.
 3. ~~Imported interfaces.~~ Done, alongside stage 2.
 4. ~~Imported resources.~~ Done.
 5. ~~All kinds of world export.~~ Done.
-6. Exported resources.
+6. ~~Exported resources.~~ Done.
+
+Every stage of the list is complete and checked end to end. The async example stays out of scope.
 
 The async example is out of scope. Async is unimplemented across the whole project and the runtime rejects it.
 
@@ -466,6 +496,6 @@ The async example is out of scope. Async is unimplemented across the whole proje
 3. ~~`ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module.~~ Done.
 4. ~~`bindgen-processor-tests`, so that the end-to-end path is checked by a test rather than by hand.~~ Done.
 
-Stages 0 to 5 are complete and checked end to end. Stage 6 is exported resources, where the resource is implemented by
-the guest rather than by the host, so the handle table runs the other way and a generated wrapper stands for something
-living inside the component.
+Every stage is complete and checked end to end against the bindgen! example worlds. What remains is the WIT the
+unsupported list above still names, records and variants chief among them, and the async example that stays out of
+scope while async is unimplemented everywhere.
