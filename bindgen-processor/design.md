@@ -250,6 +250,13 @@ to revisit rather than a correctness one.
 
 ### Naming
 
+WIT reserves fewer words than Java does, so a name like `new`, `class` or `final` is a WIT name but not a Java one, and
+a WIT name may also escape a WIT keyword with `%`. Any identifier Java reserves gains a trailing underscore. Only
+member names need it, since a type name is capitalised and an enum constant upper-cased, and neither can collide.
+
+The WIT name is what the linker matches on, so only the Java identifier is escaped. `import new: func()` still registers
+under `"new"`.
+
 | WIT | Java |
 |---|---|
 | world `calculator` | class `Calculator`, imports interface `Calculator.Imports` |
@@ -350,7 +357,8 @@ export was a function.
 
 Whether an interface is written inline in the world or named by its package makes no structural difference. Both arrive
 as an instance, differing only in whether the name carries a package qualification, and the Java name comes from the
-last segment either way.
+last segment either way. That holds on the export side too, so a world exporting a function of its own, an interface
+written inline, and an interface named by its id needs nothing beyond what one exported interface already needed.
 
 Two worlds of the same name, or an imported and an exported interface of the same name, would each produce one Java
 type. Neither is silent, since the result fails to compile. Two of the bindgen! examples do declare a `hello-world`
@@ -445,7 +453,7 @@ Following the order of the bindgen! examples.
    same shape as an inline one.
 3. ~~Imported interfaces.~~ Done, alongside stage 2.
 4. ~~Imported resources.~~ Done.
-5. All kinds of world export.
+5. ~~All kinds of world export.~~ Done.
 6. Exported resources.
 
 The async example is out of scope. Async is unimplemented across the whole project and the runtime rejects it.
@@ -458,5 +466,6 @@ The async example is out of scope. Async is unimplemented across the whole proje
 3. ~~`ComponentEmbed` and `ComponentNew` on the wasm-tools module, before the end-to-end module.~~ Done.
 4. ~~`bindgen-processor-tests`, so that the end-to-end path is checked by a test rather than by hand.~~ Done.
 
-Stages 0 to 4 are complete and checked end to end. Stage 5 is next, which is the remaining shapes a world's exports
-take, and stage 6 is exported resources, where the resource is implemented by the guest rather than by the host.
+Stages 0 to 5 are complete and checked end to end. Stage 6 is exported resources, where the resource is implemented by
+the guest rather than by the host, so the handle table runs the other way and a generated wrapper stands for something
+living inside the component.

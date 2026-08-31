@@ -46,6 +46,18 @@ public final class BindgenProcessor extends AbstractProcessor {
                 generate(element, element.getAnnotation(Bindgen.class));
             } catch (BindgenException e) {
                 processingEnv.getMessager().printMessage(ERROR, e.getMessage(), element);
+            } catch (RuntimeException e) {
+                // Reported against the annotation rather than thrown, so that a world this cannot
+                // yet handle fails the compilation it belongs to instead of crashing javac.
+                processingEnv
+                        .getMessager()
+                        .printMessage(
+                                ERROR,
+                                "bindings could not be generated: "
+                                        + e.getClass().getSimpleName()
+                                        + ": "
+                                        + e.getMessage(),
+                                element);
             }
         }
         return false;

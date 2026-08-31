@@ -66,6 +66,17 @@ class BindgenProcessorTest {
                         JavaFileObjects.forResource("ImportSomeResourcesGenerated.java"));
     }
 
+    /** The world of wasmtime's all-world-export-kinds example. */
+    @Test
+    void generatesEveryKindOfWorldExport() {
+        Compilation compilation = compile("WorldExportKindsHost.java");
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.WithExports")
+                .hasSourceEquivalentTo(JavaFileObjects.forResource("WithExportsGenerated.java"));
+    }
+
     @Test
     void inlineWitNeedsNoFile() {
         Compilation compilation =
@@ -85,6 +96,32 @@ class BindgenProcessorTest {
         assertThat(compilation)
                 .generatedSourceFile("endive.testing.HelloWorld")
                 .hasSourceEquivalentTo(JavaFileObjects.forResource("HelloWorldGenerated.java"));
+    }
+
+    /**
+     * WIT reserves fewer words than Java does, so a name like {@code new} is a WIT name but not a
+     * Java one and has to be escaped. Generation used to fail on one with a parser crash.
+     */
+    @Test
+    void witNamesJavaReservesAreEscaped() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.ReservedHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(inline = \"package k:w;\\n"
+                                        + "world kw {\\n"
+                                        + "  import new: func(class: string) -> string;\\n"
+                                        + "  export final: func();\\n"
+                                        + "}\\n\")\n"
+                                        + "public class ReservedHost {}\n"));
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.Kw")
+                .contentsAsUtf8String()
+                .contains("String new_(String class_)");
     }
 
     @Test

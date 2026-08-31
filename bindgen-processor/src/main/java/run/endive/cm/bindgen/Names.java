@@ -1,5 +1,7 @@
 package run.endive.cm.bindgen;
 
+import java.util.Set;
+
 /**
  * Turns WIT names into Java ones. WIT names are kebab-case by construction, so a word boundary is
  * always a hyphen.
@@ -10,14 +12,79 @@ final class Names {
 
     private Names() {}
 
+    /**
+     * What Java will not accept as an identifier. WIT reserves some of these itself, but not all,
+     * and a WIT name may escape a WIT keyword with {@code %}, so any of them can reach here.
+     */
+    private static final Set<String> RESERVED =
+            Set.of(
+                    "abstract",
+                    "assert",
+                    "boolean",
+                    "break",
+                    "byte",
+                    "case",
+                    "catch",
+                    "char",
+                    "class",
+                    "const",
+                    "continue",
+                    "default",
+                    "do",
+                    "double",
+                    "else",
+                    "enum",
+                    "extends",
+                    "final",
+                    "finally",
+                    "float",
+                    "for",
+                    "goto",
+                    "if",
+                    "implements",
+                    "import",
+                    "instanceof",
+                    "int",
+                    "interface",
+                    "long",
+                    "native",
+                    "new",
+                    "package",
+                    "private",
+                    "protected",
+                    "public",
+                    "return",
+                    "short",
+                    "static",
+                    "strictfp",
+                    "super",
+                    "switch",
+                    "synchronized",
+                    "this",
+                    "throw",
+                    "throws",
+                    "transient",
+                    "try",
+                    "void",
+                    "volatile",
+                    "while",
+                    // Not keywords, but reserved literals, which an identifier may not be either.
+                    "true",
+                    "false",
+                    "null");
+
     /** {@code hello-world} becomes {@code HelloWorld}. */
     static String type(String witName) {
         return join(witName, true);
     }
 
-    /** {@code host-log} becomes {@code hostLog}. */
+    /**
+     * {@code host-log} becomes {@code hostLog}, and a name Java reserves gains a trailing
+     * underscore, since {@code new} is a WIT name but not a Java one.
+     */
     static String member(String witName) {
-        return join(witName, false);
+        String name = join(witName, false);
+        return RESERVED.contains(name) ? name + "_" : name;
     }
 
     private static String join(String witName, boolean leadingCapital) {
