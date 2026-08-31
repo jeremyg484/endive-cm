@@ -20,10 +20,15 @@ import run.endive.cm.types.ValType;
  */
 final class WitTypes {
 
-    private WitTypes() {}
+    /** The package being generated into, so a reference knows whether it has to qualify. */
+    private final String into;
+
+    WitTypes(String into) {
+        this.into = into;
+    }
 
     /** The Java type carrying values of {@code valType}. */
-    static String javaType(ValType valType, WitScope scope) {
+    String javaType(ValType valType, WitScope scope) {
         if (valType.primValType() != null) {
             return primitiveJavaType(valType.primValType().kind(), valType);
         }
@@ -40,19 +45,19 @@ final class WitTypes {
     }
 
     /** Whether values of {@code valType} need converting between Java and what the ABI carries. */
-    static boolean needsConversion(ValType valType, WitScope scope) {
+    boolean needsConversion(ValType valType, WitScope scope) {
         return valType != null
                 && valType.primValType() == null
                 && definedAt(scope, valType.typeIdx()).kind() == DefValType.Kind.ENUM;
     }
 
     /** Source turning a Java value into what the ABI carries. */
-    static String toComponent(String value, ValType valType, WitScope scope) {
+    String toComponent(String value, ValType valType, WitScope scope) {
         return needsConversion(valType, scope) ? value + ".toComponent()" : value;
     }
 
     /** Source turning what the ABI carries into a Java value. */
-    static String fromComponent(String value, ValType valType, WitScope scope) {
+    String fromComponent(String value, ValType valType, WitScope scope) {
         if (needsConversion(valType, scope)) {
             return enumJavaType(scope, valType.typeIdx()) + ".fromComponent(" + value + ")";
         }
@@ -63,7 +68,7 @@ final class WitTypes {
      * Source rebuilding {@code valType}, either as a primitive written inline or as the local a
      * compound type was declared into.
      */
-    static String valTypeSource(ValType valType, WitScope scope, Map<Integer, String> declared) {
+    String valTypeSource(ValType valType, WitScope scope, Map<Integer, String> declared) {
         if (valType.primValType() != null) {
             return "ValType.builder().withPrimValType(PrimValType."
                     + valType.primValType().kind().name()
@@ -77,8 +82,7 @@ final class WitTypes {
     }
 
     /** Source rebuilding a compound type, for declaring it into a host instance. */
-    static String defValTypeSource(
-            DefValType defined, WitScope scope, Map<Integer, String> declared) {
+    String defValTypeSource(DefValType defined, WitScope scope, Map<Integer, String> declared) {
         switch (defined.kind()) {
             case LIST:
                 return "Type.of(ListType.builder().withElementType("
@@ -96,7 +100,7 @@ final class WitTypes {
     }
 
     /** Source describing {@code valType} to a typed function, or void when there is no type. */
-    static String descriptorSource(ValType valType, WitScope scope) {
+    String descriptorSource(ValType valType, WitScope scope) {
         if (valType == null) {
             return "VoidHostTypeDescriptor.instance()";
         }
@@ -144,14 +148,22 @@ final class WitTypes {
         return type == null || type.defValType() == null ? null : type.defValType().kind();
     }
 
-    /** Written whole, since a reference from outside the interface has to name it. */
-    private static String enumJavaType(WitScope scope, int index) {
+    /**
+     * A type is written by its simple name inside the package that declares it, and whole
+     * elsewhere, since the generated units do not import from one another.
+     */
+    String reference(WitScope scope, String witName) {
+        String simple = Names.type(witName);
+        String declaredIn = scope.javaPackage();
+        return declaredIn == null || declaredIn.equals(into) ? simple : declaredIn + "." + simple;
+    }
+
+    private String enumJavaType(WitScope scope, int index) {
         String name = scope.nameAt(index);
         if (name == null) {
             throw unsupported("an unnamed enum");
         }
-        String owner = scope.owner();
-        return owner == null ? Names.type(name) : Names.type(owner) + "." + Names.type(name);
+        return reference(scope, name);
     }
 
     private static DefValType definedAt(WitScope scope, int index) {

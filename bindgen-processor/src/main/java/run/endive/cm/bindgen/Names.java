@@ -87,6 +87,23 @@ final class Names {
         return RESERVED.contains(name) ? name + "_" : name;
     }
 
+    /**
+     * A WIT name as a Java package segment, which Google's style says is lowercase letters and
+     * digits with consecutive words run together. A segment Java reserves gains a trailing
+     * underscore, since there is no lowercase-only spelling that would not be a keyword.
+     */
+    static String packageSegment(String witName) {
+        StringBuilder result = new StringBuilder(witName.length());
+        for (int i = 0; i < witName.length(); i++) {
+            char c = witName.charAt(i);
+            if (c != '-') {
+                result.append(Character.toLowerCase(c));
+            }
+        }
+        String segment = result.toString();
+        return RESERVED.contains(segment) ? segment + "_" : segment;
+    }
+
     private static String join(String witName, boolean leadingCapital) {
         StringBuilder result = new StringBuilder(witName.length());
         boolean capitalize = leadingCapital;

@@ -2,9 +2,10 @@ package run.endive.cm.bindgen;
 
 import static javax.tools.Diagnostic.Kind.ERROR;
 
-import com.github.javaparser.ast.CompilationUnit;
 import java.io.IOException;
 import java.io.Writer;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.Filer;
@@ -28,6 +29,9 @@ import run.endive.cm.runtime.Bindgen;
 public final class BindgenProcessor extends AbstractProcessor {
 
     private static final String WIT_ROOT = "wit/";
+
+    /** What has already been written, so that worlds sharing an interface share its Java type. */
+    private final Map<String, String> written = new HashMap<>();
 
     @Override
     public Set<String> getSupportedAnnotationTypes() {
@@ -67,17 +71,44 @@ public final class BindgenProcessor extends AbstractProcessor {
         WitWorld world = WorldReader.read(readWit(bindgen), bindgen.world());
 
         String packageName = packageOf(element).getQualifiedName().toString();
-        CompilationUnit unit =
-                WorldGenerator.generate(world, packageName, getClass().getCanonicalName());
+        for (GeneratedSource source : WorldGenerator.generate(world, packageName, generatedBy())) {
+            write(element, world, source);
+        }
+    }
 
-        String qualifiedName =
-                (packageName.isEmpty() ? "" : packageName + ".") + Names.type(world.name());
-        try (Writer writer = filer().createSourceFile(qualifiedName, element).openWriter()) {
-            writer.write(unit.toString());
+    /**
+     * Writes one generated source, unless an identical one is already there.
+     *
+     * <p>Two worlds in one package that name the same interface generate the same file, and one
+     * Java type serving both is what an embedder wants. Two that disagree are a genuine conflict,
+     * so that is reported rather than resolved by whichever ran first.
+     */
+    private void write(Element element, WitWorld world, GeneratedSource source) {
+        String contents = source.contents();
+        String existing = written.get(source.qualifiedName());
+        if (existing != null) {
+            if (!existing.equals(contents)) {
+                throw new BindgenException(
+                        source.qualifiedName()
+                                + " is generated differently by world \""
+                                + world.name()
+                                + "\" than by a world already read in this package");
+            }
+            return;
+        }
+
+        try (Writer writer =
+                filer().createSourceFile(source.qualifiedName(), element).openWriter()) {
+            writer.write(contents);
         } catch (IOException e) {
             throw new BindgenException(
-                    "could not write " + qualifiedName + ": " + e.getMessage(), e);
+                    "could not write " + source.qualifiedName() + ": " + e.getMessage(), e);
         }
+        written.put(source.qualifiedName(), contents);
+    }
+
+    private String generatedBy() {
+        return getClass().getCanonicalName();
     }
 
     /**

@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import run.endive.cm.bindgen.it.Components;
+import run.endive.cm.bindgen.it.exportedresources.exports.example.exportedresources.logging.Level;
+import run.endive.cm.bindgen.it.exportedresources.exports.example.exportedresources.logging.Logger;
 import run.endive.cm.runtime.Bindgen;
 import run.endive.cm.runtime.ComponentStore;
 import run.endive.cm.types.WasmComponent;
@@ -38,55 +40,49 @@ public class ExportedResourceTest {
     void theHostConstructsAGuestResource() {
         ExportSomeResources bindings = instantiate();
 
-        ExportSomeResources.Logging.Logger logger =
-                bindings.logging().logger(ExportSomeResources.Logging.Level.WARN);
+        Logger logger = bindings.logging().logger(Level.WARN);
 
-        assertEquals(ExportSomeResources.Logging.Level.WARN, logger.getMaxLevel());
+        assertEquals(Level.WARN, logger.getMaxLevel());
     }
 
     /** State set through one call is visible from the next, so the handle names the same thing. */
     @Test
     void aMethodChangesStateTheGuestKeeps() {
-        ExportSomeResources.Logging.Logger logger =
-                instantiate().logging().logger(ExportSomeResources.Logging.Level.WARN);
+        Logger logger = instantiate().logging().logger(Level.WARN);
 
-        logger.setMaxLevel(ExportSomeResources.Logging.Level.DEBUG);
+        logger.setMaxLevel(Level.DEBUG);
 
-        assertEquals(ExportSomeResources.Logging.Level.DEBUG, logger.getMaxLevel());
+        assertEquals(Level.DEBUG, logger.getMaxLevel());
     }
 
     /** A method taking an enum and a string, both lowered into the guest. */
     @Test
     void aMethodTakesEveryArgument() {
-        ExportSomeResources.Logging.Logger logger =
-                instantiate().logging().logger(ExportSomeResources.Logging.Level.WARN);
+        Logger logger = instantiate().logging().logger(Level.WARN);
 
-        logger.log(ExportSomeResources.Logging.Level.ERROR, "something happened");
+        logger.log(Level.ERROR, "something happened");
 
-        assertEquals(ExportSomeResources.Logging.Level.ERROR, logger.getMaxLevel());
+        assertEquals(Level.ERROR, logger.getMaxLevel());
     }
 
     /** Two constructions are two resources, each with state of its own. */
     @Test
     void everyConstructionIsItsOwnResource() {
-        ExportSomeResources.Logging logging = instantiate().logging();
+        var logging = instantiate().logging();
 
-        ExportSomeResources.Logging.Logger first =
-                logging.logger(ExportSomeResources.Logging.Level.WARN);
-        ExportSomeResources.Logging.Logger second =
-                logging.logger(ExportSomeResources.Logging.Level.DEBUG);
+        Logger first = logging.logger(Level.WARN);
+        Logger second = logging.logger(Level.DEBUG);
 
         assertNotSame(first, second);
-        assertEquals(ExportSomeResources.Logging.Level.WARN, first.getMaxLevel());
-        assertEquals(ExportSomeResources.Logging.Level.DEBUG, second.getMaxLevel());
+        assertEquals(Level.WARN, first.getMaxLevel());
+        assertEquals(Level.DEBUG, second.getMaxLevel());
     }
 
     /** Closing runs the guest's destructor, which nothing else would have run. */
     @Test
     void closingRunsTheGuestDestructor() {
         ExportSomeResources bindings = instantiate();
-        ExportSomeResources.Logging.Logger logger =
-                bindings.logging().logger(ExportSomeResources.Logging.Level.WARN);
+        Logger logger = bindings.logging().logger(Level.WARN);
 
         assertEquals(Long.valueOf(0L), bindings.drops());
         logger.close();
@@ -98,8 +94,7 @@ public class ExportedResourceTest {
     @Test
     void closingTwiceRunsTheDestructorOnce() {
         ExportSomeResources bindings = instantiate();
-        ExportSomeResources.Logging.Logger logger =
-                bindings.logging().logger(ExportSomeResources.Logging.Level.WARN);
+        Logger logger = bindings.logging().logger(Level.WARN);
 
         logger.close();
         logger.close();
@@ -112,9 +107,8 @@ public class ExportedResourceTest {
     void aResourceMayBeClosedByTryWithResources() {
         ExportSomeResources bindings = instantiate();
 
-        try (ExportSomeResources.Logging.Logger logger =
-                bindings.logging().logger(ExportSomeResources.Logging.Level.INFO)) {
-            assertEquals(ExportSomeResources.Logging.Level.INFO, logger.getMaxLevel());
+        try (Logger logger = bindings.logging().logger(Level.INFO)) {
+            assertEquals(Level.INFO, logger.getMaxLevel());
         }
 
         assertEquals(Long.valueOf(1L), bindings.drops());

@@ -2,11 +2,14 @@ package run.endive.cm.bindgen;
 
 import static com.google.testing.compile.CompilationSubject.assertThat;
 import static com.google.testing.compile.Compiler.javac;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.google.testing.compile.Compilation;
 import com.google.testing.compile.JavaFileObjects;
 import java.io.File;
 import java.util.List;
+import java.util.stream.Collectors;
+import javax.tools.JavaFileObject;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -20,74 +23,6 @@ class BindgenProcessorTest {
 
     private static final List<File> WIT_ON_CLASSPATH =
             List.of(new File("src/test/resources"), new File("target/test-classes"));
-
-    @Test
-    void generatesHelloWorldBindings() {
-        Compilation compilation = compile("HelloWorldHost.java");
-
-        assertThat(compilation).succeededWithoutWarnings();
-        assertThat(compilation)
-                .generatedSourceFile("endive.testing.HelloWorld")
-                .hasSourceEquivalentTo(JavaFileObjects.forResource("HelloWorldGenerated.java"));
-    }
-
-    /** A world importing an interface as well as bare functions. */
-    @Test
-    void generatesWorldImportBindings() {
-        Compilation compilation = compile("WorldImportsHost.java");
-
-        assertThat(compilation).succeededWithoutWarnings();
-        assertThat(compilation)
-                .generatedSourceFile("endive.testing.MyWorld")
-                .hasSourceEquivalentTo(JavaFileObjects.forResource("MyWorldGenerated.java"));
-    }
-
-    /** The world of wasmtime's world-exports example, which also imports a named interface. */
-    @Test
-    void generatesWorldExportBindings() {
-        Compilation compilation = compile("WorldExportsHost.java");
-
-        assertThat(compilation).succeededWithoutWarnings();
-        assertThat(compilation)
-                .generatedSourceFile("endive.testing.HelloWorld")
-                .hasSourceEquivalentTo(
-                        JavaFileObjects.forResource("HelloWorldExportsGenerated.java"));
-    }
-
-    /** The world of wasmtime's imported-resources example, whose resource uses an enum. */
-    @Test
-    void generatesImportedResourceBindings() {
-        Compilation compilation = compile("ImportedResourceHost.java");
-
-        assertThat(compilation).succeededWithoutWarnings();
-        assertThat(compilation)
-                .generatedSourceFile("endive.testing.ImportSomeResources")
-                .hasSourceEquivalentTo(
-                        JavaFileObjects.forResource("ImportSomeResourcesGenerated.java"));
-    }
-
-    /** The world of wasmtime's all-world-export-kinds example. */
-    @Test
-    void generatesEveryKindOfWorldExport() {
-        Compilation compilation = compile("WorldExportKindsHost.java");
-
-        assertThat(compilation).succeededWithoutWarnings();
-        assertThat(compilation)
-                .generatedSourceFile("endive.testing.WithExports")
-                .hasSourceEquivalentTo(JavaFileObjects.forResource("WithExportsGenerated.java"));
-    }
-
-    /** The world of wasmtime's exported-resources example, whose resource the guest implements. */
-    @Test
-    void generatesExportedResourceBindings() {
-        Compilation compilation = compile("ExportedResourceHost.java");
-
-        assertThat(compilation).succeededWithoutWarnings();
-        assertThat(compilation)
-                .generatedSourceFile("endive.testing.ExportSomeResources")
-                .hasSourceEquivalentTo(
-                        JavaFileObjects.forResource("ExportSomeResourcesGenerated.java"));
-    }
 
     @Test
     void inlineWitNeedsNoFile() {
@@ -107,7 +42,179 @@ class BindgenProcessorTest {
         assertThat(compilation).succeeded();
         assertThat(compilation)
                 .generatedSourceFile("endive.testing.HelloWorld")
-                .hasSourceEquivalentTo(JavaFileObjects.forResource("HelloWorldGenerated.java"));
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource("goldens/HelloWorldHost/HelloWorld.java"));
+    }
+
+    /** Every world generates a package tree mirroring the WIT ids, which is what this pins. */
+    private static void assertGenerated(Compilation compilation, List<String> expected) {
+        List<String> actual =
+                compilation.generatedSourceFiles().stream()
+                        .map(JavaFileObject::getName)
+                        .map(BindgenProcessorTest::qualifiedName)
+                        .sorted()
+                        .collect(Collectors.toList());
+        assertEquals(expected.stream().sorted().collect(Collectors.toList()), actual);
+    }
+
+    private static String qualifiedName(String path) {
+        return path.replace("/SOURCE_OUTPUT/", "").replace(".java", "").replace('/', '.');
+    }
+
+    @Test
+    void generatesExportedResourceBindings() {
+        Compilation compilation = compile("ExportedResourceHost.java");
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertGenerated(
+                compilation,
+                List.of(
+                        "endive.testing.ExportSomeResources",
+                        "endive.testing.exports.example.exportedresources.logging.Guest",
+                        "endive.testing.exports.example.exportedresources.logging.Level",
+                        "endive.testing.exports.example.exportedresources.logging.Logger"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.ExportSomeResources")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/ExportedResourceHost/ExportSomeResources.java"));
+        assertThat(compilation)
+                .generatedSourceFile(
+                        "endive.testing.exports.example.exportedresources.logging.Guest")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/ExportedResourceHost/exports_example_exportedresources_logging_Guest.java"));
+        assertThat(compilation)
+                .generatedSourceFile(
+                        "endive.testing.exports.example.exportedresources.logging.Level")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/ExportedResourceHost/exports_example_exportedresources_logging_Level.java"));
+        assertThat(compilation)
+                .generatedSourceFile(
+                        "endive.testing.exports.example.exportedresources.logging.Logger")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/ExportedResourceHost/exports_example_exportedresources_logging_Logger.java"));
+    }
+
+    @Test
+    void generatesHelloWorldBindings() {
+        Compilation compilation = compile("HelloWorldHost.java");
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertGenerated(compilation, List.of("endive.testing.HelloWorld"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.HelloWorld")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource("goldens/HelloWorldHost/HelloWorld.java"));
+    }
+
+    @Test
+    void generatesImportedResourceBindings() {
+        Compilation compilation = compile("ImportedResourceHost.java");
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertGenerated(
+                compilation,
+                List.of(
+                        "endive.testing.ImportSomeResources",
+                        "endive.testing.example.importedresources.logging.Host",
+                        "endive.testing.example.importedresources.logging.Level",
+                        "endive.testing.example.importedresources.logging.Logger"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.ImportSomeResources")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/ImportedResourceHost/ImportSomeResources.java"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.example.importedresources.logging.Host")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/ImportedResourceHost/example_importedresources_logging_Host.java"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.example.importedresources.logging.Level")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/ImportedResourceHost/example_importedresources_logging_Level.java"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.example.importedresources.logging.Logger")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/ImportedResourceHost/example_importedresources_logging_Logger.java"));
+    }
+
+    @Test
+    void generatesEveryKindOfWorldExport() {
+        Compilation compilation = compile("WorldExportKindsHost.java");
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertGenerated(
+                compilation,
+                List.of(
+                        "endive.testing.WithExports",
+                        "endive.testing.exports.environment.Guest",
+                        "endive.testing.exports.example.worldexports.units.Guest"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.WithExports")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/WorldExportKindsHost/WithExports.java"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.exports.environment.Guest")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/WorldExportKindsHost/exports_environment_Guest.java"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.exports.example.worldexports.units.Guest")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/WorldExportKindsHost/exports_example_worldexports_units_Guest.java"));
+    }
+
+    @Test
+    void generatesWorldExportBindings() {
+        Compilation compilation = compile("WorldExportsHost.java");
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertGenerated(
+                compilation,
+                List.of(
+                        "endive.testing.HelloWorld",
+                        "endive.testing.exports.demo.Guest",
+                        "endive.testing.my.project.host.Host"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.HelloWorld")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource("goldens/WorldExportsHost/HelloWorld.java"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.exports.demo.Guest")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/WorldExportsHost/exports_demo_Guest.java"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.my.project.host.Host")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/WorldExportsHost/my_project_host_Host.java"));
+    }
+
+    @Test
+    void generatesWorldImportBindings() {
+        Compilation compilation = compile("WorldImportsHost.java");
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertGenerated(
+                compilation, List.of("endive.testing.MyWorld", "endive.testing.mycustomhost.Host"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.MyWorld")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource("goldens/WorldImportsHost/MyWorld.java"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.mycustomhost.Host")
+                .hasSourceEquivalentTo(
+                        JavaFileObjects.forResource(
+                                "goldens/WorldImportsHost/mycustomhost_Host.java"));
     }
 
     /**

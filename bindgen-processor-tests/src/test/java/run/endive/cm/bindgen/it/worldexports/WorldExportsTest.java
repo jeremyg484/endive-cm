@@ -8,6 +8,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import run.endive.cm.bindgen.it.Components;
+import run.endive.cm.bindgen.it.worldexports.my.project.host.Host;
 import run.endive.cm.runtime.Bindgen;
 import run.endive.cm.runtime.ComponentStore;
 import run.endive.cm.types.WasmComponent;
@@ -37,7 +38,7 @@ public class WorldExportsTest {
     /** Calling through the exported interface enters the guest, which calls back into the host. */
     @Test
     void anExportedInterfaceReachesTheImportedOne() {
-        Host host = new Host();
+        MyHost host = new MyHost();
 
         instantiate(host).demo().run();
 
@@ -51,7 +52,7 @@ public class WorldExportsTest {
      */
     @Test
     void aListArgumentArrivesElementByElement() {
-        Host host = new Host();
+        MyHost host = new MyHost();
 
         instantiate(host).demo().run();
 
@@ -60,26 +61,26 @@ public class WorldExportsTest {
 
     @Test
     void theExportedInterfaceWrapperIsBuiltOnce() {
-        HelloWorld bindings = instantiate(new Host());
+        HelloWorld bindings = instantiate(new MyHost());
 
         assertSame(bindings.demo(), bindings.demo());
     }
 
     @Test
     void nothingIsCalledBeforeTheGuestRuns() {
-        Host host = new Host();
+        MyHost host = new MyHost();
 
         instantiate(host);
 
         assertEquals(0, host.randomCalls);
     }
 
-    private static HelloWorld instantiate(HelloWorld.Host host) {
+    private static HelloWorld instantiate(Host host) {
         return HelloWorld.instantiate(new ComponentStore(), component, () -> host);
     }
 
     /** The host side of {@code my:project/host}. */
-    private static final class Host implements HelloWorld.Host {
+    private static final class MyHost implements Host {
 
         private final List<List<Short>> hashed = new ArrayList<>();
         private int randomCalls;

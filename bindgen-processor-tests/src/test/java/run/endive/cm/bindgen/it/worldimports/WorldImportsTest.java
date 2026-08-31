@@ -9,6 +9,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import run.endive.cm.bindgen.it.Components;
+import run.endive.cm.bindgen.it.worldimports.mycustomhost.Host;
 import run.endive.cm.runtime.Bindgen;
 import run.endive.cm.runtime.ComponentStore;
 import run.endive.cm.types.WasmComponent;
@@ -80,7 +81,7 @@ public class WorldImportsTest {
     }
 
     /** One object implementing both the world's imports and the interface it imports. */
-    private static final class Recorder implements MyWorld.Imports, MyWorld.MyCustomHost {
+    private static final class Recorder implements MyWorld.Imports, Host {
 
         private final String greeting;
         private final List<String> logged = new ArrayList<>();
@@ -104,7 +105,7 @@ public class WorldImportsTest {
         }
 
         @Override
-        public MyWorld.MyCustomHost myCustomHost() {
+        public Host myCustomHost() {
             handedOut++;
             return this;
         }

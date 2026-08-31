@@ -36,15 +36,7 @@ public final class MyWorld {
         /**
          * The imported interface {@code my-custom-host}.
          */
-        MyCustomHost myCustomHost();
-    }
-
-    /**
-     * The imported interface {@code my-custom-host}.
-     */
-    public interface MyCustomHost {
-
-        void tick();
+        endive.testing.mycustomhost.Host myCustomHost();
     }
 
     private final ComponentInstance instance;
@@ -63,7 +55,7 @@ public final class MyWorld {
             imports.log((String) args[0]);
             return new Object[0];
         }));
-        MyCustomHost myCustomHost = imports.myCustomHost();
+        endive.testing.mycustomhost.Host myCustomHost = imports.myCustomHost();
         HostInstance.Builder myCustomHostBuilder = HostInstance.builder(store);
         myCustomHostBuilder.addFunction("tick", FuncType.builder().build(), args -> {
             myCustomHost.tick();

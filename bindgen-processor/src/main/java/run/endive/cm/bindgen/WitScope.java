@@ -18,6 +18,7 @@ final class WitScope {
     private final List<Type> types = new ArrayList<>();
     private final Map<Integer, String> names = new HashMap<>();
     private String owner;
+    private String javaPackage;
 
     /**
      * Names the Java type the types in this space are generated inside, so that a reference from
@@ -30,6 +31,16 @@ final class WitScope {
     /** The Java type enclosing what this space declares, or {@code null} at the top of a world. */
     String owner() {
         return owner;
+    }
+
+    /** Names the Java package these types are generated into. */
+    void withJavaPackage(String javaPackage) {
+        this.javaPackage = javaPackage;
+    }
+
+    /** The package these types live in, so a reference from elsewhere can be written whole. */
+    String javaPackage() {
+        return javaPackage;
     }
 
     /** Appends a type, at the next index. */

@@ -8,6 +8,9 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import run.endive.cm.bindgen.it.Components;
+import run.endive.cm.bindgen.it.importedresources.example.importedresources.logging.Host;
+import run.endive.cm.bindgen.it.importedresources.example.importedresources.logging.Level;
+import run.endive.cm.bindgen.it.importedresources.example.importedresources.logging.Logger;
 import run.endive.cm.runtime.Bindgen;
 import run.endive.cm.runtime.ComponentStore;
 import run.endive.cm.types.WasmComponent;
@@ -37,12 +40,12 @@ public class ImportedResourceTest {
     /** The guest constructs a host resource, passing an enum the bindings convert on the way in. */
     @Test
     void theGuestConstructsAResourceWithAnEnumArgument() {
-        Logging logging = new Logging();
+        HostLogging logging = new HostLogging();
 
         instantiate(logging).run();
 
         assertEquals(1, logging.built.size());
-        assertEquals(ImportSomeResources.Logging.Level.WARN, logging.built.get(0).constructedAt);
+        assertEquals(Level.WARN, logging.built.get(0).constructedAt);
     }
 
     /**
@@ -51,7 +54,7 @@ public class ImportedResourceTest {
      */
     @Test
     void anEnumResultReachesTheGuestIntact() {
-        Logging logging = new Logging();
+        HostLogging logging = new HostLogging();
 
         instantiate(logging).run();
 
@@ -61,37 +64,36 @@ public class ImportedResourceTest {
     /** A method taking an enum and a string, both converted on the way in. */
     @Test
     void aMethodReceivesEveryArgument() {
-        Logging logging = new Logging();
+        HostLogging logging = new HostLogging();
 
         instantiate(logging).run();
 
         HostLogger logger = logging.built.get(0);
-        assertEquals(ImportSomeResources.Logging.Level.DEBUG, logger.maxLevel);
+        assertEquals(Level.DEBUG, logger.maxLevel);
         assertEquals(List.of("info: hi"), logger.logged);
     }
 
     /** Dropping the owned handle in the guest runs the destructor, which reaches the host. */
     @Test
     void droppingTheHandleReachesTheHost() {
-        Logging logging = new Logging();
+        HostLogging logging = new HostLogging();
 
         instantiate(logging).run();
 
         assertTrue(logging.built.get(0).dropped, "expected the dropped handle to reach the host");
     }
 
-    private static ImportSomeResources instantiate(Logging logging) {
+    private static ImportSomeResources instantiate(HostLogging logging) {
         return ImportSomeResources.instantiate(new ComponentStore(), component, () -> logging);
     }
 
     /** The host side of {@code example:imported-resources/logging}. */
-    private static final class Logging implements ImportSomeResources.Logging {
+    private static final class HostLogging implements Host {
 
         private final List<HostLogger> built = new ArrayList<>();
 
         @Override
-        public ImportSomeResources.Logging.Logger logger(
-                ImportSomeResources.Logging.Level maxLevel) {
+        public Logger logger(Level maxLevel) {
             HostLogger logger = new HostLogger(maxLevel);
             built.add(logger);
             return logger;
@@ -99,30 +101,30 @@ public class ImportedResourceTest {
     }
 
     /** One logger, recording everything the guest does to it. */
-    private static final class HostLogger implements ImportSomeResources.Logging.Logger {
+    private static final class HostLogger implements Logger {
 
         private final List<String> logged = new ArrayList<>();
-        private final ImportSomeResources.Logging.Level constructedAt;
-        private ImportSomeResources.Logging.Level maxLevel;
+        private final Level constructedAt;
+        private Level maxLevel;
         private boolean dropped;
 
-        HostLogger(ImportSomeResources.Logging.Level maxLevel) {
+        HostLogger(Level maxLevel) {
             this.constructedAt = maxLevel;
             this.maxLevel = maxLevel;
         }
 
         @Override
-        public ImportSomeResources.Logging.Level getMaxLevel() {
+        public Level getMaxLevel() {
             return maxLevel;
         }
 
         @Override
-        public void setMaxLevel(ImportSomeResources.Logging.Level level) {
+        public void setMaxLevel(Level level) {
             maxLevel = level;
         }
 
         @Override
-        public void log(ImportSomeResources.Logging.Level level, String msg) {
+        public void log(Level level, String msg) {
             logged.add(level.name().toLowerCase() + ": " + msg);
         }
 

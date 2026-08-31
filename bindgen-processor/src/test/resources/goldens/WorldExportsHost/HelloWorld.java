@@ -4,12 +4,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.processing.Generated;
-import run.endive.cm.runtime.ComponentFunction;
 import run.endive.cm.runtime.ComponentInstance;
 import run.endive.cm.runtime.ComponentLinker;
 import run.endive.cm.runtime.ComponentStore;
 import run.endive.cm.runtime.HostInstance;
-import run.endive.cm.runtime.VoidHostTypeDescriptor;
 import run.endive.cm.types.FuncType;
 import run.endive.cm.types.LabelValType;
 import run.endive.cm.types.ListType;
@@ -32,42 +30,16 @@ public final class HelloWorld {
         /**
          * The imported interface {@code my:project/host}.
          */
-        Host host();
-    }
-
-    /**
-     * The imported interface {@code my:project/host}.
-     */
-    public interface Host {
-
-        Long genRandomInteger();
-
-        String sha256(List<Short> bytes);
-    }
-
-    /**
-     * The exported interface {@code demo}.
-     */
-    public static final class Demo {
-
-        private final ComponentFunction run;
-
-        private Demo(ComponentInstance instance) {
-            this.run = instance.export("run").typed(VoidHostTypeDescriptor.instance());
-        }
-
-        public void run() {
-            this.run.apply();
-        }
+        endive.testing.my.project.host.Host host();
     }
 
     private final ComponentInstance instance;
 
-    private final Demo demo;
+    private final endive.testing.exports.demo.Guest demo;
 
     private HelloWorld(ComponentInstance instance) {
         this.instance = instance;
-        this.demo = new Demo(instance.exportedInstance("demo"));
+        this.demo = new endive.testing.exports.demo.Guest(instance.exportedInstance("demo"));
     }
 
     /**
@@ -76,7 +48,7 @@ public final class HelloWorld {
     @SuppressWarnings("unchecked")
     public static HelloWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
-        Host host = imports.host();
+        endive.testing.my.project.host.Host host = imports.host();
         HostInstance.Builder hostBuilder = HostInstance.builder(store);
         ValType hostType1 = hostBuilder.declareType(Type.of(ListType.builder().withElementType(ValType.builder().withPrimValType(PrimValType.U8).build()).build()));
         hostBuilder.addFunction("gen-random-integer", FuncType.builder().withResult(ValType.builder().withPrimValType(PrimValType.U32).build()).build(), args -> new Object[] { host.genRandomInteger() });
@@ -95,7 +67,7 @@ public final class HelloWorld {
     /**
      * The exported interface {@code demo}.
      */
-    public Demo demo() {
+    public endive.testing.exports.demo.Guest demo() {
         return demo;
     }
 }

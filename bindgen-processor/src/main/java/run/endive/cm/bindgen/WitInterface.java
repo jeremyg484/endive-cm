@@ -59,4 +59,48 @@ final class WitInterface {
         int slash = name.lastIndexOf('/');
         return slash < 0 ? name : name.substring(slash + 1);
     }
+
+    /**
+     * The Java package this interface's types are generated into, mirroring the WIT id.
+     *
+     * <p>An interface named by its id contributes a segment per part of that id, and one written
+     * inline in a world has no id to contribute, so it sits directly under the base. Exports go
+     * under {@code exports}, which is what lets a world import and export one name at once.
+     *
+     * @param base the package the annotation was found in
+     */
+    String javaPackage(String base, boolean exported) {
+        StringBuilder result = new StringBuilder(base);
+        if (exported) {
+            append(result, "exports");
+        }
+        for (String segment : idSegments()) {
+            append(result, Names.packageSegment(segment));
+        }
+        return result.toString();
+    }
+
+    /** {@code example:imported-resources/logging} names three segments, an inline name only one. */
+    private List<String> idSegments() {
+        int slash = name.indexOf('/');
+        if (slash < 0) {
+            return List.of(name);
+        }
+        String qualifier = name.substring(0, slash);
+        int colon = qualifier.indexOf(':');
+        if (colon < 0) {
+            return List.of(qualifier, name.substring(slash + 1));
+        }
+        return List.of(
+                qualifier.substring(0, colon),
+                qualifier.substring(colon + 1),
+                name.substring(slash + 1));
+    }
+
+    private static void append(StringBuilder target, String segment) {
+        if (target.length() > 0) {
+            target.append('.');
+        }
+        target.append(segment);
+    }
 }

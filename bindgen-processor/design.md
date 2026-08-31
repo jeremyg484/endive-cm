@@ -248,6 +248,42 @@ Everything stays visible to the golden-file tests and nothing is read from the c
 carries the generated descriptor constants. This is verbose for something the size of WASI, which is a code-size concern
 to revisit rather than a correctness one.
 
+### Generated structure
+
+The world becomes one class, and everything else lands in a Java package mirroring the WIT id, the way `bindgen!`
+lays out Rust modules.
+
+| WIT | Java |
+|---|---|
+| world `hello-world` | `<base>.HelloWorld` |
+| the world's own imports | `<base>.HelloWorld.Imports` |
+| import `example:imported-resources/logging` | `<base>.example.importedresources.logging.Host` |
+| import written inline in the world | `<base>.<name>.Host` |
+| export `example:world-exports/units` | `<base>.exports.example.worldexports.units.Guest` |
+| export written inline in the world | `<base>.exports.<name>.Guest` |
+| a type the interface declares | that same package |
+
+An interface written inline has no id to contribute, so it sits directly under the base. `exports` is a deliberate
+split, and it is what lets a world import and export one name at once.
+
+The point of it is the use site. A type reached as `ImportSomeResources.Logging.Level` cannot be imported and has to be
+written whole every time. As `Level` in a package of its own it is imported once.
+
+Package segments are lowercase with the words run together, since Google's Java style allows no underscores, which is
+why `imported-resources` becomes `importedresources`. Real WASI ids are mostly single words, so the run-together
+spelling rarely shows.
+
+Two things follow from generating more than one file.
+
+A world's interfaces are shared rather than copied. The first world to need an interface id generates it and a later
+one reuses it, so two worlds importing `wasi:io/streams` get one Java type and one implementation serves both. Two
+worlds that would generate the same file differently is a real conflict, and is reported as one.
+
+The world class names types from other packages, and Java has no way to write a qualified name that a field cannot
+shadow. A world exporting `run` inside a package under `run.endive` is enough to break it. So a field whose name
+matches the first segment of a qualified reference is renamed rather than the reference. Only the world class makes
+such references, since every other unit names its own package.
+
 ### Naming
 
 WIT reserves fewer words than Java does, so a name like `new`, `class` or `final` is a WIT name but not a Java one, and
