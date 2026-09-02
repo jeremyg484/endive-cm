@@ -259,6 +259,66 @@ public class ComponentTypeMatchingTests {
         assertThrows(LinkageException.class, () -> link(DECLARES_TYPE, exportsType("(tuple u32)")));
     }
 
+    /** An alias extends the type index space, so the type after it sits one index further along. */
+    @Test
+    public void aTypeDefinedAfterAnAliasIsFoundAtItsRealIndex() {
+        String provider =
+                "(component "
+                        + "(type $X u8) "
+                        + "(instance $i (export \"x\" (type $X))) "
+                        + "(alias export $i \"x\" (type $A)) "
+                        + "(type $T (record (field \"a\" u32))) "
+                        + "(export \"t\" (type $T)) "
+                        + "(core module $m (func (export \"g\") (result i32) (i32.const 7))) "
+                        + "(core instance $mi (instantiate $m)) "
+                        + "(func (export \"f\") (result u32) (canon lift (core func $mi \"g\"))))";
+        assertNotNull(link(DECLARES_TYPE, provider));
+    }
+
+    /** An alias into an instance the pass has read is followed to what that instance exports. */
+    @Test
+    public void aTypeReachedThroughAnExportAliasIsCompared() {
+        assertNotNull(link(DECLARES_TYPE, exportsAliasedType("(record (field \"a\" u32))")));
+        var thrown =
+                assertThrows(
+                        LinkageException.class,
+                        () ->
+                                link(
+                                        DECLARES_TYPE,
+                                        exportsAliasedType("(record (field \"a\" u64))")));
+        assertTrue(
+                thrown.getMessage().contains("\"t\""),
+                "expected the mismatched type to be named, got: " + thrown.getMessage());
+    }
+
+    /** Exports {@code t} as an alias of the type an inline instance exports. */
+    private static String exportsAliasedType(String recordType) {
+        return "(component "
+                + "(type $R "
+                + recordType
+                + ") "
+                + "(instance $i (export \"x\" (type $R))) "
+                + "(alias export $i \"x\" (type $A)) "
+                + "(export \"t\" (type $A)) "
+                + "(core module $m (func (export \"g\") (result i32) (i32.const 7))) "
+                + "(core instance $mi (instantiate $m)) "
+                + "(func (export \"f\") (result u32) (canon lift (core func $mi \"g\"))))";
+    }
+
+    /** The same for the function index space. */
+    @Test
+    public void aFunctionReachedThroughAnExportAliasIsCompared() {
+        String provider =
+                "(component "
+                        + "(core module $m (func (export \"g\") (result i32) (i32.const 7))) "
+                        + "(core instance $mi (instantiate $m)) "
+                        + "(func $g (result u32) (canon lift (core func $mi \"g\"))) "
+                        + "(instance $i (export \"g\" (func $g))) "
+                        + "(alias export $i \"g\" (func $h)) "
+                        + "(export \"f\" (func $h)))";
+        assertNotNull(link(DECLARES_F, provider));
+    }
+
     private static final String DECLARES_RESOURCE = "/component-type/declared-resource-export.wat";
 
     private static final String LIFTS =

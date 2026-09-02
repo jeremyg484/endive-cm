@@ -5,11 +5,14 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import run.endive.cm.types.Alias;
+import run.endive.cm.types.AliasSection;
 import run.endive.cm.types.CanonSection;
 import run.endive.cm.types.ComponentDecl;
 import run.endive.cm.types.ComponentSection;
 import run.endive.cm.types.ComponentType;
 import run.endive.cm.types.Export;
+import run.endive.cm.types.ExportAlias;
 import run.endive.cm.types.ExportDecl;
 import run.endive.cm.types.ExportSection;
 import run.endive.cm.types.ExternDesc;
@@ -628,6 +631,10 @@ final class ComponentTypeMatcher {
                             side.funcs.add(side.funcTypeAt((int) ((CanonLift) canon).typeIdx()));
                         }
                     }
+                } else if (section instanceof AliasSection) {
+                    for (Alias alias : ((AliasSection) section).aliases()) {
+                        side.addAlias(alias);
+                    }
                 } else if (section instanceof ExportSection) {
                     for (Export export : ((ExportSection) section).exports()) {
                         // An export names a preceding definition before adding one of its own.
@@ -638,6 +645,31 @@ final class ComponentTypeMatcher {
                 }
             }
             return side;
+        }
+
+        /**
+         * An alias extends the index space of its sort, so it is counted even when what it reaches
+         * cannot be derived. An export alias into an instance read here is followed; an outer alias
+         * is left underivable.
+         */
+        private void addAlias(Alias alias) {
+            Sort sort = alias.sort();
+            if (sort.kind() == Sort.Kind.CORE || sort.kind() == Sort.Kind.VALUE) {
+                // Neither space is tracked here.
+                return;
+            }
+            ExternDesc.Kind kind = externKindOf(sort);
+            Extern reached = null;
+            if (alias instanceof ExportAlias) {
+                ExportAlias exportAlias = (ExportAlias) alias;
+                int index = (int) exportAlias.instanceIdx();
+                Side instance =
+                        index >= 0 && index < instances.size() ? instances.get(index) : null;
+                if (instance != null) {
+                    reached = instance.exports.get(exportAlias.name());
+                }
+            }
+            bindExport(reached != null && reached.kind == kind ? reached : Extern.of(kind));
         }
 
         /** Records what an extern description denotes, filling the index space it extends. */
