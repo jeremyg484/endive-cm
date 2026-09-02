@@ -2,12 +2,19 @@ package run.endive.cm.runtime;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import run.endive.cm.abi.VariantValue;
+import run.endive.cm.types.DefValType;
 import run.endive.cm.types.EnumType;
-import run.endive.cm.types.FlagsType;
 import run.endive.cm.types.Type;
 import run.endive.cm.types.ValType;
 
+/**
+ * Binds a Java enum to a component {@code enum} whose labels are the constants' names in kebab
+ * case, converting between a constant and the payload-less {@link VariantValue} the Canonical ABI
+ * carries.
+ */
 public final class EnumHostTypeDescriptor extends HostTypeDescriptor {
 
     private final Class<?> hostType;
@@ -38,19 +45,10 @@ public final class EnumHostTypeDescriptor extends HostTypeDescriptor {
         if (type == null || type.defValType() == null) {
             return false;
         }
-        List<String> labels = null;
-        switch (type.defValType().kind()) {
-            case ENUM:
-                var enumType = (EnumType) type.defValType();
-                labels = enumType.labels();
-                break;
-            case FLAGS:
-                var flagsType = (FlagsType) type.defValType();
-                labels = flagsType.labels();
-                break;
-            default:
-                return false;
+        if (type.defValType().kind() != DefValType.Kind.ENUM) {
+            return false;
         }
+        List<String> labels = ((EnumType) type.defValType()).labels();
 
         Object[] constants = hostType.getEnumConstants();
         if (constants == null || constants.length != labels.size()) {
@@ -58,15 +56,37 @@ public final class EnumHostTypeDescriptor extends HostTypeDescriptor {
         }
 
         return Arrays.stream(constants)
-                .map(constant -> toKebabCase(((Enum<?>) constant).name()))
+                .map(constant -> labelOf((Enum<?>) constant))
                 .allMatch(labels::contains);
+    }
+
+    @Override
+    Object toComponentValue(Object hostValue) {
+        return VariantValue.of(labelOf((Enum<?>) hostValue), null);
+    }
+
+    @Override
+    Object toHostValue(Object componentValue) {
+        String label = ((VariantValue) componentValue).label();
+        for (Object constant : hostType.getEnumConstants()) {
+            if (labelOf((Enum<?>) constant).equals(label)) {
+                return constant;
+            }
+        }
+        throw new IllegalArgumentException(
+                "enum label \"" + label + "\" has no constant in " + hostType.getName());
+    }
+
+    @Override
+    public String toString() {
+        return hostType.getSimpleName();
     }
 
     static boolean supports(Class<?> hostType) {
         return Enum.class.isAssignableFrom(hostType);
     }
 
-    private static String toKebabCase(String name) {
-        return name.toLowerCase().replace("_", "-");
+    private static String labelOf(Enum<?> constant) {
+        return constant.name().toLowerCase(Locale.ROOT).replace("_", "-");
     }
 }

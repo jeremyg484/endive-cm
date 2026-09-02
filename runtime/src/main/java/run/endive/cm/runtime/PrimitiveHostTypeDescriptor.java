@@ -65,12 +65,13 @@ public final class PrimitiveHostTypeDescriptor extends HostTypeDescriptor {
             new PrimitiveHostTypeDescriptor(Integer.class, U16_VAL_TYPE, S32_VAL_TYPE);
     private static final PrimitiveHostTypeDescriptor INT_PRIMITIVE =
             new PrimitiveHostTypeDescriptor(Integer.TYPE, U16_VAL_TYPE, S32_VAL_TYPE);
+    // Not u64, which lifts to a BigInteger because it exceeds long.
     private static final PrimitiveHostTypeDescriptor LONG_WRAPPER =
             new PrimitiveHostTypeDescriptor(
-                    Long.class, U32_VAL_TYPE, S64_VAL_TYPE, U64_VAL_TYPE, ERROR_CONTEXT_VAL_TYPE);
+                    Long.class, U32_VAL_TYPE, S64_VAL_TYPE, ERROR_CONTEXT_VAL_TYPE);
     private static final PrimitiveHostTypeDescriptor LONG_PRIMITIVE =
             new PrimitiveHostTypeDescriptor(
-                    Long.TYPE, U32_VAL_TYPE, S64_VAL_TYPE, U64_VAL_TYPE, ERROR_CONTEXT_VAL_TYPE);
+                    Long.TYPE, U32_VAL_TYPE, S64_VAL_TYPE, ERROR_CONTEXT_VAL_TYPE);
     private static final PrimitiveHostTypeDescriptor BIG_INTEGER =
             new PrimitiveHostTypeDescriptor(BigInteger.class, U64_VAL_TYPE);
     private static final PrimitiveHostTypeDescriptor FLOAT_WRAPPER =
@@ -158,7 +159,12 @@ public final class PrimitiveHostTypeDescriptor extends HostTypeDescriptor {
 
     @Override
     boolean matches(Class<?> hostType) {
-        return this.hostType == hostType;
+        return boxed(this.hostType) == boxed(hostType);
+    }
+
+    @Override
+    public String toString() {
+        return hostType.getSimpleName();
     }
 
     @Override

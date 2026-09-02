@@ -1,13 +1,20 @@
 package run.endive.cm.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
+import run.endive.cm.abi.VariantValue;
+import run.endive.cm.types.EnumType;
 import run.endive.cm.types.FuncType;
 import run.endive.cm.types.LabelValType;
 import run.endive.cm.types.PrimValType;
+import run.endive.cm.types.Type;
 import run.endive.cm.types.ValType;
 import run.endive.wasm.WasmEngineException;
 
@@ -160,6 +167,74 @@ public class TypedComponentFunctionTests {
                 () -> typed.typed(PrimitiveHostTypeDescriptor.forClass(Long.class)));
     }
 
+    /** An argument arrives boxed, so a primitive-class descriptor matches its wrapper. */
+    @Test
+    public void aPrimitiveClassDescriptorMatchesTheBoxedArgument() {
+        ComponentFunction typed =
+                doubler()
+                        .typed(
+                                PrimitiveHostTypeDescriptor.forClass(long.class),
+                                PrimitiveHostTypeDescriptor.forClass(long.class));
+
+        assertArrayEquals(new Object[] {42L}, typed.apply(21L));
+    }
+
+    /** {@code u64} lifts to a {@link BigInteger}, so a {@code Long} descriptor is refused. */
+    @Test
+    public void aLongCannotCarryU64() {
+        ComponentFunction wide = echo(prim(PrimValType.U64));
+
+        assertThrows(
+                LinkageException.class,
+                () ->
+                        wide.typed(
+                                PrimitiveHostTypeDescriptor.forClass(Long.class),
+                                PrimitiveHostTypeDescriptor.forClass(Long.class)));
+
+        ComponentFunction typed =
+                wide.typed(
+                        PrimitiveHostTypeDescriptor.forClass(BigInteger.class),
+                        PrimitiveHostTypeDescriptor.forClass(BigInteger.class));
+        assertArrayEquals(new Object[] {BigInteger.TEN}, typed.apply(BigInteger.TEN));
+    }
+
+    /** The embedder passes and receives its own constants; the component sees labels. */
+    @Test
+    public void aJavaEnumIsConvertedToAndFromItsLabel() {
+        var builder = ComponentInstance.builder(new ComponentStore());
+        builder.addType(
+                Type.of(
+                        EnumType.builder()
+                                .addLabel("foo")
+                                .addLabel("bar")
+                                .addLabel("baz-kebab-case")
+                                .build()));
+        ValType enumType = ValType.builder().withTypeIdx(0).build();
+        FuncType funcType =
+                FuncType.builder().addParam(param("e", enumType)).withResult(enumType).build();
+        List<Object> seen = new ArrayList<>();
+        ComponentFunction echo =
+                ComponentFunctionInstance.builder()
+                        .withInstance(builder.instance())
+                        .withTypeResolver(builder.instance())
+                        .withFuncType(funcType)
+                        .withCall(
+                                args -> {
+                                    seen.add(args[0]);
+                                    return new Object[] {args[0]};
+                                })
+                        .build();
+
+        ComponentFunction typed =
+                echo.typed(
+                        EnumHostTypeDescriptor.forClass(TestEnum1.class),
+                        EnumHostTypeDescriptor.forClass(TestEnum1.class));
+
+        assertArrayEquals(
+                new Object[] {TestEnum1.BAZ_KEBAB_CASE}, typed.apply(TestEnum1.BAZ_KEBAB_CASE));
+        assertEquals(List.of(VariantValue.of("baz-kebab-case", null)), seen);
+    }
+
     /** {@code func(param "n" u32) -> u32}, doubling whatever it is given. */
     private static ComponentFunction doubler() {
         var builder = ComponentInstance.builder(new ComponentStore());
@@ -169,6 +244,18 @@ public class TypedComponentFunctionTests {
                 .withTypeResolver(builder.instance())
                 .withFuncType(funcType)
                 .withCall(args -> new Object[] {((Number) args[0]).longValue() * 2})
+                .build();
+    }
+
+    /** {@code func(param "v" t) -> t}, handing back whatever it is given. */
+    private static ComponentFunction echo(ValType t) {
+        var builder = ComponentInstance.builder(new ComponentStore());
+        FuncType funcType = FuncType.builder().addParam(param("v", t)).withResult(t).build();
+        return ComponentFunctionInstance.builder()
+                .withInstance(builder.instance())
+                .withTypeResolver(builder.instance())
+                .withFuncType(funcType)
+                .withCall(args -> new Object[] {args[0]})
                 .build();
     }
 

@@ -312,11 +312,7 @@ public class ComponentFunctionTests {
                 .collect(
                         Collectors.partitioningBy(
                                 t ->
-                                        List.of(
-                                                        U32_VAL_TYPE,
-                                                        S64_VAL_TYPE,
-                                                        U64_VAL_TYPE,
-                                                        ERROR_CONTEXT_VAL_TYPE)
+                                        List.of(U32_VAL_TYPE, S64_VAL_TYPE, ERROR_CONTEXT_VAL_TYPE)
                                                 .contains(t)))
                 .forEach(
                         (compatible, types) -> {
@@ -577,12 +573,11 @@ public class ComponentFunctionTests {
                         });
     }
 
+    /** A Java enum carries a component {@code enum}, and not {@code flags}, which is a set. */
     @Test
     void testEnumCompatibility() {
         checkedValTypes.stream()
-                .collect(
-                        Collectors.partitioningBy(
-                                t -> List.of(ENUM_VAL_TYPE, FLAGS_VAL_TYPE).contains(t)))
+                .collect(Collectors.partitioningBy(t -> t == ENUM_VAL_TYPE))
                 .forEach(
                         (compatible, types) -> {
                             if (compatible) {

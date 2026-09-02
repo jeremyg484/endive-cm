@@ -117,10 +117,12 @@ public final class ComponentFunctionInstance implements ComponentFunction {
                             + params);
         }
 
+        Object[] componentArgs = new Object[args.length];
         for (int i = 0; i < args.length; i++) {
             Object arg = args[i];
             LabelValType param = params.get(i);
-            if (!isTypeCompatible(instance, arg.getClass(), param.valType())) {
+            HostTypeDescriptor descriptor = descriptorFor(arg.getClass());
+            if (!isTypeCompatible(instance, descriptor, param.valType())) {
                 throw new WasmEngineException(
                         "Argument '"
                                 + arg
@@ -129,8 +131,9 @@ public final class ComponentFunctionInstance implements ComponentFunction {
                                 + " is not compatible with parameter "
                                 + param);
             }
+            componentArgs[i] = descriptor.toComponentValue(arg);
         }
-        return call.apply(args);
+        return call.apply(componentArgs);
     }
 
     @Override
@@ -180,28 +183,31 @@ public final class ComponentFunctionInstance implements ComponentFunction {
 
     static boolean isTypeCompatible(
             ComponentInstance instance, Class<?> hostType, ValType componentType) {
-        if (PrimitiveHostTypeDescriptor.supports(hostType)) {
-            return isTypeCompatible(
-                    instance, PrimitiveHostTypeDescriptor.forClass(hostType), componentType);
-        } else if (EnumHostTypeDescriptor.supports(hostType)) {
-            return isTypeCompatible(
-                    instance, EnumHostTypeDescriptor.forClass(hostType), componentType);
-        } else if (ResourceHostTypeDescriptor.supports(hostType)) {
-            return isTypeCompatible(instance, ResourceHostTypeDescriptor.instance(), componentType);
-        } else if (ListHostTypeDescriptor.supports(hostType)) {
-            return isTypeCompatible(instance, ListHostTypeDescriptor.instance(), componentType);
-        } else if (RecordHostTypeDescriptor.supports(hostType)) {
-            return isTypeCompatible(instance, RecordHostTypeDescriptor.instance(), componentType);
-        } else if (VariantHostTypeDescriptor.supports(hostType)) {
-            return isTypeCompatible(instance, VariantHostTypeDescriptor.instance(), componentType);
-        }
-        throw new IllegalArgumentException(
-                "host type " + hostType.getName() + " is not yet supported");
+        return isTypeCompatible(instance, descriptorFor(hostType), componentType);
     }
 
     static boolean isTypeCompatible(
             ComponentInstance instance, HostTypeDescriptor hostType, ValType componentType) {
         return hostType.isCompatibleWith(instance, componentType);
+    }
+
+    /** The descriptor under which a value of {@code hostType} crosses into a component. */
+    static HostTypeDescriptor descriptorFor(Class<?> hostType) {
+        if (PrimitiveHostTypeDescriptor.supports(hostType)) {
+            return PrimitiveHostTypeDescriptor.forClass(hostType);
+        } else if (EnumHostTypeDescriptor.supports(hostType)) {
+            return EnumHostTypeDescriptor.forClass(hostType);
+        } else if (ResourceHostTypeDescriptor.supports(hostType)) {
+            return ResourceHostTypeDescriptor.instance();
+        } else if (ListHostTypeDescriptor.supports(hostType)) {
+            return ListHostTypeDescriptor.instance();
+        } else if (RecordHostTypeDescriptor.supports(hostType)) {
+            return RecordHostTypeDescriptor.instance();
+        } else if (VariantHostTypeDescriptor.supports(hostType)) {
+            return VariantHostTypeDescriptor.instance();
+        }
+        throw new IllegalArgumentException(
+                "host type " + hostType.getName() + " is not yet supported");
     }
 
     public final class Typed implements ComponentFunction {
@@ -275,7 +281,16 @@ public final class ComponentFunctionInstance implements ComponentFunction {
             Object[] results = ComponentFunctionInstance.this.apply(args);
             // A component function has at most one result, so the descriptor describes that one
             // value, or its absence, which is what VoidHostTypeDescriptor matches.
-            Object result = results.length == 0 ? null : results[0];
+            if (results.length == 0) {
+                requireResultMatches(null);
+                return results;
+            }
+            Object result = requiredResultType.toHostValue(results[0]);
+            requireResultMatches(result);
+            return new Object[] {result};
+        }
+
+        private void requireResultMatches(Object result) {
             if (!requiredResultType.matches(classOf(result))) {
                 throw new WasmEngineException(
                         "Result type "
@@ -283,7 +298,6 @@ public final class ComponentFunctionInstance implements ComponentFunction {
                                 + " does not match the type expected by result descriptor "
                                 + requiredResultType);
             }
-            return results;
         }
 
         /** The class to match a value against, {@code null} standing for no value at all. */
