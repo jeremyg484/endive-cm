@@ -175,7 +175,7 @@ class CanonicalAbiResourceTests {
         var f = new Fixture();
         CanonicalAbi.store(f.ctx, ResourceValue.owned(f.rt, REP), f.ownType, 0);
 
-        // Only the table index reaches memory and the rep stays behind.
+        // Only the table index reaches memory, and the rep does not.
         assertThat(f.ctx.memory().readInt(0)).isEqualTo(1);
         assertThat(CanonicalAbi.load(f.ctx, 0, f.ownType))
                 .isEqualTo(ResourceValue.owned(f.rt, REP));
@@ -186,10 +186,10 @@ class CanonicalAbiResourceTests {
         var f = new Fixture();
         long[] flat =
                 CanonicalAbi.lowerFlatParams(
-                        f.ctx, List.of(ResourceValue.owned(f.rt, REP)), List.of(f.ownValType));
+                        f.ctx, List.of(ResourceValue.owned(f.rt, REP)), List.of(f.ownType));
 
         assertThat(flat).containsExactly(1L);
-        assertThat(CanonicalAbi.liftFlatParams(f.ctx, flat, List.of(f.ownValType)))
+        assertThat(CanonicalAbi.liftFlatParams(f.ctx, flat, List.of(f.ownType)))
                 .containsExactly(ResourceValue.owned(f.rt, REP));
     }
 
@@ -198,13 +198,10 @@ class CanonicalAbiResourceTests {
         // A handle index means something only relative to one instance's table, so no byte copy
         // can carry it. canTransfer has to reject these and fall back to lift/lower.
         var f = new Fixture();
-        var space = TypeSpace.of(f.types);
-        var own = ResolvedType.of(f.ownType, space);
-        var borrow = ResolvedType.of(f.borrowType, space);
-        assertThat(Transferability.isSupported(own)).isFalse();
-        assertThat(Transferability.isSupported(borrow)).isFalse();
-        assertThat(Transferability.isBitwiseCopyable(PointerType.I32, own)).isFalse();
-        assertThat(Transferability.isFlatIdentity(PointerType.I32, borrow)).isFalse();
+        assertThat(Transferability.isSupported(f.ownType)).isFalse();
+        assertThat(Transferability.isSupported(f.borrowType)).isFalse();
+        assertThat(Transferability.isBitwiseCopyable(PointerType.I32, f.ownType)).isFalse();
+        assertThat(Transferability.isFlatIdentity(PointerType.I32, f.borrowType)).isFalse();
     }
 
     @Test
@@ -228,34 +225,50 @@ class CanonicalAbiResourceTests {
     private static final class Fixture {
         final StubResourceType rt = new StubResourceType();
         final StubHanleTable handles = new StubHanleTable();
-        final OwnType ownType = OwnType.builder().withTypeIdx(0).build();
-        final BorrowType borrowType = BorrowType.builder().withTypeIdx(1).build();
         final Types types = new Types();
         final ValType ownValType;
+        final ResolvedType ownType;
+        final ResolvedType borrowType;
         final LiftLowerContext ctx;
 
         Fixture() {
-            ownValType = types.add(ownType);
-            types.add(borrowType);
+            types.rt = rt;
+            OwnType own = OwnType.builder().withTypeIdx(0).build();
+            BorrowType borrow = BorrowType.builder().withTypeIdx(1).build();
+            ownValType = types.add(own);
+            types.add(borrow);
+            ownType = ResolvedType.of(own, types);
+            borrowType = ResolvedType.of(borrow, types);
             ctx =
                     LiftLowerContext.builder()
                             .withMemory(new ByteArrayMemory(new MemoryLimits(1)))
                             .withPtrType(PointerType.I32)
-                            .withTypeResolver(types)
                             .withHandles(handles)
-                            // Both own and borrow here name the same resource type; the type
-                            // index only says which handle type it is used through.
-                            .withResourceTypes(typeIdx -> rt)
                             .build();
         }
     }
 
-    private static final class Types implements TypeResolver {
+    /**
+     * Both own and borrow here name the same resource type. The type index only says which handle
+     * type carries it.
+     */
+    private static final class Types implements TypeResolver, TypeSpace {
         private final List<Type> types = new ArrayList<>();
+        private ResourceTypeRef rt;
 
         @Override
         public Type getType(int index) {
             return types.get(index);
+        }
+
+        @Override
+        public ResolvedType resolve(ValType valType) {
+            return ResolvedType.of(resolveDefValType(valType), this);
+        }
+
+        @Override
+        public ResourceTypeRef resourceType(int typeIdx) {
+            return rt;
         }
 
         ValType add(DefValType t) {

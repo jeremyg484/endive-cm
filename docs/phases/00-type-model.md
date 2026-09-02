@@ -1,6 +1,23 @@
 # Phase 0: Type Model Foundation
 
-**Status**: In progress
+**Status**: Complete
+
+Every deliverable below is implemented apart from the value index space, values
+being a gated feature that nothing downstream reaches yet. The model also carries
+the async type forms (`stream`, `future`, `error-context`) and the full set of
+canonical definitions, which are parsed and represented but not yet executed by
+the runtime -- see Phase 5.
+
+Three additions were made beyond the original plan, all in service of resolving
+a type against the index space it was written in rather than the one it is used
+in:
+
+- `ResolvedType` and `ResolvedFuncType` -- a type with every index already
+  followed, so it no longer refers to any index space
+- `TypeSpace` -- what an index resolves against
+- `ResourceTypeId` -- an opaque handle on a runtime resource identity, which
+  lets a resolved type carry identity without this module depending on the
+  runtime
 
 ## Goal
 
@@ -63,10 +80,13 @@ Separate growing lists for each namespace: core modules, core instances,
 core types, core functions, core memories, core tables, core globals,
 components, component instances, component types, component functions, values.
 
+All but values, which nothing reaches yet.
+
 ### Canonical definitions
 
 Types representing `canon lift`, `canon lower`, `resource.new`,
-`resource.drop`, `resource.rep`.
+`resource.drop`, `resource.rep`. The async and threading built-ins are
+represented as well.
 
 ### Import/export definitions
 

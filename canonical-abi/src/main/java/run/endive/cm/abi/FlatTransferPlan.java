@@ -10,14 +10,14 @@ import run.endive.runtime.TrapException;
 import run.endive.wasm.types.ValType;
 
 /**
- * A compiled transfer for a function's flat parameter or result list — the counterpart of
+ * A compiled transfer for a function's flat parameter or result list, the counterpart of
  * {@link TransferPlan} for values travelling as core Wasm values rather than in memory.
  *
- * <p>Whether the values spill into linear memory is decided once, at compile time. Both
- * sides always reach the same answer: flattening depends only on the type and the pointer
- * width, and the transfer path requires those to match. So a plan is either a
- * <em>spilled</em> one, holding a {@link TransferPlan} for the tuple both sides agree on, or
- * a <em>direct</em> one, holding a step per value.
+ * <p>Whether the values spill into linear memory is decided once, at compile time. Both sides
+ * always reach the same answer, because flattening depends only on the type and the pointer width,
+ * and the transfer path requires those to match. So a plan is either a <em>spilled</em> one,
+ * holding a {@link TransferPlan} for the tuple both sides agree on, or a <em>direct</em> one,
+ * holding a step per value.
  */
 final class FlatTransferPlan {
 
@@ -38,15 +38,14 @@ final class FlatTransferPlan {
         this.spillSize = spillSize;
     }
 
-    static FlatTransferPlan compile(
-            LiftLowerContext ctx, List<run.endive.cm.types.ValType> ts, int maxFlat) {
+    static FlatTransferPlan compile(LiftLowerContext ctx, List<ResolvedType> ts, int maxFlat) {
         PointerType ptrType = ctx.ptrType();
         List<ValType> flatTypes = new ArrayList<>();
-        for (run.endive.cm.types.ValType t : ts) {
-            flatTypes.addAll(ctx.resolve(t).flatten(ptrType));
+        for (ResolvedType t : ts) {
+            flatTypes.addAll(t.flatten(ptrType));
         }
         if (flatTypes.size() > maxFlat) {
-            ResolvedType tupleType = CanonicalAbi.resolvedTupleOf(ctx, ts);
+            ResolvedType tupleType = ResolvedType.tupleOf(ts);
             return new FlatTransferPlan(
                     null,
                     TransferPlan.compile(ptrType, tupleType),
@@ -54,8 +53,8 @@ final class FlatTransferPlan {
                     tupleType.elementSize(ptrType));
         }
         var builder = new Builder(ptrType);
-        for (run.endive.cm.types.ValType t : ts) {
-            builder.append(ctx.resolve(t));
+        for (ResolvedType t : ts) {
+            builder.append(t);
         }
         return new FlatTransferPlan(builder.build(), null, 0, 0);
     }
@@ -93,10 +92,10 @@ final class FlatTransferPlan {
         }
 
         /**
-         * Appends the steps for one value. The normalizations are the same ones {@link
-         * CanonicalAbi#transferFlat} applies — narrow integers masked or sign-extended,
-         * {@code bool} collapsed, {@code char} validated, {@code flags} stripped of slack
-         * bits — but resolved to a concrete mask here instead of re-dispatched per call.
+         * Appends the steps for one value. The normalizations are the same ones
+         * {@link CanonicalAbi#transferFlat} applies, with narrow integers masked or sign-extended,
+         * {@code bool} collapsed, {@code char} validated, {@code flags} stripped of slack bits, but
+         * resolved to a concrete mask here instead of re-dispatched per call.
          */
         void append(ResolvedType t) {
             switch (t.kind()) {
@@ -186,9 +185,9 @@ final class FlatTransferPlan {
         }
 
         /**
-         * Compiles a nested plan per case. At run time the discriminant selects one, and the
-         * joined payload slots the chosen case leaves unused are skipped on the source cursor
-         * and zero-padded on the destination, exactly as the interpreted path does.
+         * Compiles a nested plan per case. At run time the discriminant selects one, and the joined
+         * payload slots the chosen case leaves unused are skipped on the source cursor and
+         * zero-padded on the destination, exactly as the interpreted path does.
          */
         private void appendVariant(ResolvedType t) {
             var cases = t.cases();

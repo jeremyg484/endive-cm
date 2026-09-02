@@ -17,6 +17,8 @@ class CanonicalAbiStringTests {
 
     private static final TypeResolver STUB_RESOLVER = index -> null;
 
+    private static final AbiHelper ABI = new AbiHelper(STUB_RESOLVER);
+
     private static LiftLowerContext newContext(StringEncoding encoding) {
         Memory memory = new ByteArrayMemory(new MemoryLimits(4));
         int[] bumpPtr = {1000};
@@ -30,7 +32,6 @@ class CanonicalAbiStringTests {
                 .withMemory(memory)
                 .withPtrType(PointerType.I32)
                 .withStringEncoding(encoding)
-                .withTypeResolver(STUB_RESOLVER)
                 .withRealloc(realloc)
                 .build();
     }
@@ -38,48 +39,48 @@ class CanonicalAbiStringTests {
     @Test
     void roundTripsUtf8AsciiAndNonAscii() {
         var ctx = newContext(StringEncoding.UTF8);
-        CanonicalAbi.store(ctx, "hello", PrimValType.STRING, 0);
-        assertThat(CanonicalAbi.load(ctx, 0, PrimValType.STRING)).isEqualTo("hello");
+        ABI.store(ctx, "hello", PrimValType.STRING, 0);
+        assertThat(ABI.load(ctx, 0, PrimValType.STRING)).isEqualTo("hello");
 
         // includes a codepoint outside the BMP (requires a Java surrogate pair)
         String s = "café 😀";
-        CanonicalAbi.store(ctx, s, PrimValType.STRING, 8);
-        assertThat(CanonicalAbi.load(ctx, 8, PrimValType.STRING)).isEqualTo(s);
+        ABI.store(ctx, s, PrimValType.STRING, 8);
+        assertThat(ABI.load(ctx, 8, PrimValType.STRING)).isEqualTo(s);
     }
 
     @Test
     void roundTripsUtf16() {
         var ctx = newContext(StringEncoding.UTF16);
         String s = "café 😀";
-        CanonicalAbi.store(ctx, s, PrimValType.STRING, 0);
-        assertThat(CanonicalAbi.load(ctx, 0, PrimValType.STRING)).isEqualTo(s);
+        ABI.store(ctx, s, PrimValType.STRING, 0);
+        assertThat(ABI.load(ctx, 0, PrimValType.STRING)).isEqualTo(s);
     }
 
     @Test
     void latin1Utf16StoresLatin1FittingContentUntagged() {
         var ctx = newContext(StringEncoding.LATIN1_UTF16);
         String s = "cafeé"; // all codepoints < 256
-        CanonicalAbi.store(ctx, s, PrimValType.STRING, 0);
+        ABI.store(ctx, s, PrimValType.STRING, 0);
 
         // tagged_code_units high bit must be clear (stored as plain latin1)
         long taggedCodeUnits = ctx.memory().readU32(4);
         long tag = 1L << 31;
         assertThat(taggedCodeUnits & tag).isZero();
 
-        assertThat(CanonicalAbi.load(ctx, 0, PrimValType.STRING)).isEqualTo(s);
+        assertThat(ABI.load(ctx, 0, PrimValType.STRING)).isEqualTo(s);
     }
 
     @Test
     void latin1Utf16StoresNonLatin1ContentTaggedAsUtf16() {
         var ctx = newContext(StringEncoding.LATIN1_UTF16);
         String s = "hello 😀"; // contains a codepoint outside latin1
-        CanonicalAbi.store(ctx, s, PrimValType.STRING, 0);
+        ABI.store(ctx, s, PrimValType.STRING, 0);
 
         long taggedCodeUnits = ctx.memory().readU32(4);
         long tag = 1L << 31;
         assertThat(taggedCodeUnits & tag).isNotZero();
 
-        assertThat(CanonicalAbi.load(ctx, 0, PrimValType.STRING)).isEqualTo(s);
+        assertThat(ABI.load(ctx, 0, PrimValType.STRING)).isEqualTo(s);
     }
 
     @Test
@@ -88,7 +89,7 @@ class CanonicalAbiStringTests {
         ctx.memory().writeI32(0, 100); // begin
         ctx.memory().writeI32(4, 1); // byte length 1
         ctx.memory().writeByte(100, (byte) 0xFF); // not a valid UTF-8 lead byte
-        assertThatThrownBy(() -> CanonicalAbi.load(ctx, 0, PrimValType.STRING))
+        assertThatThrownBy(() -> ABI.load(ctx, 0, PrimValType.STRING))
                 .isInstanceOf(TrapException.class);
     }
 
@@ -97,14 +98,14 @@ class CanonicalAbiStringTests {
         var ctx = newContext(StringEncoding.UTF8);
         ctx.memory().writeI32(0, 0); // begin
         ctx.memory().writeI32(4, (1 << 28)); // one past MAX_STRING_BYTE_LENGTH
-        assertThatThrownBy(() -> CanonicalAbi.load(ctx, 0, PrimValType.STRING))
+        assertThatThrownBy(() -> ABI.load(ctx, 0, PrimValType.STRING))
                 .isInstanceOf(TrapException.class);
     }
 
     @Test
     void emptyStringRoundTrips() {
         var ctx = newContext(StringEncoding.UTF8);
-        CanonicalAbi.store(ctx, "", PrimValType.STRING, 0);
-        assertThat(CanonicalAbi.load(ctx, 0, PrimValType.STRING)).isEqualTo("");
+        ABI.store(ctx, "", PrimValType.STRING, 0);
+        assertThat(ABI.load(ctx, 0, PrimValType.STRING)).isEqualTo("");
     }
 }

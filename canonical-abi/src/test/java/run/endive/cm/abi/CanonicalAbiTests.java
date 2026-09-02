@@ -14,6 +14,7 @@ import run.endive.cm.types.ResultType;
 import run.endive.cm.types.StreamType;
 import run.endive.cm.types.TupleType;
 import run.endive.cm.types.TypeResolver;
+import run.endive.cm.types.TypeSpace;
 import run.endive.cm.types.ValType;
 
 class CanonicalAbiTests {
@@ -63,8 +64,9 @@ class CanonicalAbiTests {
     @Test
     void containsBorrowFindsTopLevelBorrow() {
         var borrow = BorrowType.builder().withTypeIdx(0).build();
-        assertThat(CanonicalAbi.containsBorrow(stubResolver, borrow)).isTrue();
-        assertThat(CanonicalAbi.containsBorrow(stubResolver, PrimValType.U32)).isFalse();
+        assertThat(CanonicalAbi.containsBorrow(TypeSpace.of(stubResolver), borrow)).isTrue();
+        assertThat(CanonicalAbi.containsBorrow(TypeSpace.of(stubResolver), PrimValType.U32))
+                .isFalse();
     }
 
     @Test
@@ -77,13 +79,14 @@ class CanonicalAbiTests {
                                         .withValType(prim(PrimValType.U32))
                                         .build())
                         .build();
-        assertThat(CanonicalAbi.containsBorrow(stubResolver, record)).isFalse();
+        assertThat(CanonicalAbi.containsBorrow(TypeSpace.of(stubResolver), record)).isFalse();
     }
 
     @Test
     void containsAsyncValueFindsNestedStreamOrFuture() {
         var stream = StreamType.builder().withElementType(prim(PrimValType.U8)).build();
-        assertThat(CanonicalAbi.containsAsyncValue(stubResolver, stream)).isTrue();
-        assertThat(CanonicalAbi.containsAsyncValue(stubResolver, PrimValType.U32)).isFalse();
+        assertThat(CanonicalAbi.containsAsyncValue(TypeSpace.of(stubResolver), stream)).isTrue();
+        assertThat(CanonicalAbi.containsAsyncValue(TypeSpace.of(stubResolver), PrimValType.U32))
+                .isFalse();
     }
 }

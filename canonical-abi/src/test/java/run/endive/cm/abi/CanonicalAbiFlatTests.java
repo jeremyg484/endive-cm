@@ -28,6 +28,8 @@ class CanonicalAbiFlatTests {
 
     private static final TypeResolver STUB_RESOLVER = index -> null;
 
+    private static final AbiHelper ABI = new AbiHelper(STUB_RESOLVER);
+
     private static final run.endive.wasm.types.ValType CORE_I32 = run.endive.wasm.types.ValType.I32;
     private static final run.endive.wasm.types.ValType CORE_I64 = run.endive.wasm.types.ValType.I64;
 
@@ -52,13 +54,12 @@ class CanonicalAbiFlatTests {
                 .withMemory(memory)
                 .withPtrType(PointerType.I32)
                 .withStringEncoding(StringEncoding.UTF8)
-                .withTypeResolver(resolver)
                 .withRealloc(realloc)
                 .build();
     }
 
     private static Object roundTrip(LiftLowerContext ctx, Object v, DefValType t) {
-        var resolved = ctx.resolve(t);
+        var resolved = ABI.resolve(t);
         long[] flat = CanonicalAbi.lowerFlat(ctx, v, resolved);
         return CanonicalAbi.liftFlat(ctx, new CanonicalAbi.CoreValues(flat), resolved);
     }
@@ -82,11 +83,8 @@ class CanonicalAbiFlatTests {
                         .withResult(prim(PrimValType.U32))
                         .build();
         var flat =
-                CanonicalAbi.flattenFuncType(
-                        LiftLowerContext.builder()
-                                .withTypeResolver(STUB_RESOLVER)
-                                .withPtrType(PointerType.I32)
-                                .build(),
+                ABI.flattenFuncType(
+                        LiftLowerContext.builder().withPtrType(PointerType.I32).build(),
                         ft,
                         Direction.LIFT);
         assertThat(flat.params()).containsExactly(CORE_I32);
@@ -104,11 +102,8 @@ class CanonicalAbiFlatTests {
                             .build());
         }
         var flat =
-                CanonicalAbi.flattenFuncType(
-                        LiftLowerContext.builder()
-                                .withTypeResolver(STUB_RESOLVER)
-                                .withPtrType(PointerType.I32)
-                                .build(),
+                ABI.flattenFuncType(
+                        LiftLowerContext.builder().withPtrType(PointerType.I32).build(),
                         builder.build(),
                         Direction.LIFT);
         assertThat(flat.params()).containsExactly(CORE_I32);
@@ -131,22 +126,13 @@ class CanonicalAbiFlatTests {
                                         .build())
                         .build();
         var ft = FuncType.builder().withResult(ValType.builder().withTypeIdx(0).build()).build();
-        TypeResolver wideResolver =
-                new TypeResolver() {
-                    @Override
-                    public run.endive.cm.types.Type getType(int index) {
-                        return run.endive.cm.types.Type.of(wideRecord);
-                    }
-                };
-        var ctx =
-                LiftLowerContext.builder()
-                        .withTypeResolver(wideResolver)
-                        .withPtrType(PointerType.I32)
-                        .build();
-        var flatLift = CanonicalAbi.flattenFuncType(ctx, ft, Direction.LIFT);
+        TypeResolver wideResolver = index -> run.endive.cm.types.Type.of(wideRecord);
+        var ctx = LiftLowerContext.builder().withPtrType(PointerType.I32).build();
+        var abi = new AbiHelper(wideResolver);
+        var flatLift = abi.flattenFuncType(ctx, ft, Direction.LIFT);
         assertThat(flatLift.returns()).containsExactly(CORE_I32);
 
-        var flatLower = CanonicalAbi.flattenFuncType(ctx, ft, Direction.LOWER);
+        var flatLower = abi.flattenFuncType(ctx, ft, Direction.LOWER);
         assertThat(flatLower.returns()).isEmpty();
         assertThat(flatLower.params()).containsExactly(CORE_I32); // out-param pointer
     }
@@ -225,7 +211,6 @@ class CanonicalAbiFlatTests {
     @Test
     void variantWithMismatchedCaseTypesCoercesThroughJoinedSlot() {
         var ctx = newContext();
-        // case "a": u32 -> flattens [i32]; case "b": f64 -> flattens [f64].
         // join(i32, f64) is neither (i32,f32) nor (f32,i32), so the shared slot is i64.
         var variant =
                 VariantType.builder()
@@ -240,7 +225,7 @@ class CanonicalAbiFlatTests {
                                         .withValType(prim(PrimValType.F64))
                                         .build())
                         .build();
-        assertThat(ctx.resolve(variant).flatten(PointerType.I32))
+        assertThat(ABI.resolve(variant).flatten(PointerType.I32))
                 .containsExactly(CORE_I32, CORE_I64);
 
         assertThat(roundTrip(ctx, VariantValue.of("a", 4_000_000_000L), variant))
@@ -262,7 +247,7 @@ class CanonicalAbiFlatTests {
                                         .build())
                         .build();
         long[] lowered =
-                CanonicalAbi.lowerFlat(ctx, VariantValue.of("none", null), ctx.resolve(variant));
+                CanonicalAbi.lowerFlat(ctx, VariantValue.of("none", null), ABI.resolve(variant));
         assertThat(lowered).containsExactly(0L, 0L);
 
         assertThat(roundTrip(ctx, VariantValue.of("none", null), variant))
@@ -277,11 +262,11 @@ class CanonicalAbiFlatTests {
         List<ValType> ts = List.of(prim(PrimValType.U32), prim(PrimValType.F64));
         List<Object> vs = List.of(42L, 3.5);
 
-        long[] flat = CanonicalAbi.lowerFlatParams(ctx, vs, ts);
+        long[] flat = ABI.lowerFlatParams(ctx, vs, ts);
         // u32 -> [i32], f64 -> [f64]: passed directly as two core values, no spill pointer.
         assertThat(flat).hasSize(2);
 
-        var lifted = CanonicalAbi.liftFlatParams(ctx, flat, ts);
+        var lifted = ABI.liftFlatParams(ctx, flat, ts);
         assertThat(lifted).containsExactly(42L, 3.5);
     }
 
@@ -296,10 +281,10 @@ class CanonicalAbiFlatTests {
             vs.add((long) i);
         }
 
-        long[] flat = CanonicalAbi.lowerFlatParams(ctx, vs, ts);
+        long[] flat = ABI.lowerFlatParams(ctx, vs, ts);
         assertThat(flat).hasSize(1); // just the freshly-allocated spill pointer
 
-        var lifted = CanonicalAbi.liftFlatParams(ctx, flat, ts);
+        var lifted = ABI.liftFlatParams(ctx, flat, ts);
         assertThat(lifted).isEqualTo(vs);
     }
 
@@ -320,20 +305,21 @@ class CanonicalAbiFlatTests {
                                         .withValType(prim(PrimValType.U32))
                                         .build())
                         .build();
-        var ctx = newContext(index -> run.endive.cm.types.Type.of(wideRecord));
+        TypeResolver wideResolver = index -> run.endive.cm.types.Type.of(wideRecord);
+        var ctx = newContext(wideResolver);
+        var abi = new AbiHelper(wideResolver);
         List<ValType> ts = List.of(ValType.builder().withTypeIdx(0).build());
         Map<String, Object> resultValue = new LinkedHashMap<>();
         resultValue.put("a", 7L);
         resultValue.put("b", 9L);
         List<Object> vs = List.of(resultValue);
 
-        // record(u32, u32) has alignment 4 and size 8; 100 is aligned and within the page.
         int bufPtr = 100;
-        long[] flat = CanonicalAbi.lowerFlatResults(ctx, vs, ts, new long[] {bufPtr});
+        long[] flat = abi.lowerFlatResults(ctx, vs, ts, new long[] {bufPtr});
         // With an out-param, the pointer is not returned among the flat values.
         assertThat(flat).isEmpty();
 
-        var lifted = CanonicalAbi.liftFlatResults(ctx, new long[] {bufPtr}, ts);
+        var lifted = abi.liftFlatResults(ctx, new long[] {bufPtr}, ts);
         assertThat(lifted).containsExactly(resultValue);
     }
 }

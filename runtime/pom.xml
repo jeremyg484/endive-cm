@@ -23,6 +23,10 @@
     </dependency>
     <dependency>
       <groupId>run.endive.cm</groupId>
+      <artifactId>canonical-abi</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
       <artifactId>types</artifactId>
     </dependency>
     <dependency>
@@ -60,6 +64,18 @@
         <configuration>
           <testSuiteRepoRef>706074c96bc14cfc58469e1bdc452bb4d91921c7</testSuiteRepoRef>
           <includedWasts>
+            <wast>linking/link-time-virtualization.wast</wast>
+            <wast>linking/shared-everything-dynamic-linking.wast</wast>
+            <wast>linking/unit.wast</wast>
+            <wast>resources/multiple-resources.wast</wast>
+            <wast>validation/abi.wast</wast>
+            <wast>validation/attributes.wast</wast>
+            <wast>validation/external-visibility.wast</wast>
+            <wast>validation/kebab.wast</wast>
+            <wast>validation/outer-alias.wast</wast>
+            <wast>validation/resources.wast</wast>
+            <wast>values/concat.wast</wast>
+            <wast>values/strings.wast</wast>
             <wast>wasm-tools/adapt.wast</wast>
             <wast>wasm-tools/alias.wast</wast>
             <wast>wasm-tools/big.wast</wast>
@@ -91,7 +107,20 @@
             <wast>wasm-tools/very-nested.wast</wast>
             <wast>wasm-tools/virtualize.wast</wast>
             <wast>wasm-tools/wrong-order.wast</wast>
+            <wast>wasmtime/adapter.wast</wast>
+            <wast>wasmtime/aliasing.wast</wast>
+            <wast>wasmtime/fused.wast</wast>
+            <wast>wasmtime/import.wast</wast>
+            <wast>wasmtime/instance.wast</wast>
+            <wast>wasmtime/linking.wast</wast>
+            <wast>wasmtime/modules.wast</wast>
+            <wast>wasmtime/nested.wast</wast>
+            <wast>wasmtime/resources.wast</wast>
+            <wast>wasmtime/restrictions.wast</wast>
             <wast>wasmtime/simple.wast</wast>
+            <wast>wasmtime/strings.wast</wast>
+            <wast>wasmtime/tags.wast</wast>
+            <wast>wasmtime/types.wast</wast>
           </includedWasts>
           <excludedWasts>
             <wast>async/async-calls-sync.wast</wast>
@@ -125,56 +154,20 @@
             <wast>async/validate-no-stream-char.wast</wast>
             <wast>async/wait-during-callback.wast</wast>
             <wast>async/zero-length.wast</wast>
-            <wast>linking/link-time-virtualization.wast</wast>
-            <wast>linking/shared-everything-dynamic-linking.wast</wast>
-            <wast>linking/unit.wast</wast>
-            <wast>names/kebab.wast</wast>
-            <wast>resources/multiple-resources.wast</wast>
-            <wast>validation/abi.wast</wast>
-            <wast>validation/attributes.wast</wast>
-            <wast>validation/external-visibility.wast</wast>
-            <wast>validation/implements.wast</wast>
-            <wast>validation/kebab.wast</wast>
-            <wast>validation/outer-alias.wast</wast>
-            <wast>validation/resources.wast</wast>
-            <wast>values/concat.wast</wast>
             <wast>values/post-return.wast</wast>
-            <wast>values/strings.wast</wast>
-            <wast>wasmtime/adapter.wast</wast>
-            <wast>wasmtime/aliasing.wast</wast>
-            <wast>wasmtime/fused.wast</wast>
-            <wast>wasmtime/import.wast</wast>
-            <wast>wasmtime/instance.wast</wast>
-            <wast>wasmtime/linking.wast</wast>
-            <wast>wasmtime/modules.wast</wast>
-            <wast>wasmtime/nested.wast</wast>
-            <wast>wasmtime/resources.wast</wast>
-            <wast>wasmtime/restrictions.wast</wast>
-            <wast>wasmtime/strings.wast</wast>
-            <wast>wasmtime/tags.wast</wast>
-            <wast>wasmtime/types.wast</wast>
           </excludedWasts>
           <excludedTests>
+            <!-- These require 64-bit memory support, not yet implemented in Endive for core Wasm -->
             <test>CmSpecWasmToolsMemory64Test.test2</test>
             <test>CmSpecWasmToolsMemory64Test.test3</test>
             <test>CmSpecWasmToolsMemory64Test.test4</test>
-            <test>CmSpecWasmToolsNamingTest.test3</test>
-            <test>CmSpecWasmToolsAdaptTest.test14</test>
-            <test>CmSpecWasmToolsAdaptTest.test18</test>
-            <test>CmSpecWasmToolsDefinedtypesTest.test1</test>
-            <test>CmSpecWasmToolsExportIntroducesAliasTest.test3</test>
-            <test>CmSpecWasmToolsInlineExportsTest.test1</test>
-            <test>CmSpecWasmToolsInstanceTypeTest.test8</test>
-            <test>CmSpecWasmToolsInvalidTest.test1</test>
-            <test>CmSpecWasmToolsInvalidTest.test2</test>
-            <test>CmSpecWasmToolsInvalidTest.test3</test>
-            <test>CmSpecWasmToolsInvalidTest.test4</test>
-            <test>CmSpecWasmToolsTypesTest.test15</test>
-            <test>CmSpecWasmToolsTypesTest.test18</test>
-            <test>CmSpecWasmToolsTypesTest.test24</test>
-            <test>CmSpecWasmToolsVeryNestedTest.test4</test>
-            <test>CmSpecWasmtimeSimpleTest.test4</test>
-            <test>CmSpecWasmtimeSimpleTest.test5</test>
+            <!-- These test the "implements" annotation on imports/exports, which is not supported yet -->
+            <test>CmSpecValidationAttributesTest.test0</test>
+            <test>CmSpecValidationAttributesTest.test1</test>
+            <test>CmSpecValidationAttributesTest.test25</test>
+            <test>CmSpecValidationAttributesTest.test26</test>
+            <!-- The currently used version of wasm-tools emits a different error message than expected in the wast -->
+            <test>CmSpecWasmToolsResourcesTest.test5</test>
           </excludedTests>
         </configuration>
         <executions>

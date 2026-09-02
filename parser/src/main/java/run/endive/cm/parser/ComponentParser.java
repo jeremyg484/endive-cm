@@ -137,21 +137,21 @@ public final class ComponentParser {
     static final byte[] VERSION_BYTES = {0x0d, 0x00};
     static final byte[] LAYER_BYTES = {0x01, 0x00};
 
+    private final boolean validate;
+    private final Validator validator;
     private final Parser coreModuleParser;
 
-    private ComponentParser(Parser coreModuleParser) {
+    private ComponentParser(boolean validate, Validator validator, Parser coreModuleParser) {
+        this.validate = validate;
+        this.validator = validate ? Objects.requireNonNull(validator, "validator") : null;
         Objects.requireNonNull(coreModuleParser, "coreModuleParser");
         this.coreModuleParser = coreModuleParser;
     }
 
-    private static ByteBuffer readByteBuffer(InputStream is) {
-        try {
-            var buffer = ByteBuffer.wrap(InputStreams.readAllBytes(is));
-            buffer.order(ByteOrder.LITTLE_ENDIAN);
-            return buffer;
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to read wasm bytes.", e);
-        }
+    private static ByteBuffer readByteBuffer(byte[] bytes) {
+        var buffer = ByteBuffer.wrap(bytes);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+        return buffer;
     }
 
     public Parser coreModuleParser() {
@@ -164,7 +164,19 @@ public final class ComponentParser {
 
     public static final class Builder {
 
+        private boolean validate = true;
+        private Validator validator;
         private Parser coreModuleParser;
+
+        public Builder withValidation(boolean validate) {
+            this.validate = validate;
+            return this;
+        }
+
+        public Builder withValidator(Validator validator) {
+            this.validator = validator;
+            return this;
+        }
 
         public Builder withCoreModuleParser(Parser coreModuleParser) {
             this.coreModuleParser = coreModuleParser;
@@ -177,7 +189,12 @@ public final class ComponentParser {
             if (coreModuleParser == null) {
                 coreModuleParser = Parser.builder().build();
             }
-            return new ComponentParser(coreModuleParser);
+            if (validate && validator == null) {
+                throw new IllegalArgumentException(
+                        "Validator must be provided or else validation must be explicitly disabled"
+                                + " by setting 'withValidation(false)'");
+            }
+            return new ComponentParser(validate, validator, coreModuleParser);
         }
     }
 
@@ -235,13 +252,25 @@ public final class ComponentParser {
     public WasmComponent parse(Supplier<InputStream> inputStreamSupplier) {
         WasmComponent.Builder componentBuilder = WasmComponent.builder();
         parse(inputStreamSupplier.get(), s -> onSection(componentBuilder, s));
-        return componentBuilder.build();
+        WasmComponent component = componentBuilder.build();
+        if (validate) {
+            validator.validateWasmComponent(component);
+        }
+        return component;
     }
 
     private void parse(InputStream in, ComponentParserListener listener) {
         requireNonNull(listener, "listener");
-
-        var buffer = readByteBuffer(in);
+        byte[] bytes;
+        try {
+            bytes = InputStreams.readAllBytes(in);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Failed to read wasm bytes.", e);
+        }
+        if (validate) {
+            validator.validateBinary(new ByteArrayInputStream(bytes));
+        }
+        var buffer = readByteBuffer(bytes);
 
         parseComponent(listener, buffer, coreModuleParser);
     }

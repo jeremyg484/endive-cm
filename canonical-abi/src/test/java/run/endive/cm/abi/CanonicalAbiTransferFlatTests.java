@@ -27,9 +27,9 @@ import run.endive.runtime.TrapException;
 import run.endive.wasm.types.MemoryLimits;
 
 /**
- * Covers the flat (core value) side of the transfer path, where the normalizations differ
- * from the in-memory ones. A core value can carry bits above its component type's width, and
- * lifting would have masked or sign-extended them before lowering re-encoded them.
+ * Covers the flat (core value) side of the transfer path, where the normalizations differ from the
+ * in-memory ones. A core value can carry bits above its component type's width, and lifting would
+ * have masked or sign-extended them before lowering re-encoded them.
  */
 class CanonicalAbiTransferFlatTests {
 
@@ -50,13 +50,14 @@ class CanonicalAbiTransferFlatTests {
         var dst = newContext(types);
         var reference = newContext(types);
         List<ValType> ts = List.of(prim(PrimValType.STRING));
-        CanonicalAbi.store(src, "flat string", PrimValType.STRING, 0);
+        new AbiHelper(types).store(src, "flat string", PrimValType.STRING, 0);
         long[] args = {src.memory().readU32(0), src.memory().readU32(4)};
 
-        long[] actual = CanonicalAbi.transferFlatParams(src, dst, args, ts);
+        long[] actual = new AbiHelper(types).transferFlatParams(src, dst, args, ts);
         long[] expected =
-                CanonicalAbi.lowerFlatParams(
-                        reference, CanonicalAbi.liftFlatParams(src, args, ts), ts);
+                new AbiHelper(types)
+                        .lowerFlatParams(
+                                reference, new AbiHelper(types).liftFlatParams(src, args, ts), ts);
 
         assertThat(actual).isEqualTo(expected);
         assertMemoryEquals(dst.memory(), reference.memory());
@@ -66,12 +67,13 @@ class CanonicalAbiTransferFlatTests {
     void narrowsUnsignedIntegersCarryingBitsAboveTheirWidth() {
         var types = new TransferTestSupport.Types();
         List<ValType> ts = List.of(prim(PrimValType.U8), prim(PrimValType.U16));
-        // A core i32 may carry more bits than the component type has; lifting masks them
+        // A core i32 may carry more bits than the component type has, so lifting masks them
         // away, so the transfer must too rather than forwarding the raw value.
         long[] args = {0x1FFL, 0x1FFFFL};
 
         long[] actual =
-                CanonicalAbi.transferFlatParams(newContext(types), newContext(types), args, ts);
+                new AbiHelper(types)
+                        .transferFlatParams(newContext(types), newContext(types), args, ts);
 
         assertThat(actual).containsExactly(0xFFL, 0xFFFFL);
         assertFlatParamsMatchLiftLower(types, ts, args);
@@ -84,7 +86,8 @@ class CanonicalAbiTransferFlatTests {
         long[] args = {0x80L, 0x8000L};
 
         long[] actual =
-                CanonicalAbi.transferFlatParams(newContext(types), newContext(types), args, ts);
+                new AbiHelper(types)
+                        .transferFlatParams(newContext(types), newContext(types), args, ts);
 
         assertThat(actual).containsExactly(0xFFFFFF80L, 0xFFFF8000L);
         assertFlatParamsMatchLiftLower(types, ts, args);
@@ -97,7 +100,8 @@ class CanonicalAbiTransferFlatTests {
         long[] args = {0x2A};
 
         long[] actual =
-                CanonicalAbi.transferFlatParams(newContext(types), newContext(types), args, ts);
+                new AbiHelper(types)
+                        .transferFlatParams(newContext(types), newContext(types), args, ts);
 
         assertThat(actual).containsExactly(1L);
         assertFlatParamsMatchLiftLower(types, ts, args);
@@ -110,7 +114,8 @@ class CanonicalAbiTransferFlatTests {
         long[] args = {0x7f800001L};
 
         long[] actual =
-                CanonicalAbi.transferFlatParams(newContext(types), newContext(types), args, ts);
+                new AbiHelper(types)
+                        .transferFlatParams(newContext(types), newContext(types), args, ts);
 
         assertThat(actual).containsExactly(0x7f800001L);
     }
@@ -122,11 +127,12 @@ class CanonicalAbiTransferFlatTests {
 
         assertThatThrownBy(
                         () ->
-                                CanonicalAbi.transferFlatParams(
-                                        newContext(types),
-                                        newContext(types),
-                                        new long[] {0xD800L},
-                                        ts))
+                                new AbiHelper(types)
+                                        .transferFlatParams(
+                                                newContext(types),
+                                                newContext(types),
+                                                new long[] {0xD800L},
+                                                ts))
                 .isInstanceOf(TrapException.class);
     }
 
@@ -168,8 +174,12 @@ class CanonicalAbiTransferFlatTests {
 
         assertThatThrownBy(
                         () ->
-                                CanonicalAbi.transferFlatParams(
-                                        newContext(types), newContext(types), new long[] {9L}, ts))
+                                new AbiHelper(types)
+                                        .transferFlatParams(
+                                                newContext(types),
+                                                newContext(types),
+                                                new long[] {9L},
+                                                ts))
                 .isInstanceOf(TrapException.class);
     }
 
@@ -191,10 +201,11 @@ class CanonicalAbiTransferFlatTests {
         }
         long[] args = {spillPtr};
 
-        long[] actual = CanonicalAbi.transferFlatParams(src, dst, args, ts);
+        long[] actual = new AbiHelper(types).transferFlatParams(src, dst, args, ts);
         long[] expected =
-                CanonicalAbi.lowerFlatParams(
-                        reference, CanonicalAbi.liftFlatParams(src, args, ts), ts);
+                new AbiHelper(types)
+                        .lowerFlatParams(
+                                reference, new AbiHelper(types).liftFlatParams(src, args, ts), ts);
 
         assertThat(actual).as("both sides spill, so a single pointer comes back").hasSize(1);
         assertThat(actual).isEqualTo(expected);
@@ -220,13 +231,15 @@ class CanonicalAbiTransferFlatTests {
         long[] outParam = {128};
 
         long[] actual =
-                CanonicalAbi.transferFlatResults(src, dst, new long[] {srcPtr}, ts, outParam);
+                new AbiHelper(types)
+                        .transferFlatResults(src, dst, new long[] {srcPtr}, ts, outParam);
         long[] expected =
-                CanonicalAbi.lowerFlatResults(
-                        reference,
-                        CanonicalAbi.liftFlatResults(src, new long[] {srcPtr}, ts),
-                        ts,
-                        outParam);
+                new AbiHelper(types)
+                        .lowerFlatResults(
+                                reference,
+                                new AbiHelper(types).liftFlatResults(src, new long[] {srcPtr}, ts),
+                                ts,
+                                outParam);
 
         assertThat(actual).as("nothing comes back when the caller supplied the buffer").isEmpty();
         assertThat(actual).isEqualTo(expected);
@@ -249,8 +262,9 @@ class CanonicalAbiTransferFlatTests {
 
         assertThatThrownBy(
                         () ->
-                                CanonicalAbi.transferFlatResults(
-                                        src, dst, new long[] {64}, ts, new long[] {129}))
+                                new AbiHelper(types)
+                                        .transferFlatResults(
+                                                src, dst, new long[] {64}, ts, new long[] {129}))
                 .isInstanceOf(TrapException.class);
     }
 
@@ -278,7 +292,7 @@ class CanonicalAbiTransferFlatTests {
 
         var counting = (CountingMemory) dst.memory();
         counting.resetCounts();
-        CanonicalAbi.transfer(src, dst, 0, 0, t);
+        new AbiHelper(types).transfer(src, dst, 0, 0, t);
 
         assertThat(counting.bulkWrites())
                 .as("bool needs normalizing, so there is no bulk copy of the payload")
@@ -298,9 +312,9 @@ class CanonicalAbiTransferFlatTests {
 
         var counting = (CountingMemory) dst.memory();
         counting.resetCounts();
-        CanonicalAbi.transfer(src, dst, 0, 0, t);
+        new AbiHelper(types).transfer(src, dst, 0, 0, t);
 
-        int elementSize = src.resolve(elementType).elementSize(PointerType.I32);
+        int elementSize = new AbiHelper(types).resolve(elementType).elementSize(PointerType.I32);
         int expectedChunks = Math.max(1, (length * elementSize + 65535) / 65536);
         assertThat(counting.bulkWrites())
                 .as("payload copied in bulk, not per element")
@@ -326,14 +340,15 @@ class CanonicalAbiTransferFlatTests {
                 List.of(prim(PrimValType.U8), prim(PrimValType.STRING), prim(PrimValType.BOOL));
 
         var src = newContext(types);
-        CanonicalAbi.store(src, "compiled", PrimValType.STRING, 16);
+        new AbiHelper(types).store(src, "compiled", PrimValType.STRING, 16);
         long[] args = {0x1FFL, src.memory().readU32(16), src.memory().readU32(20), 3L};
 
         var viaStatics = newContext(types);
-        long[] staticResult = CanonicalAbi.transferFlatParams(src, viaStatics, args, paramTypes);
+        long[] staticResult =
+                new AbiHelper(types).transferFlatParams(src, viaStatics, args, paramTypes);
 
         var viaPlan = newContext(types);
-        long[] planResult = ValueTransfer.compile(src, viaPlan, ft).transferParams(args);
+        long[] planResult = new AbiHelper(types).compile(src, viaPlan, ft).transferParams(args);
 
         assertThat(planResult).isEqualTo(staticResult);
         assertMemoryEquals(viaPlan.memory(), viaStatics.memory());
@@ -357,10 +372,11 @@ class CanonicalAbiTransferFlatTests {
         long[] args = {64};
 
         var viaStatics = newContext(types);
-        long[] staticResult = CanonicalAbi.transferFlatParams(src, viaStatics, args, paramTypes);
+        long[] staticResult =
+                new AbiHelper(types).transferFlatParams(src, viaStatics, args, paramTypes);
 
         var viaPlan = newContext(types);
-        long[] planResult = ValueTransfer.compile(src, viaPlan, ft).transferParams(args);
+        long[] planResult = new AbiHelper(types).compile(src, viaPlan, ft).transferParams(args);
 
         assertThat(planResult).isEqualTo(staticResult);
         assertMemoryEquals(viaPlan.memory(), viaStatics.memory());
@@ -380,12 +396,19 @@ class CanonicalAbiTransferFlatTests {
 
         var viaStatics = newContext(types);
         long[] staticResult =
-                CanonicalAbi.transferFlatResults(
-                        callee, viaStatics, flatResults, List.of(prim(PrimValType.U32)), null);
+                new AbiHelper(types)
+                        .transferFlatResults(
+                                callee,
+                                viaStatics,
+                                flatResults,
+                                List.of(prim(PrimValType.U32)),
+                                null);
 
         var viaPlan = newContext(types);
         long[] planResult =
-                ValueTransfer.compile(viaPlan, callee, ft).transferResults(flatResults, null);
+                new AbiHelper(types)
+                        .compile(viaPlan, callee, ft)
+                        .transferResults(flatResults, null);
 
         assertThat(planResult).containsExactly(0xDEADBEEFL);
         assertThat(planResult).isEqualTo(staticResult);
@@ -402,22 +425,29 @@ class CanonicalAbiTransferFlatTests {
                         .build();
         var callee = newContext(types);
         int spillPtr = 32;
-        CanonicalAbi.store(callee, "result", PrimValType.STRING, spillPtr);
+        new AbiHelper(types).store(callee, "result", PrimValType.STRING, spillPtr);
         long[] flatResults = {spillPtr};
 
         var viaStatics = newContext(types);
         long[] staticResult =
-                CanonicalAbi.transferFlatResults(
-                        callee, viaStatics, flatResults, List.of(prim(PrimValType.STRING)), null);
+                new AbiHelper(types)
+                        .transferFlatResults(
+                                callee,
+                                viaStatics,
+                                flatResults,
+                                List.of(prim(PrimValType.STRING)),
+                                null);
 
         var viaPlan = newContext(types);
         long[] planResult =
-                ValueTransfer.compile(viaPlan, callee, ft).transferResults(flatResults, null);
+                new AbiHelper(types)
+                        .compile(viaPlan, callee, ft)
+                        .transferResults(flatResults, null);
 
         assertThat(planResult).as("a pointer to the destination's spilled tuple").hasSize(1);
         assertThat(planResult).isEqualTo(staticResult);
         assertMemoryEquals(viaPlan.memory(), viaStatics.memory());
-        assertThat(CanonicalAbi.load(viaPlan, (int) planResult[0], PrimValType.STRING))
+        assertThat(new AbiHelper(types).load(viaPlan, (int) planResult[0], PrimValType.STRING))
                 .isEqualTo("result");
     }
 
@@ -431,10 +461,10 @@ class CanonicalAbiTransferFlatTests {
                         .build();
         var caller = TransferTestSupport.newContext(types, StringEncoding.UTF8);
         var callee = TransferTestSupport.newContext(types, StringEncoding.UTF16);
-        var transfer = ValueTransfer.compile(caller, callee, ft);
+        var transfer = new AbiHelper(types).compile(caller, callee, ft);
         String value = "héllo 😀";
 
-        CanonicalAbi.store(caller, value, PrimValType.STRING, 0);
+        new AbiHelper(types).store(caller, value, PrimValType.STRING, 0);
         long[] calleeArgs =
                 transfer.transferParams(
                         new long[] {caller.memory().readU32(0), caller.memory().readU32(4)});
@@ -453,7 +483,7 @@ class CanonicalAbiTransferFlatTests {
         long[] callerResults = transfer.transferResults(new long[] {calleeSpillPtr}, null);
 
         assertThat(callerResults).hasSize(1);
-        assertThat(CanonicalAbi.load(caller, (int) callerResults[0], PrimValType.STRING))
+        assertThat(new AbiHelper(types).load(caller, (int) callerResults[0], PrimValType.STRING))
                 .isEqualTo(value);
 
         // Back in the caller's memory it is UTF-8 again.
@@ -467,7 +497,7 @@ class CanonicalAbiTransferFlatTests {
     void compiledValueTransferReturnsNothingForAVoidFunction() {
         var types = new TransferTestSupport.Types();
         var ft = FuncType.builder().addParam(param("x", prim(PrimValType.U32))).build();
-        var transfer = ValueTransfer.compile(newContext(types), newContext(types), ft);
+        var transfer = new AbiHelper(types).compile(newContext(types), newContext(types), ft);
 
         assertThat(transfer.hasResult()).isFalse();
         assertThat(transfer.transferResults(new long[0], null)).isEmpty();
@@ -484,7 +514,8 @@ class CanonicalAbiTransferFlatTests {
                         .withResult(prim(PrimValType.U32))
                         .build();
 
-        assertThat(ValueTransfer.canTransfer(newContext(types), newContext(types), ft)).isTrue();
+        assertThat(new AbiHelper(types).canTransfer(newContext(types), newContext(types), ft))
+                .isTrue();
     }
 
     @Test
@@ -493,14 +524,13 @@ class CanonicalAbiTransferFlatTests {
         var ft = FuncType.builder().addParam(param("x", prim(PrimValType.U32))).build();
         var async =
                 LiftLowerContext.builder()
-                        .withTypeResolver(types)
                         .withMemory(new ByteArrayMemory(new MemoryLimits(1)))
                         .withPtrType(PointerType.I32)
                         .withAsync(true)
                         .build();
 
-        assertThat(ValueTransfer.canTransfer(newContext(types), async, ft)).isFalse();
-        assertThat(ValueTransfer.canTransfer(async, newContext(types), ft)).isFalse();
+        assertThat(new AbiHelper(types).canTransfer(newContext(types), async, ft)).isFalse();
+        assertThat(new AbiHelper(types).canTransfer(async, newContext(types), ft)).isFalse();
     }
 
     @Test
@@ -509,12 +539,11 @@ class CanonicalAbiTransferFlatTests {
         var ft = FuncType.builder().addParam(param("x", prim(PrimValType.U32))).build();
         var wide =
                 LiftLowerContext.builder()
-                        .withTypeResolver(types)
                         .withMemory(new ByteArrayMemory(new MemoryLimits(1)))
                         .withPtrType(PointerType.I64)
                         .build();
 
-        assertThat(ValueTransfer.canTransfer(newContext(types), wide, ft)).isFalse();
+        assertThat(new AbiHelper(types).canTransfer(newContext(types), wide, ft)).isFalse();
     }
 
     @Test
@@ -522,11 +551,12 @@ class CanonicalAbiTransferFlatTests {
         var types = new TransferTestSupport.Types();
         var ft = FuncType.builder().addParam(param("e", prim(PrimValType.ERROR_CONTEXT))).build();
 
-        assertThat(ValueTransfer.canTransfer(newContext(types), newContext(types), ft)).isFalse();
+        assertThat(new AbiHelper(types).canTransfer(newContext(types), newContext(types), ft))
+                .isFalse();
     }
 
     private static LiftLowerContext memorylessContext(TransferTestSupport.Types types) {
-        return LiftLowerContext.builder().withTypeResolver(types).build();
+        return LiftLowerContext.builder().build();
     }
 
     @Test
@@ -540,8 +570,9 @@ class CanonicalAbiTransferFlatTests {
                         .build();
 
         assertThat(
-                        ValueTransfer.canTransfer(
-                                memorylessContext(types), memorylessContext(types), ft))
+                        new AbiHelper(types)
+                                .canTransfer(
+                                        memorylessContext(types), memorylessContext(types), ft))
                 .isTrue();
     }
 
@@ -553,8 +584,9 @@ class CanonicalAbiTransferFlatTests {
         var ft = FuncType.builder().addParam(param("xs", types.add(list))).build();
 
         assertThat(
-                        ValueTransfer.canTransfer(
-                                memorylessContext(types), memorylessContext(types), ft))
+                        new AbiHelper(types)
+                                .canTransfer(
+                                        memorylessContext(types), memorylessContext(types), ft))
                 .isTrue();
     }
 
@@ -574,12 +606,18 @@ class CanonicalAbiTransferFlatTests {
                         .build();
 
         assertThat(
-                        ValueTransfer.canTransfer(
-                                memorylessContext(types), memorylessContext(types), withString))
+                        new AbiHelper(types)
+                                .canTransfer(
+                                        memorylessContext(types),
+                                        memorylessContext(types),
+                                        withString))
                 .isFalse();
         assertThat(
-                        ValueTransfer.canTransfer(
-                                memorylessContext(types), memorylessContext(types), withList))
+                        new AbiHelper(types)
+                                .canTransfer(
+                                        memorylessContext(types),
+                                        memorylessContext(types),
+                                        withList))
                 .isFalse();
     }
 
@@ -592,10 +630,11 @@ class CanonicalAbiTransferFlatTests {
         }
 
         assertThat(
-                        ValueTransfer.canTransfer(
-                                memorylessContext(types),
-                                memorylessContext(types),
-                                builder.build()))
+                        new AbiHelper(types)
+                                .canTransfer(
+                                        memorylessContext(types),
+                                        memorylessContext(types),
+                                        builder.build()))
                 .isFalse();
     }
 
@@ -610,8 +649,9 @@ class CanonicalAbiTransferFlatTests {
         var ft = FuncType.builder().withResult(types.add(wide)).build();
 
         assertThat(
-                        ValueTransfer.canTransfer(
-                                memorylessContext(types), memorylessContext(types), ft))
+                        new AbiHelper(types)
+                                .canTransfer(
+                                        memorylessContext(types), memorylessContext(types), ft))
                 .isFalse();
     }
 
@@ -621,13 +661,12 @@ class CanonicalAbiTransferFlatTests {
         var ft = FuncType.builder().addParam(param("s", prim(PrimValType.STRING))).build();
         var noRealloc =
                 LiftLowerContext.builder()
-                        .withTypeResolver(types)
                         .withMemory(new ByteArrayMemory(new MemoryLimits(1)))
                         .build();
 
         // Parameters are allocated in the callee, so the callee is the one that needs it.
-        assertThat(ValueTransfer.canTransfer(newContext(types), noRealloc, ft)).isFalse();
-        assertThat(ValueTransfer.canTransfer(noRealloc, newContext(types), ft)).isTrue();
+        assertThat(new AbiHelper(types).canTransfer(newContext(types), noRealloc, ft)).isFalse();
+        assertThat(new AbiHelper(types).canTransfer(noRealloc, newContext(types), ft)).isTrue();
     }
 
     @Test
@@ -638,8 +677,8 @@ class CanonicalAbiTransferFlatTests {
         var caller = memorylessContext(types);
         var callee = memorylessContext(types);
 
-        assertThat(ValueTransfer.canTransfer(caller, callee, ft)).isTrue();
-        var transfer = ValueTransfer.compile(caller, callee, ft);
+        assertThat(new AbiHelper(types).canTransfer(caller, callee, ft)).isTrue();
+        var transfer = new AbiHelper(types).compile(caller, callee, ft);
 
         assertThat(transfer.transferParams(new long[] {0L})).containsExactly(0L);
         assertThatThrownBy(() -> transfer.transferParams(new long[] {1L}))
@@ -655,12 +694,15 @@ class CanonicalAbiTransferFlatTests {
         var reference = newContext(types);
 
         long[] actual =
-                CanonicalAbi.transferFlatParams(src, dst, Arrays.copyOf(args, args.length), ts);
+                new AbiHelper(types)
+                        .transferFlatParams(src, dst, Arrays.copyOf(args, args.length), ts);
         long[] expected =
-                CanonicalAbi.lowerFlatParams(
-                        reference,
-                        CanonicalAbi.liftFlatParams(src, Arrays.copyOf(args, args.length), ts),
-                        ts);
+                new AbiHelper(types)
+                        .lowerFlatParams(
+                                reference,
+                                new AbiHelper(types)
+                                        .liftFlatParams(src, Arrays.copyOf(args, args.length), ts),
+                                ts);
 
         assertThat(actual).isEqualTo(expected);
         assertMemoryEquals(dst.memory(), reference.memory());
@@ -679,7 +721,6 @@ class CanonicalAbiTransferFlatTests {
                 .withMemory(memory)
                 .withPtrType(PointerType.I32)
                 .withStringEncoding(StringEncoding.UTF8)
-                .withTypeResolver(types)
                 .withRealloc(realloc)
                 .build();
     }

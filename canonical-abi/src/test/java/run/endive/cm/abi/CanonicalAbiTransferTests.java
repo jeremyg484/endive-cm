@@ -187,10 +187,10 @@ class CanonicalAbiTransferTests {
         var dst = newContext(types);
         src.memory().writeByte(0, (byte) 0x02);
 
-        CanonicalAbi.transfer(src, dst, 0, 0, PrimValType.BOOL);
+        new AbiHelper(types).transfer(src, dst, 0, 0, PrimValType.BOOL);
 
         assertThat(dst.memory().read(0)).isEqualTo((byte) 1);
-        assertThat(CanonicalAbi.load(dst, 0, PrimValType.BOOL)).isEqualTo(true);
+        assertThat(new AbiHelper(types).load(dst, 0, PrimValType.BOOL)).isEqualTo(true);
     }
 
     @Test
@@ -199,10 +199,10 @@ class CanonicalAbiTransferTests {
         var src = newContext(types);
         var dst = newContext(types);
         var t = flagsType(FIVE_LABELS);
-        // Five labels occupy one byte; the top three bits are slack that lifting discards.
+        // Five labels occupy one byte and the top three bits are slack that lifting discards.
         src.memory().writeByte(0, (byte) 0xFF);
 
-        CanonicalAbi.transfer(src, dst, 0, 0, t);
+        new AbiHelper(types).transfer(src, dst, 0, 0, t);
 
         assertThat(dst.memory().read(0)).isEqualTo((byte) 0x1F);
     }
@@ -214,7 +214,7 @@ class CanonicalAbiTransferTests {
         var dst = newContext(types);
         src.memory().writeByte(0, (byte) 0xFF);
 
-        CanonicalAbi.transfer(src, dst, 0, 0, flagsType(EIGHT_LABELS));
+        new AbiHelper(types).transfer(src, dst, 0, 0, flagsType(EIGHT_LABELS));
 
         assertThat(dst.memory().read(0)).isEqualTo((byte) 0xFF);
     }
@@ -228,13 +228,17 @@ class CanonicalAbiTransferTests {
         int nonCanonicalBits = 0x7f800001;
         src.memory().writeI32(0, nonCanonicalBits);
 
-        CanonicalAbi.transfer(src, dst, 0, 0, PrimValType.F32);
+        new AbiHelper(types).transfer(src, dst, 0, 0, PrimValType.F32);
 
         assertThat(dst.memory().readInt(0)).isEqualTo(nonCanonicalBits);
         // The lift/lower path, by contrast, replaces it with the canonical NaN.
         var canonical = newContext(types);
-        CanonicalAbi.store(
-                canonical, CanonicalAbi.load(src, 0, PrimValType.F32), PrimValType.F32, 0);
+        new AbiHelper(types)
+                .store(
+                        canonical,
+                        new AbiHelper(types).load(src, 0, PrimValType.F32),
+                        PrimValType.F32,
+                        0);
         assertThat(canonical.memory().readInt(0)).isEqualTo(0x7fc00000);
     }
 
@@ -248,16 +252,17 @@ class CanonicalAbiTransferTests {
                         .build();
         var src = newContext(types);
         var dst = newContext(types);
-        CanonicalAbi.store(src, record("a", (short) 1, "b", 2L), t, 0);
+        new AbiHelper(types).store(src, record("a", (short) 1, "b", 2L), t, 0);
         // Dirty the three padding bytes between the u8 and the u32.
         src.memory().writeByte(1, (byte) 0xAA);
         src.memory().writeByte(2, (byte) 0xBB);
         src.memory().writeByte(3, (byte) 0xCC);
 
-        CanonicalAbi.transfer(src, dst, 0, 0, t);
+        new AbiHelper(types).transfer(src, dst, 0, 0, t);
 
         // The fields agree, which is all the Canonical ABI defines
-        assertThat(CanonicalAbi.load(dst, 0, t)).isEqualTo(CanonicalAbi.load(src, 0, t));
+        assertThat(new AbiHelper(types).load(dst, 0, t))
+                .isEqualTo(new AbiHelper(types).load(src, 0, t));
         // The padding rode along because coalescing copies the whole record at once.
         assertThat(dst.memory().read(1)).isEqualTo((byte) 0xAA);
     }
@@ -271,9 +276,9 @@ class CanonicalAbiTransferTests {
         var dst = newContext(types);
         src.memory().writeI32(0, 0xD800);
 
-        assertThatThrownBy(() -> CanonicalAbi.transfer(src, dst, 0, 0, PrimValType.CHAR))
+        assertThatThrownBy(() -> new AbiHelper(types).transfer(src, dst, 0, 0, PrimValType.CHAR))
                 .isInstanceOf(TrapException.class);
-        assertThatThrownBy(() -> CanonicalAbi.load(src, 0, PrimValType.CHAR))
+        assertThatThrownBy(() -> new AbiHelper(types).load(src, 0, PrimValType.CHAR))
                 .isInstanceOf(TrapException.class);
     }
 
@@ -284,7 +289,7 @@ class CanonicalAbiTransferTests {
         var dst = newContext(types);
         src.memory().writeI32(0, 0x110000);
 
-        assertThatThrownBy(() -> CanonicalAbi.transfer(src, dst, 0, 0, PrimValType.CHAR))
+        assertThatThrownBy(() -> new AbiHelper(types).transfer(src, dst, 0, 0, PrimValType.CHAR))
                 .isInstanceOf(TrapException.class);
     }
 
@@ -300,9 +305,10 @@ class CanonicalAbiTransferTests {
                         .build();
         src.memory().writeByte(0, (byte) 7);
 
-        assertThatThrownBy(() -> CanonicalAbi.transfer(src, dst, 0, 0, t))
+        assertThatThrownBy(() -> new AbiHelper(types).transfer(src, dst, 0, 0, t))
                 .isInstanceOf(TrapException.class);
-        assertThatThrownBy(() -> CanonicalAbi.load(src, 0, t)).isInstanceOf(TrapException.class);
+        assertThatThrownBy(() -> new AbiHelper(types).load(src, 0, t))
+                .isInstanceOf(TrapException.class);
     }
 
     @Test
@@ -314,9 +320,10 @@ class CanonicalAbiTransferTests {
         src.memory().writeI32(0, 101); // not 4-byte aligned
         src.memory().writeI32(4, 1);
 
-        assertThatThrownBy(() -> CanonicalAbi.transfer(src, dst, 0, 0, t))
+        assertThatThrownBy(() -> new AbiHelper(types).transfer(src, dst, 0, 0, t))
                 .isInstanceOf(TrapException.class);
-        assertThatThrownBy(() -> CanonicalAbi.load(src, 0, t)).isInstanceOf(TrapException.class);
+        assertThatThrownBy(() -> new AbiHelper(types).load(src, 0, t))
+                .isInstanceOf(TrapException.class);
     }
 
     @Test
@@ -328,7 +335,7 @@ class CanonicalAbiTransferTests {
         src.memory().writeI32(0, 0);
         src.memory().writeI32(4, (1 << 28)); // 2^28 elements of 4 bytes each
 
-        assertThatThrownBy(() -> CanonicalAbi.transfer(src, dst, 0, 0, t))
+        assertThatThrownBy(() -> new AbiHelper(types).transfer(src, dst, 0, 0, t))
                 .isInstanceOf(TrapException.class);
     }
 
@@ -341,7 +348,7 @@ class CanonicalAbiTransferTests {
         src.memory().writeI32(0, 0);
         src.memory().writeI32(4, 0x80000000); // 2^31 elements, negative as a signed int
 
-        assertThatThrownBy(() -> CanonicalAbi.transfer(src, dst, 0, 0, t))
+        assertThatThrownBy(() -> new AbiHelper(types).transfer(src, dst, 0, 0, t))
                 .isInstanceOf(TrapException.class);
     }
 
@@ -354,9 +361,9 @@ class CanonicalAbiTransferTests {
         src.memory().writeI32(4, 1);
         src.memory().writeByte(100, (byte) 0xFF);
 
-        assertThatThrownBy(() -> CanonicalAbi.transfer(src, dst, 0, 0, PrimValType.STRING))
+        assertThatThrownBy(() -> new AbiHelper(types).transfer(src, dst, 0, 0, PrimValType.STRING))
                 .isInstanceOf(TrapException.class);
-        assertThatThrownBy(() -> CanonicalAbi.load(src, 0, PrimValType.STRING))
+        assertThatThrownBy(() -> new AbiHelper(types).load(src, 0, PrimValType.STRING))
                 .isInstanceOf(TrapException.class);
     }
 
@@ -366,12 +373,11 @@ class CanonicalAbiTransferTests {
         var src = newContext(types);
         var dst =
                 LiftLowerContext.builder()
-                        .withTypeResolver(types)
                         .withMemory(newContext(types).memory())
                         .withPtrType(PointerType.I64)
                         .build();
 
-        assertThatThrownBy(() -> CanonicalAbi.transfer(src, dst, 0, 0, PrimValType.U32))
+        assertThatThrownBy(() -> new AbiHelper(types).transfer(src, dst, 0, 0, PrimValType.U32))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

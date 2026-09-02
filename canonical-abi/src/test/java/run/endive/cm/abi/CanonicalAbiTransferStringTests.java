@@ -51,15 +51,16 @@ class CanonicalAbiTransferStringTests {
             var dst = newContext(types, dstEncoding);
             var reference = newContext(types, dstEncoding);
 
-            CanonicalAbi.store(src, s, PrimValType.STRING, 0);
-            CanonicalAbi.transfer(src, dst, 0, 0, PrimValType.STRING);
-            CanonicalAbi.store(
-                    reference,
-                    CanonicalAbi.load(src, 0, PrimValType.STRING),
-                    PrimValType.STRING,
-                    0);
+            new AbiHelper(types).store(src, s, PrimValType.STRING, 0);
+            new AbiHelper(types).transfer(src, dst, 0, 0, PrimValType.STRING);
+            new AbiHelper(types)
+                    .store(
+                            reference,
+                            new AbiHelper(types).load(src, 0, PrimValType.STRING),
+                            PrimValType.STRING,
+                            0);
 
-            assertThat(CanonicalAbi.load(dst, 0, PrimValType.STRING))
+            assertThat(new AbiHelper(types).load(dst, 0, PrimValType.STRING))
                     .as("%s -> %s for \"%s\"", srcEncoding, dstEncoding, s)
                     .isEqualTo(s);
             assertMemoryEquals(dst.memory(), reference.memory());
@@ -69,7 +70,7 @@ class CanonicalAbiTransferStringTests {
     @Test
     void narrowsATaggedUtf16SourceThatFitsLatin1() {
         // A guest may hand over a latin1+utf16 string tagged as UTF-16 even when its content
-        // fits Latin-1; store_string would have chosen Latin-1, so the transfer must too.
+        // fits Latin-1, so store_string would have chosen it and the transfer must too.
         var types = new TransferTestSupport.Types();
         var src = newContext(types, StringEncoding.LATIN1_UTF16);
         var dst = newContext(types, StringEncoding.LATIN1_UTF16);
@@ -78,12 +79,12 @@ class CanonicalAbiTransferStringTests {
         src.memory().writeI32(0, 200);
         src.memory().writeI32(4, (utf16.length / 2) | (1 << 31));
 
-        CanonicalAbi.transfer(src, dst, 0, 0, PrimValType.STRING);
+        new AbiHelper(types).transfer(src, dst, 0, 0, PrimValType.STRING);
 
         long taggedCodeUnits = dst.memory().readU32(4);
         assertThat(taggedCodeUnits & (1L << 31)).as("re-tagged as UTF-16").isZero();
         assertThat(taggedCodeUnits).isEqualTo(4);
-        assertThat(CanonicalAbi.load(dst, 0, PrimValType.STRING)).isEqualTo("café");
+        assertThat(new AbiHelper(types).load(dst, 0, PrimValType.STRING)).isEqualTo("café");
     }
 
     @Test
@@ -96,7 +97,7 @@ class CanonicalAbiTransferStringTests {
         src.memory().writeI32(0, 200);
         src.memory().writeI32(4, utf8.length);
 
-        CanonicalAbi.transfer(src, dst, 0, 0, PrimValType.STRING);
+        new AbiHelper(types).transfer(src, dst, 0, 0, PrimValType.STRING);
 
         int dstBegin = dst.memory().readInt(0);
         assertThat(dst.memory().readU32(4)).isEqualTo(utf8.length);
@@ -194,9 +195,9 @@ class CanonicalAbiTransferStringTests {
         src.memory().writeI32(0, 200);
         src.memory().writeI32(4, 1);
 
-        assertThatThrownBy(() -> CanonicalAbi.transfer(src, dst, 0, 0, PrimValType.STRING))
+        assertThatThrownBy(() -> new AbiHelper(types).transfer(src, dst, 0, 0, PrimValType.STRING))
                 .isInstanceOf(TrapException.class);
-        assertThatThrownBy(() -> CanonicalAbi.load(src, 0, PrimValType.STRING))
+        assertThatThrownBy(() -> new AbiHelper(types).load(src, 0, PrimValType.STRING))
                 .isInstanceOf(TrapException.class);
     }
 
@@ -208,7 +209,7 @@ class CanonicalAbiTransferStringTests {
         src.memory().writeI32(0, 0);
         src.memory().writeI32(4, 1 << 28);
 
-        assertThatThrownBy(() -> CanonicalAbi.transfer(src, dst, 0, 0, PrimValType.STRING))
+        assertThatThrownBy(() -> new AbiHelper(types).transfer(src, dst, 0, 0, PrimValType.STRING))
                 .isInstanceOf(TrapException.class);
     }
 

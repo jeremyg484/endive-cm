@@ -6,22 +6,21 @@ import java.util.List;
 import run.endive.wasm.types.ValType;
 
 /**
- * A component value type with its type indices already resolved, forming a self-contained graph that means
- * one thing, independent of any index space.
+ * A component value type with its type indices already resolved, forming a self-contained graph
+ * that means one thing, independent of any index space.
  *
- * <p>Grounding resolves every child once, against the space that child
- * actually belongs to, and the result does not need a {@link TypeResolver} to be understood.
+ * <p>Grounding resolves every child once, against the space that child actually belongs to, and the
+ * result does not need a {@link TypeResolver} to be understood.
  *
- * <p>Memory layout is a property of this class rather than of {@link DefValType}.
- * Alignment, size, and flattening cannot be cached on a syntax node as the answer depends on the
- * space, but they are fixed for a fully resolved type, so each is computed at most once per pointer
- * width here.
+ * <p>Memory layout is a property of this class rather than of {@link DefValType}. Alignment, size,
+ * and flattening cannot be cached on a syntax node as the answer depends on the space, but they are
+ * fixed for a fully resolved type, so each is computed at most once per pointer width here.
  *
- * <p>The resolution process also despecializes {@code tuple}, {@code enum}, {@code option}, {@code result} and
- * {@code map} into records and variants. The expansion is done once at construction
- * instead of allocating a fresh expansion on every layout query. {@link #node()} still reports the
- * type as written, for diagnostics and for the places that distinguish the sugar from what it
- * represents.
+ * <p>The resolution process also despecializes {@code tuple}, {@code enum}, {@code option},
+ * {@code result} and {@code map} into records and variants. The expansion is done once at
+ * construction instead of allocating a fresh expansion on every layout query. {@link #node()} still
+ * reports the type as written, for diagnostics and for the places that distinguish the sugar from
+ * what it represents.
  *
  * <p>Handles are the exception to "self-contained". {@code own} and {@code borrow} keep the index
  * they were written with, because which runtime resource type that names is a property of the
@@ -37,6 +36,7 @@ public final class ResolvedType {
     private final List<Field> fields;
     private final List<Case> cases;
     private final ResolvedType element;
+    private final ResourceTypeId resourceType;
 
     private final int[] alignments = newMemo();
     private final int[] elementSizes = newMemo();
@@ -48,11 +48,22 @@ public final class ResolvedType {
             List<Field> fields,
             List<Case> cases,
             ResolvedType element) {
+        this(node, kind, fields, cases, element, null);
+    }
+
+    private ResolvedType(
+            DefValType node,
+            DefValType.Kind kind,
+            List<Field> fields,
+            List<Case> cases,
+            ResolvedType element,
+            ResourceTypeId resourceType) {
         this.node = node;
         this.kind = kind;
         this.fields = fields;
         this.cases = cases;
         this.element = element;
+        this.resourceType = resourceType;
     }
 
     /** Resolves {@code type}, whose own indices count in {@code space}. */
@@ -98,14 +109,39 @@ public final class ResolvedType {
                             null,
                             future.hasElementType() ? resolve(future.elementType(), space) : null);
                 }
+            case OWN:
+                return new ResolvedType(
+                        type, kind, null, null, null, space.resourceType(((OwnType) d).typeIdx()));
+            case BORROW:
+                return new ResolvedType(
+                        type,
+                        kind,
+                        null,
+                        null,
+                        null,
+                        space.resourceType(((BorrowType) d).typeIdx()));
             default:
                 return new ResolvedType(type, kind, null, null, null);
         }
     }
 
     /**
+     * A tuple of types that are already resolved, as the record produced by despecializing it.
+     *
+     * <p>Used to treat a whole parameter or result list as one value, which is what a spill buffer
+     * holds, without going back to an index space to say what those types are.
+     */
+    public static ResolvedType tupleOf(List<ResolvedType> elements) {
+        List<Field> fields = new ArrayList<>(elements.size());
+        for (int i = 0; i < elements.size(); i++) {
+            fields.add(new Field(Integer.toString(i), elements.get(i)));
+        }
+        return new ResolvedType(null, DefValType.Kind.RECORD, List.copyOf(fields), null, null);
+    }
+
+    /**
      * The entry type of {@code map<k, v>} that the record {@code (k, v)} despecializes to, whose
-     * two fields count in the same space the map itself was written in.
+     * two fields count in the same space in which the map itself was written.
      */
     private static ResolvedType mapEntry(MapType map, TypeSpace space) {
         return of(
@@ -118,8 +154,7 @@ public final class ResolvedType {
     }
 
     private static ResolvedType resolve(run.endive.cm.types.ValType valType, TypeSpace space) {
-        TypeSpace.Resolved resolved = space.resolve(valType);
-        return of(resolved.type(), resolved.space());
+        return space.resolve(valType);
     }
 
     private static List<Field> resolveFields(List<LabelValType> fields, TypeSpace space) {
@@ -138,15 +173,20 @@ public final class ResolvedType {
         return List.copyOf(resolved);
     }
 
-    /** The parsed AST representation of the type, before resolution and despecialization. */
+    /**
+     * The parsed declaration of the type, before resolution and despecialization. {@code null} for
+     * a type this runtime synthesized rather than read, such as {@link #tupleOf}'s bundle of a
+     * parameter list. Such a type belongs to no index space and so is never compared against a
+     * declaration, and comparison is the one thing that needs the type as written.
+     */
     public DefValType node() {
         return node;
     }
 
     /**
-     * The kind of type this stands for, with the shorthands expanded according to
-     * despecialization, so a {@code tuple} reports {@code RECORD}, an {@code option}
-     * reports {@code VARIANT} and a {@code map} reports {@code LIST}.
+     * The kind of type this stands for, with the shorthands expanded according to despecialization,
+     * so a {@code tuple} reports {@code RECORD}, an {@code option} reports {@code VARIANT} and a
+     * {@code map} reports {@code LIST}.
      */
     public DefValType.Kind kind() {
         return kind;
@@ -169,11 +209,32 @@ public final class ResolvedType {
     }
 
     /**
-     * A list's element type, or the payload of a {@code stream} or {@code future},
-     * {@code null} when a stream or future carries none.
+     * A list's element type, or the payload of a {@code stream} or {@code future}, {@code null}
+     * when a stream or future carries none.
      */
     public ResolvedType element() {
         return element;
+    }
+
+    /**
+     * The runtime resource type an {@code own} or {@code borrow} names, settled when this type was
+     * resolved against the space in which it was written.
+     *
+     * <p>Resolving it here rather than at each lift and lower is what keeps a handle nested inside
+     * an imported or aliased type meaning the right thing, because the index it was written with
+     * counts in the space that <em>defined</em> the type, not in whichever one happens to be doing
+     * the lifting.
+     */
+    public ResourceTypeId resourceType() {
+        if (resourceType == null) {
+            throw new IllegalStateException(
+                    kind() == DefValType.Kind.OWN || kind() == DefValType.Kind.BORROW
+                            ? kind()
+                                    + " was resolved in a space that carries no resource"
+                                    + " identities"
+                            : kind() + " does not name a resource type");
+        }
+        return resourceType;
     }
 
     public boolean isFixedSizeList() {
@@ -454,7 +515,7 @@ public final class ResolvedType {
 
     @Override
     public String toString() {
-        return "ResolvedType{" + node + '}';
+        return "ResolvedType{" + (node == null ? kind : node) + '}';
     }
 
     /** One field of a resolved {@code record}. */

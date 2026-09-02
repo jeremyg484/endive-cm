@@ -4,6 +4,14 @@
 **Depends on**: Phase 0 (Type Model), Phase 1 (Parser), Phase 2 (wasm-tools),
 Phase 3 (Canonical ABI)
 
+Phases 0, 1 and 3 are ready. Phase 2 still needs `ComponentNew` and
+`ComponentEmbed`.
+
+The `HostTypeDescriptor` family in the runtime module is the nearest thing that
+exists today. It says whether a given Java type can carry a given component
+type, which is the same question a generator has to answer, decided at runtime
+rather than at build time.
+
 ## Goal
 
 Generate type-safe Java bindings from WIT definitions. Given a WIT world,

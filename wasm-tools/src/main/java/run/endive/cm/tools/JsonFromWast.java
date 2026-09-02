@@ -103,7 +103,10 @@ public final class JsonFromWast {
                 } catch (WasiExitException e) {
                     if (e.exitCode() != 0) {
                         throw new ComponentValidateException(
-                                stdoutStream.toString(StandardCharsets.UTF_8)
+                                "json-from-wast failed on "
+                                        + file
+                                        + ": "
+                                        + stdoutStream.toString(StandardCharsets.UTF_8)
                                         + stderrStream.toString(StandardCharsets.UTF_8),
                                 e);
                     }
@@ -115,7 +118,10 @@ public final class JsonFromWast {
 
             try (Stream<Path> wasmFiles = Files.list(workDir)) {
                 wasmFiles
-                        .filter(p -> p.toString().endsWith(".wasm"))
+                        .filter(
+                                p ->
+                                        p.toString().endsWith(".wasm")
+                                                || p.toString().endsWith(".wat"))
                         .forEach(
                                 p -> {
                                     try {

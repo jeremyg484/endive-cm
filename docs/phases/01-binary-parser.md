@@ -1,7 +1,22 @@
 # Phase 1: Binary Parser
 
-**Status**: In progress
+**Status**: Complete except for the start section
 **Depends on**: Phase 0 (Type Model)
+
+Every section parses except `start` and `value`, both gated features, which are
+rejected as not supported. The `0x02` import and export opcode is rejected too.
+Every canonical definition parses, including the async and threading built-ins,
+whether or not the runtime can execute them.
+
+One addition was made beyond the original plan. A `Validator` interface now sits
+in this module, and `ComponentParser.Builder#build` requires an implementation
+unless validation is explicitly disabled. The parser itself stays free of any
+dependency on the `wasm-tools` module, so the tests supply a validator backed by
+`ComponentValidate`. Some checks the spec test suite expects cannot be made on
+the binary and are applied after parsing instead, as default methods on the
+interface. See `docs/misc.md` for which of those are restrictions of one
+implementation rather than of the model, and for what the runtime is entitled to
+assume because validation ran.
 
 ## Goal
 
@@ -59,7 +74,7 @@ For each section:
 - `parseCoreInstanceSection` -- core module instantiation records
 - `parseCoreTypeSection` -- core type definitions at component level
 - `parseInstanceSection` -- component instance definitions
-- `parseStartSection` -- component start function reference
+- `parseStartSection` -- not implemented, the section is rejected
 
 ### ComponentSectionsValidator
 

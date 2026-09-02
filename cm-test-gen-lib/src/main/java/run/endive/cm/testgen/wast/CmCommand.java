@@ -2,7 +2,8 @@ package run.endive.cm.testgen.wast;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public final class CmCommand {
@@ -13,7 +14,9 @@ public final class CmCommand {
     private final String moduleType;
     private final String text;
     private final CmAction action;
-    private final JsonNode[] expected;
+    private final List<TypedValue> expected;
+    private final String instance;
+    private final String module;
 
     public CmCommand(
             @JsonProperty("type") String type,
@@ -23,7 +26,9 @@ public final class CmCommand {
             @JsonProperty("module_type") String moduleType,
             @JsonProperty("text") String text,
             @JsonProperty("action") CmAction action,
-            @JsonProperty("expected") JsonNode[] expected) {
+            @JsonProperty("expected") List<TypedValue> expected,
+            @JsonProperty("instance") String instance,
+            @JsonProperty("module") String module) {
         this.type = type;
         this.line = line;
         this.filename = filename;
@@ -32,6 +37,8 @@ public final class CmCommand {
         this.text = text;
         this.action = action;
         this.expected = expected;
+        this.instance = instance;
+        this.module = module;
     }
 
     public CmCommandType commandType() {
@@ -66,7 +73,24 @@ public final class CmCommand {
         return action;
     }
 
-    public JsonNode[] expected() {
+    public List<TypedValue> expected() {
         return expected;
+    }
+
+    /** The name a {@code module_instance} command gives the instance it creates. */
+    public String instance() {
+        return instance;
+    }
+
+    /** The name of the {@code module_definition} a {@code module_instance} command instantiates. */
+    public String module() {
+        return module;
+    }
+
+    public String emitExpected() {
+        if (!expected.isEmpty()) {
+            return expected.stream().map(TypedValue::emitValue).collect(Collectors.joining(", "));
+        }
+        return "";
     }
 }
