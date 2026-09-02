@@ -467,9 +467,6 @@ public final class CmJavaTestGen {
                 "var parser ="
                     + " ComponentParser.builder().withValidation(true).withValidator(SpecTestValidator.INSTANCE).build();");
         body.addStatement(
-                "assertThrows(ComponentValidationException.class, () ->"
-                        + " parser.parse(() -> new ByteArrayInputStream(bytes)));");
-        body.addStatement(
                 "var ex = assertThrows(ComponentValidationException.class, () -> parser.parse(() ->"
                         + " new ByteArrayInputStream(bytes)));");
         body.addStatement(
