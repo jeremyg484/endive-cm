@@ -125,6 +125,90 @@ public class ComponentTypeMatchingTests {
                 "expected the mismatched import to be named, got: " + thrown.getMessage());
     }
 
+    private static final String DECLARES_INSTANCE_IMPORT =
+            "/component-type/declared-component-with-instance-import.wat";
+
+    /** A component importing an instance {@code dep} with the given exports, and exporting f. */
+    private static String importsInstance(String depExports) {
+        return "(component (import \"dep\" (instance "
+                + depExports
+                + ")) "
+                + "(core module $m (func (export \"g\") (result i32) (i32.const 7))) "
+                + "(core instance $mi (instantiate $m)) "
+                + "(func (export \"f\") (result u32) (canon lift (core func $mi \"g\"))))";
+    }
+
+    /** Asking for less than the declared type promises is allowed. */
+    @Test
+    public void aComponentImportingANarrowerInstanceThanDeclaredLinks() {
+        assertNotNull(
+                link(
+                        DECLARES_INSTANCE_IMPORT,
+                        importsInstance("(export \"a\" (func (result u32)))")));
+    }
+
+    @Test
+    public void aComponentImportingExactlyTheDeclaredInstanceLinks() {
+        assertNotNull(
+                link(
+                        DECLARES_INSTANCE_IMPORT,
+                        importsInstance(
+                                "(export \"a\" (func (result u32)))"
+                                        + " (export \"b\" (func (result u32)))")));
+    }
+
+    /** Nothing will ever supply {@code c}, so asking for it is asking for more than declared. */
+    @Test
+    public void aComponentImportingAWiderInstanceThanDeclaredIsRejected() {
+        var thrown =
+                assertThrows(
+                        LinkageException.class,
+                        () ->
+                                link(
+                                        DECLARES_INSTANCE_IMPORT,
+                                        importsInstance(
+                                                "(export \"a\" (func (result u32)))"
+                                                        + " (export \"b\" (func (result u32)))"
+                                                        + " (export \"c\" (func (result u32)))")));
+        assertTrue(
+                thrown.getMessage().contains("\"c\""),
+                "expected the unpromised export to be named, got: " + thrown.getMessage());
+    }
+
+    @Test
+    public void aComponentImportingAnInstanceExportOfTheWrongTypeIsRejected() {
+        var thrown =
+                assertThrows(
+                        LinkageException.class,
+                        () ->
+                                link(
+                                        DECLARES_INSTANCE_IMPORT,
+                                        importsInstance("(export \"a\" (func (result u64)))")));
+        assertTrue(
+                thrown.getMessage().contains("\"a\""),
+                "expected the mismatched export to be named, got: " + thrown.getMessage());
+    }
+
+    private static final String DECLARES_REEXPORTED_RESOURCE =
+            "/component-type/declared-reexported-resource.wat";
+
+    /**
+     * A resource related through an import and again through an export resolves to one identity
+     * on each side.
+     */
+    @Test
+    public void aResourceRelatedThroughBothAnImportAndAnExportMatches() {
+        String provider =
+                "(component "
+                        + "(import \"t\" (type $t (sub resource))) "
+                        + "(export \"u\" (type $t)) "
+                        + "(core module $m (func (export \"g\") (param i32))) "
+                        + "(core instance $mi (instantiate $m)) "
+                        + "(func (export \"f\") (param \"x\" (own $t)) "
+                        + "(canon lift (core func $mi \"g\"))))";
+        assertNotNull(link(DECLARES_REEXPORTED_RESOURCE, provider));
+    }
+
     private static final String DECLARES_TYPE = "/component-type/declared-type-export.wat";
 
     /** A component exporting {@code t}, a record, alongside {@code f : () -> u32}. */

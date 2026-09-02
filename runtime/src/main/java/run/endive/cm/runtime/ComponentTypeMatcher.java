@@ -67,7 +67,13 @@ final class ComponentTypeMatcher {
         matchSides(Side.ofComponentType(declared), Side.ofComponent(actual), what);
     }
 
-    /** Walks one side's declarations against the other's, in the order they were written. */
+    /**
+     * Walks one side's declarations against the other's, in the order they were written.
+     *
+     * <p>Exports are covariant and imports are contravariant, so a nested instance or component
+     * under an import is compared with its sides swapped. Everything else is compared for equality
+     * in the same orientation, which keeps every resource relation recorded on {@code expected}.
+     */
     private static void matchSides(Side expected, Side supplied, String what) {
         for (Decl decl : expected.decls) {
             if (decl.isImport) {
@@ -80,6 +86,7 @@ final class ComponentTypeMatcher {
                         expected,
                         need,
                         supplied,
+                        true,
                         what,
                         "import \"" + decl.name + "\"");
             } else {
@@ -88,7 +95,13 @@ final class ComponentTypeMatcher {
                     throw new LinkageException(what + " is missing export \"" + decl.name + "\"");
                 }
                 requireMatch(
-                        decl.extern, expected, got, supplied, what, "export \"" + decl.name + "\"");
+                        decl.extern,
+                        expected,
+                        got,
+                        supplied,
+                        false,
+                        what,
+                        "export \"" + decl.name + "\"");
             }
         }
 
@@ -103,12 +116,17 @@ final class ComponentTypeMatcher {
         }
     }
 
-    /** Compares one extern against another. Only instance and component types are subtypes. */
+    /**
+     * Compares one extern against another. Only instance and component types are subtypes. For an
+     * export {@code actual} has to be a subtype of {@code expected}; for an import, which is
+     * {@code contravariant}, it is the other way round.
+     */
     private static void requireMatch(
             Extern expected,
             Side expectedSide,
             Extern actual,
             Side actualSide,
+            boolean contravariant,
             String what,
             String which) {
         if (expected.kind != actual.kind) {
@@ -139,7 +157,11 @@ final class ComponentTypeMatcher {
                                     + what
                                     + "): it is built in a way this pass does not follow");
                 }
-                matchSides(expected.nested, actual.nested, what + ", " + which);
+                if (contravariant) {
+                    matchSides(actual.nested, expected.nested, what + ", " + which);
+                } else {
+                    matchSides(expected.nested, actual.nested, what + ", " + which);
+                }
                 return;
             default:
                 throw new UnsupportedOperationException(
