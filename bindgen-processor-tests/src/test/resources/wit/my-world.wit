@@ -1,0 +1,10 @@
+package example:imports;
+
+world my-world {
+  import greet: func() -> string;
+  import log: func(msg: string);
+  import my-custom-host: interface {
+    tick: func();
+  }
+  export run: func();
+}

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>run.endive.cm</groupId>
+    <artifactId>endive-cm</artifactId>
+    <version>999-SNAPSHOT</version>
+  </parent>
+  <artifactId>bindgen-processor</artifactId>
+  <packaging>jar</packaging>
+
+  <name>Endive CM - Bindgen Annotation Processor</name>
+  <description>An annotation processor library to generate host-side bindings for WIT worlds.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.github.javaparser</groupId>
+      <artifactId>javaparser-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
+      <artifactId>parser</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
+      <artifactId>runtime</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
+      <artifactId>wasm-tools</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.google.testing.compile</groupId>
+      <artifactId>compile-testing</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-api</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- compile-testing compares parsed sources, which reaches into javac's own trees. -->
+          <argLine>--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED
+            --add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED
+            --add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED
+            --add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
+            --add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED
+            --add-opens=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED</argLine>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>
