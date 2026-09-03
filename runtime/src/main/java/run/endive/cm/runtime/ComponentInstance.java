@@ -83,7 +83,7 @@ public final class ComponentInstance implements TypeResolver {
 
     // ---------------------------------------------------------------- public surface
 
-    /** The store this instance belongs to, shared with every instance it can interact with. */
+    /** The store owning this instance, shared with every instance it can reach. */
     public ComponentStore store() {
         return store;
     }
@@ -104,6 +104,24 @@ public final class ComponentInstance implements TypeResolver {
                             + ")");
         }
         return (ComponentFunction) value;
+    }
+
+    /**
+     * The instance exported under {@code name}, which is what an exported interface is.
+     *
+     * @throws LinkageException if the export is something other than an instance
+     */
+    public ComponentInstance exportedInstance(String name) {
+        Object value = getExport(name);
+        if (!(value instanceof ComponentInstance)) {
+            throw new LinkageException(
+                    "Export \""
+                            + name
+                            + "\" is not an instance (got "
+                            + value.getClass().getName()
+                            + ")");
+        }
+        return (ComponentInstance) value;
     }
 
     public Set<String> exportNames() {
@@ -145,7 +163,7 @@ public final class ComponentInstance implements TypeResolver {
         return typeSpace;
     }
 
-    /** The index space {@code resolver} stands for. */
+    /** The index space that {@code resolver} names. */
     static TypeSpace spaceOf(TypeResolver resolver) {
         return resolver instanceof ComponentInstance
                 ? ((ComponentInstance) resolver).typeSpace()

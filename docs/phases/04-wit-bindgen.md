@@ -1,16 +1,36 @@
 # Phase 4: WIT Bindgen (Code Generation)
 
-**Status**: Not started
+**Status**: Complete for the bindgen! example worlds
 **Depends on**: Phase 0 (Type Model), Phase 1 (Parser), Phase 2 (wasm-tools),
 Phase 3 (Canonical ABI)
 
-Phases 0, 1 and 3 are ready. Phase 2 still needs `ComponentNew` and
-`ComponentEmbed`.
+Delivered as an annotation processor rather than a standalone library, mirroring
+Wasmtime's `bindgen!` macro. `@Bindgen` on a class or package generates the
+bindings for a WIT world during compilation.
 
-The `HostTypeDescriptor` family in the runtime module is the nearest thing that
-exists today. It says whether a given Java type can carry a given component
-type, which is the same question a generator has to answer, decided at runtime
-rather than at build time.
+All seven non-async `bindgen!` example worlds are checked in as fixtures, and
+each runs end to end against a component built from `.wat`. What is not yet
+supported is listed in the design document, records and variants chief among
+them.
+
+**`bindgen-processor/design.md` is the working document for this phase.** It
+carries the design decisions and their reasons, the encoding details that are
+easy to get wrong, the remaining work, and how to regenerate the checked-in
+expected sources. Read it before this file, which records only the original
+plan and how the result diverged from it.
+
+## How It Diverged From This Plan
+
+- Two modules rather than one, `bindgen-processor` and `bindgen-processor-tests`,
+  the second existing so that generated bindings are compiled and run as ordinary
+  classes.
+- No `bindgen-maven-plugin`. The annotation processor covers the same ground for
+  a Java project and nothing has needed the plugin.
+- The WIT-to-type-model bridge uses `wasm-tools component wit --wasm` through
+  `WitParser.encode`, rather than `ComponentNew` and `ComponentEmbed`. Those two
+  were still needed, for building the end-to-end test fixtures.
+- Generated types are nominal but convert at the boundary rather than being lifted
+  and lowered directly, so the Canonical ABI module is untouched.
 
 ## Goal
 
