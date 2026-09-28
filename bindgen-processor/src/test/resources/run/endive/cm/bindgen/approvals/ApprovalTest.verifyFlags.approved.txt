@@ -50,6 +50,7 @@ public final class FlagTypes {
         endive.testing.example.flagtypes.permissions.Host permissions = imports.permissions();
         HostInstance.Builder permissionsBuilder = HostInstance.builder(store);
         ValType permissionsPermission = permissionsBuilder.declareType(Type.of(FlagsType.builder().addLabel("read").addLabel("write").addLabel("exec").build()));
+        permissionsBuilder.addType("permission", permissionsPermission);
         permissionsBuilder.addFunction("grant", FuncType.builder().addParam(LabelValType.builder().withLabel("requested").withValType(permissionsPermission).build()).withResult(permissionsPermission).build(), args -> new Object[] { permissions.grant(endive.testing.example.flagtypes.permissions.Permission.fromComponent(args[0])).toComponent() });
         values.put("example:flag-types/permissions", permissionsBuilder.build());
         return new FlagTypes(ComponentLinker.builder().build().instantiate(store, component, values));

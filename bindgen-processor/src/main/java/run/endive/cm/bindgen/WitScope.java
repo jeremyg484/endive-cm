@@ -12,11 +12,15 @@ import run.endive.cm.types.Type;
  * <p>A value type names anything but a primitive by index, so resolving one needs the space
  * against which it was written. Names matter because a Java type has to be called something, and
  * only the export declaring a type says what its name is.
+ *
+ * <p>A type one space uses from another keeps the numbering of the space declaring it, so anything
+ * looking inside such a type has to resolve it against {@link #declaringScope} rather than here.
  */
 final class WitScope {
 
     private final List<Type> types = new ArrayList<>();
     private final Map<Integer, String> names = new HashMap<>();
+    private final Map<Integer, Origin> origins = new HashMap<>();
     private String owner;
     private String javaPackage;
 
@@ -56,6 +60,22 @@ final class WitScope {
         return index;
     }
 
+    /**
+     * Appends a type that {@code from} holds at {@code index}, which remains declared by whichever
+     * space declared it in the first place.
+     */
+    int alias(WitScope from, int index) {
+        Origin origin = from.originOf(index);
+        int added = add(origin.scope.at(origin.index));
+        origins.put(added, origin);
+        return added;
+    }
+
+    /** Appends a type that {@code from} holds at {@code index}, under a WIT name of this space. */
+    void alias(WitScope from, int index, String name) {
+        names.put(alias(from, index), name);
+    }
+
     int size() {
         return types.size();
     }
@@ -71,5 +91,52 @@ final class WitScope {
     /** The WIT name of the type at {@code index}, or {@code null} if it was never named. */
     String nameAt(int index) {
         return names.get(index);
+    }
+
+    /** The index of the type this space exports as {@code name}, or -1 when it exports none. */
+    int indexOf(String name) {
+        for (Map.Entry<Integer, String> entry : names.entrySet()) {
+            if (entry.getValue().equals(name)) {
+                return entry.getKey();
+            }
+        }
+        return -1;
+    }
+
+    /** Whether the type at {@code index} was declared by another space and used here. */
+    boolean isUsed(int index) {
+        at(index);
+        return origins.containsKey(index);
+    }
+
+    /**
+     * The space that declared the type at {@code index}, against which the indices inside it
+     * resolve. That is this space unless the type was used from another.
+     */
+    WitScope declaringScope(int index) {
+        return originOf(index).scope;
+    }
+
+    /** Where the type at {@code index} sits in the space that declared it. */
+    int declaringIndex(int index) {
+        return originOf(index).index;
+    }
+
+    private Origin originOf(int index) {
+        at(index);
+        Origin origin = origins.get(index);
+        return origin == null ? new Origin(this, index) : origin;
+    }
+
+    /** A slot in the space that declared a type, which is where its name and indices belong. */
+    private static final class Origin {
+
+        private final WitScope scope;
+        private final int index;
+
+        Origin(WitScope scope, int index) {
+            this.scope = scope;
+            this.index = index;
+        }
     }
 }

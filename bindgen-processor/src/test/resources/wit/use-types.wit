@@ -1,0 +1,37 @@
+package example:use-types;
+
+interface types {
+    enum level {
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    record entry {
+        level: level,
+        code: u32,
+    }
+
+    type tags = list<level>;
+}
+
+interface logging {
+    use types.{level, entry, tags as labels};
+
+    log: func(level: level, msg: string);
+
+    /// The entry the host last recorded.
+    latest: func() -> entry;
+
+    /// The most severe of the levels given, if any were.
+    worst: func(levels: labels) -> option<level>;
+}
+
+world use-types {
+    use types.{level};
+
+    import logging;
+
+    export run: func() -> level;
+}

@@ -83,6 +83,21 @@ public final class HostInstance {
             return this;
         }
 
+        /**
+         * Exports a type declared through {@link #declareType}, so that an importer can alias it by
+         * name, which is what a WIT {@code use} of the type becomes.
+         *
+         * @see <a href="https://github.com/WebAssembly/component-model/blob/706074c96bc14cfc58469e1bdc452bb4d91921c7/design/mvp/WIT.md#use-statements">WIT.md, use statements</a>
+         */
+        public Builder addType(String name, ValType type) {
+            if (type.primValType() != null) {
+                throw new IllegalArgumentException(
+                        "only a declared type can be exported, not a primitive");
+            }
+            delegate.addExport(name, delegate.instance().slotAt(type.typeIdx()));
+            return this;
+        }
+
         /** Exports a resource type, which may be exported under more than one name. */
         public Builder addResource(String name, HostResource resource) {
             delegate.addExport(name, resource.instance());

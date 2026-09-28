@@ -8,14 +8,18 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import run.endive.cm.parser.ComponentParser;
 import run.endive.cm.tools.WitParser;
+import run.endive.cm.types.Alias;
 import run.endive.cm.types.ComponentDecl;
 import run.endive.cm.types.ComponentType;
+import run.endive.cm.types.DefValType;
 import run.endive.cm.types.Export;
+import run.endive.cm.types.ExportAlias;
 import run.endive.cm.types.ExportSection;
 import run.endive.cm.types.ExternDesc;
 import run.endive.cm.types.ImportDecl;
 import run.endive.cm.types.InstanceDecl;
 import run.endive.cm.types.InstanceType;
+import run.endive.cm.types.OuterAlias;
 import run.endive.cm.types.Section;
 import run.endive.cm.types.Sort;
 import run.endive.cm.types.Type;
@@ -127,36 +131,51 @@ final class WorldReader {
     }
 
     /**
-     * One walk of the world's declarations, filling every list. The type index space grows as the
-     * walk goes, so an index in a declaration is resolved against what came before it.
+     * One walk of the world's declarations, filling every list. The type and instance index spaces
+     * grow as the walk goes, so an index in a declaration is resolved against what came before it.
      */
     private static WitWorld build(String name, String qualifiedName, ComponentType world) {
         WitScope declared = new WitScope();
+        List<WitInterface> instances = new ArrayList<>();
         List<WitFunction> importedFunctions = new ArrayList<>();
         List<WitInterface> importedInterfaces = new ArrayList<>();
         List<WitFunction> exportedFunctions = new ArrayList<>();
         List<WitInterface> exportedInterfaces = new ArrayList<>();
 
         for (ComponentDecl decl : world.getComponentDecls()) {
-            track(declared, decl);
             ImportDecl importDecl = decl.importDecl();
             if (importDecl != null) {
+                if (importDecl.externDesc().kind() == ExternDesc.Kind.TYPE) {
+                    declareWorldType(name, declared, importDecl.name(), importDecl.externDesc());
+                    continue;
+                }
                 collect(
                         declared,
+                        instances,
                         importDecl.name(),
                         importDecl.externDesc(),
                         importedFunctions,
-                        importedInterfaces);
+                        importedInterfaces,
+                        false);
                 continue;
             }
             InstanceDecl instanceDecl = decl.instanceDecl();
-            if (instanceDecl != null && instanceDecl.exportDecl() != null) {
+            if (instanceDecl == null) {
+                continue;
+            }
+            if (instanceDecl.kind() == InstanceDecl.Kind.TYPE) {
+                declared.add(instanceDecl.type());
+            } else if (instanceDecl.kind() == InstanceDecl.Kind.ALIAS) {
+                alias(declared, instances, instanceDecl.alias());
+            } else if (instanceDecl.exportDecl() != null) {
                 collect(
                         declared,
+                        instances,
                         instanceDecl.exportDecl().name(),
                         instanceDecl.exportDecl().externDesc(),
                         exportedFunctions,
-                        exportedInterfaces);
+                        exportedInterfaces,
+                        true);
             }
         }
         return new WitWorld(
@@ -168,17 +187,100 @@ final class WorldReader {
                 exportedInterfaces);
     }
 
-    /** A world reaches a function directly and an interface as an instance, both ways round. */
+    /**
+     * A world reaches a function directly and an interface as an instance, both ways round. An
+     * interface also takes the next slot in the instance index space, which is how a later alias
+     * names it.
+     */
     private static void collect(
             WitScope declared,
+            List<WitInterface> instances,
             String name,
             ExternDesc desc,
             List<WitFunction> functions,
-            List<WitInterface> interfaces) {
+            List<WitInterface> interfaces,
+            boolean exported) {
         if (desc.kind() == ExternDesc.Kind.INSTANCE) {
-            interfaces.add(readInterface(name, instanceTypeAt(declared, desc, name)));
+            WitInterface read = readInterface(name, instanceTypeAt(declared, desc, name), declared);
+            if (exported) {
+                requireOwnTypes(read);
+            }
+            instances.add(read);
+            interfaces.add(read);
         } else {
             functions.add(function(declared, name, desc));
+        }
+    }
+
+    /**
+     * A world's {@code use} arrives as an alias of a type an imported interface exports. It takes a
+     * slot in the world's type index space and stays declared by that interface.
+     *
+     * @see <a href="https://github.com/WebAssembly/component-model/blob/706074c96bc14cfc58469e1bdc452bb4d91921c7/design/mvp/Explainer.md#alias-definitions">Explainer.md, alias definitions</a>
+     */
+    private static void alias(WitScope declared, List<WitInterface> instances, Alias alias) {
+        if (alias.kind() != Alias.Kind.EXPORT || alias.sort().kind() != Sort.Kind.TYPE) {
+            throw new BindgenException(
+                    "a world alias of kind "
+                            + alias.kind().name().toLowerCase()
+                            + " is not yet supported");
+        }
+        ExportAlias export = (ExportAlias) alias;
+        int instance = (int) export.instanceIdx();
+        if (instance < 0 || instance >= instances.size()) {
+            throw new BindgenException(
+                    "type \"" + export.name() + "\" is aliased from an instance never declared");
+        }
+        WitScope from = instances.get(instance).scope();
+        int index = from.indexOf(export.name());
+        if (index < 0) {
+            throw new BindgenException(
+                    "\""
+                            + instances.get(instance).name()
+                            + "\" exports no type named \""
+                            + export.name()
+                            + "\"");
+        }
+        declared.alias(from, index);
+    }
+
+    /**
+     * A type a world names arrives as an imported type. One bound to an alias is a {@code use},
+     * which the world can name like any type the interface declares. One the world declares in its
+     * own right has no Java package to be generated into, so it is refused.
+     */
+    private static void declareWorldType(
+            String world, WitScope declared, String name, ExternDesc desc) {
+        TypeBound bound = desc.typeBound();
+        if (bound != null && bound.kind() == TypeBound.Kind.EQ) {
+            int index = (int) bound.typeIdx();
+            if (declared.isUsed(index)) {
+                requireUsable(declared, index, "world \"" + world + "\"", name);
+                declared.alias(declared, index, name);
+                return;
+            }
+        }
+        throw new BindgenException(
+                "world \""
+                        + world
+                        + "\" declares type \""
+                        + name
+                        + "\" in its own right, which is not yet supported");
+    }
+
+    /**
+     * The guest side of an interface names its types through its own package, so an exported
+     * interface using a type from elsewhere is refused rather than generated wrongly.
+     */
+    private static void requireOwnTypes(WitInterface exported) {
+        WitScope scope = exported.scope();
+        for (int i = 0; i < scope.size(); i++) {
+            if (scope.isUsed(i)) {
+                throw new BindgenException(
+                        "exported interface \""
+                                + exported.name()
+                                + "\" uses types from elsewhere, which is not yet supported");
+            }
         }
     }
 
@@ -188,8 +290,10 @@ final class WorldReader {
      * <p>A resource is exported as a type rather than defined as one, and that export grows the
      * type index space just as a definition does, so it has to be counted or every index after it
      * names the wrong type.
+     *
+     * @param world the enclosing world's type index space, which an {@code alias outer} reaches
      */
-    private static WitInterface readInterface(String name, InstanceType type) {
+    private static WitInterface readInterface(String name, InstanceType type, WitScope world) {
         WitScope scope = new WitScope();
         scope.withOwner(simpleNameOf(name));
         List<WitFunction> functions = new ArrayList<>();
@@ -202,10 +306,8 @@ final class WorldReader {
                 continue;
             }
             if (decl.kind() == InstanceDecl.Kind.ALIAS) {
-                throw new BindgenException(
-                        "interface \""
-                                + name
-                                + "\" uses types from elsewhere, which is not yet supported");
+                aliasOuter(name, scope, world, decl.alias());
+                continue;
             }
             if (decl.exportDecl() == null) {
                 continue;
@@ -213,7 +315,7 @@ final class WorldReader {
             String exportName = decl.exportDecl().name();
             ExternDesc desc = decl.exportDecl().externDesc();
             if (desc.kind() == ExternDesc.Kind.TYPE) {
-                declareType(scope, types, resources, exportName, desc);
+                declareType(name, scope, types, resources, exportName, desc);
                 continue;
             }
             WitFunction function = function(scope, exportName, desc);
@@ -233,13 +335,34 @@ final class WorldReader {
     }
 
     /**
+     * An interface's {@code use} arrives as an {@code alias outer} reaching the enclosing world,
+     * which aliased the type from the interface declaring it.
+     *
+     * @see <a href="https://github.com/WebAssembly/component-model/blob/706074c96bc14cfc58469e1bdc452bb4d91921c7/design/mvp/Explainer.md#alias-definitions">Explainer.md, alias definitions</a>
+     */
+    private static void aliasOuter(String name, WitScope scope, WitScope world, Alias alias) {
+        if (alias.kind() != Alias.Kind.OUTER
+                || alias.sort().kind() != Sort.Kind.TYPE
+                || ((OuterAlias) alias).count() != 1) {
+            throw new BindgenException(
+                    "interface \""
+                            + name
+                            + "\" holds an alias other than a type from its world, which is not"
+                            + " yet supported");
+        }
+        scope.alias(world, (int) ((OuterAlias) alias).index());
+    }
+
+    /**
      * A type an interface exports takes an index of its own, whether it names a resource or a type
      * defined just above it, so both have to be recorded or every index after them is wrong.
      *
      * <p>A {@code sub} bound is a resource, which has no structure to read. An {@code eq} bound
-     * names a type the interface defined, and that is where a record or an enum gets its name.
+     * names a type the interface defined, and that is where a record or an enum gets its name. An
+     * {@code eq} bound naming an alias is a {@code use}, and the type stays declared elsewhere.
      */
     private static void declareType(
+            String iface,
             WitScope scope,
             List<WitType> types,
             Map<String, ResourceFunctions> resources,
@@ -247,14 +370,48 @@ final class WorldReader {
             ExternDesc desc) {
         TypeBound bound = desc.typeBound();
         if (bound == null || bound.kind() != TypeBound.Kind.EQ) {
-            int index = scope.add(null);
+            int index = scope.add(null, exportName);
             resources.computeIfAbsent(exportName, name -> new ResourceFunctions(name, index));
             return;
         }
-        Type named = scope.at((int) bound.typeIdx());
+        int boundIndex = (int) bound.typeIdx();
+        if (scope.isUsed(boundIndex)) {
+            requireUsable(scope, boundIndex, "interface \"" + iface + "\"", exportName);
+            scope.alias(scope, boundIndex, exportName);
+            return;
+        }
+        Type named = scope.at(boundIndex);
         scope.add(named, exportName);
         if (named != null && named.defValType() != null) {
             types.add(new WitType(exportName, named.defValType()));
+        }
+    }
+
+    /**
+     * A used resource has to share its runtime type with the interface declaring it, and a used
+     * {@code result} generates its exception into the declaring interface's package. Neither is
+     * wired yet, so both are refused by name.
+     */
+    private static void requireUsable(WitScope scope, int index, String user, String name) {
+        Type used = scope.at(index);
+        String declaredBy = scope.declaringScope(index).owner();
+        if (used == null) {
+            throw new BindgenException(
+                    user
+                            + " uses resource \""
+                            + name
+                            + "\" from \""
+                            + declaredBy
+                            + "\", which is not yet supported");
+        }
+        if (used.defValType() != null && used.defValType().kind() == DefValType.Kind.RESULT) {
+            throw new BindgenException(
+                    user
+                            + " uses result type \""
+                            + name
+                            + "\" from \""
+                            + declaredBy
+                            + "\", which is not yet supported");
         }
     }
 
@@ -325,26 +482,6 @@ final class WorldReader {
 
         WitResource toResource() {
             return new WitResource(name, typeIndex, constructor, methods, statics);
-        }
-    }
-
-    /**
-     * Grows the type index space by whatever {@code decl} contributes to it. An alias would also
-     * grow it, and silently mis-numbering every index after one is worse than refusing to read it.
-     */
-    private static void track(WitScope declared, ComponentDecl decl) {
-        InstanceDecl instanceDecl = decl.instanceDecl();
-        if (instanceDecl == null) {
-            return;
-        }
-        if (instanceDecl.kind() == InstanceDecl.Kind.TYPE) {
-            declared.add(instanceDecl.type());
-        } else if (instanceDecl.kind() == InstanceDecl.Kind.ALIAS) {
-            Sort sort = instanceDecl.alias().sort();
-            if (sort != null && sort.kind() == Sort.Kind.TYPE) {
-                throw new BindgenException(
-                        "a world using types from an interface is not yet supported");
-            }
         }
     }
 

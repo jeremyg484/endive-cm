@@ -92,6 +92,11 @@ public class ApprovalTest {
         verifyGeneratedBindings("ResultHost.java");
     }
 
+    @Test
+    public void verifyUseTypes() {
+        verifyGeneratedBindings("UseTypesHost.java");
+    }
+
     /**
      * Sources are ordered by name and headed by it, so that the package a world lays out is part of
      * what is approved rather than something a separate assertion has to repeat.

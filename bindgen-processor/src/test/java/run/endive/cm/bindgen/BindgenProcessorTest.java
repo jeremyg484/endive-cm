@@ -252,6 +252,205 @@ class BindgenProcessorTest {
                 .contains("counterOpen2(");
     }
 
+    /**
+     * A used type is numbered by the interface declaring it, so what it names has to be declared
+     * into the using instance first, even when the using interface never names that itself.
+     */
+    @Test
+    void aUsedTypeDeclaresWhatItNamesFirst() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.UsedRecordHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"used-record\", inline ="
+                                        + " \"package example:used;\\n"
+                                        + "interface types {\\n"
+                                        + "  enum level { debug, info }\\n"
+                                        + "  record entry { level: level, code: u32 }\\n"
+                                        + "}\\n"
+                                        + "interface logging {\\n"
+                                        + "  use types.{entry};\\n"
+                                        + "  latest: func() -> entry;\\n"
+                                        + "}\\n"
+                                        + "world used-record {\\n"
+                                        + "  import logging;\\n"
+                                        + "  export go: func();\\n"
+                                        + "}\\n\")\n"
+                                        + "public class UsedRecordHost {}\n"));
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.UsedRecord")
+                .contentsAsUtf8String()
+                .contains(
+                        "ValType loggingTypesLevel = loggingBuilder.declareType(Type.of("
+                                + "EnumType.builder()");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.UsedRecord")
+                .contentsAsUtf8String()
+                .contains("withLabel(\"level\").withValType(loggingTypesLevel)");
+    }
+
+    /**
+     * A type reached through a chain of uses belongs to the interface at the end of the chain, so
+     * only that one generates it.
+     */
+    @Test
+    void aTypeUsedThroughAnotherUseKeepsItsDeclaringPackage() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.ChainHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"chain\", inline ="
+                                        + " \"package example:chain;\\n"
+                                        + "interface base {\\n"
+                                        + "  enum level { debug, info }\\n"
+                                        + "}\\n"
+                                        + "interface middle {\\n"
+                                        + "  use base.{level};\\n"
+                                        + "  record note { level: level }\\n"
+                                        + "}\\n"
+                                        + "interface top {\\n"
+                                        + "  use middle.{note, level};\\n"
+                                        + "  post: func(n: note, l: level);\\n"
+                                        + "}\\n"
+                                        + "world chain {\\n"
+                                        + "  import top;\\n"
+                                        + "  export go: func();\\n"
+                                        + "}\\n\")\n"
+                                        + "public class ChainHost {}\n"));
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertGenerated(
+                compilation,
+                List.of(
+                        "endive.testing.Chain",
+                        "endive.testing.example.chain.base.Host",
+                        "endive.testing.example.chain.base.Level",
+                        "endive.testing.example.chain.middle.Host",
+                        "endive.testing.example.chain.middle.Note",
+                        "endive.testing.example.chain.top.Host"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.example.chain.top.Host")
+                .contentsAsUtf8String()
+                .contains(
+                        "void post(endive.testing.example.chain.middle.Note n,"
+                                + " endive.testing.example.chain.base.Level l);");
+    }
+
+    /** A used resource has to share its runtime type with the interface declaring it. */
+    @Test
+    void aUsedResourceIsRefused() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.UsedResourceHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"used-resource\", inline ="
+                                        + " \"package example:used;\\n"
+                                        + "interface poll {\\n"
+                                        + "  resource pollable { ready: func() -> bool; }\\n"
+                                        + "}\\n"
+                                        + "interface streams {\\n"
+                                        + "  use poll.{pollable};\\n"
+                                        + "  subscribe: func() -> pollable;\\n"
+                                        + "}\\n"
+                                        + "world used-resource {\\n"
+                                        + "  import streams;\\n"
+                                        + "  export go: func();\\n"
+                                        + "}\\n\")\n"
+                                        + "public class UsedResourceHost {}\n"));
+
+        assertThat(compilation).failed();
+        assertThat(compilation)
+                .hadErrorContaining(
+                        "interface \"example:used/streams\" uses resource \"pollable\" from"
+                                + " \"poll\"");
+    }
+
+    /** A used result generates its exception into the package of the interface declaring it. */
+    @Test
+    void aUsedResultIsRefused() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.UsedResultHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"used-result\", inline ="
+                                        + " \"package example:used;\\n"
+                                        + "interface types {\\n"
+                                        + "  type outcome = result<u32, string>;\\n"
+                                        + "}\\n"
+                                        + "interface runner {\\n"
+                                        + "  use types.{outcome};\\n"
+                                        + "  run: func() -> outcome;\\n"
+                                        + "}\\n"
+                                        + "world used-result {\\n"
+                                        + "  import runner;\\n"
+                                        + "  export go: func();\\n"
+                                        + "}\\n\")\n"
+                                        + "public class UsedResultHost {}\n"));
+
+        assertThat(compilation).failed();
+        assertThat(compilation).hadErrorContaining("uses result type \"outcome\" from \"types\"");
+    }
+
+    /** Only the host side of a used type is generated so far. */
+    @Test
+    void anExportedInterfaceUsingTypesIsRefused() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.ExportedUseHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"exported-use\", inline ="
+                                        + " \"package example:used;\\n"
+                                        + "interface types {\\n"
+                                        + "  enum level { debug, info }\\n"
+                                        + "}\\n"
+                                        + "interface logging {\\n"
+                                        + "  use types.{level};\\n"
+                                        + "  log: func(level: level);\\n"
+                                        + "}\\n"
+                                        + "world exported-use {\\n"
+                                        + "  export logging;\\n"
+                                        + "}\\n\")\n"
+                                        + "public class ExportedUseHost {}\n"));
+
+        assertThat(compilation).failed();
+        assertThat(compilation)
+                .hadErrorContaining(
+                        "exported interface \"example:used/logging\" uses types from elsewhere");
+    }
+
+    /** A world declares no Java package for a type of its own to be generated into. */
+    @Test
+    void aTypeAWorldDeclaresIsRefused() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.WorldTypeHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"world-type\", inline ="
+                                        + " \"package example:used;\\n"
+                                        + "world world-type {\\n"
+                                        + "  type count = u32;\\n"
+                                        + "  export go: func() -> count;\\n"
+                                        + "}\\n\")\n"
+                                        + "public class WorldTypeHost {}\n"));
+
+        assertThat(compilation).failed();
+        assertThat(compilation).hadErrorContaining("declares type \"count\" in its own right");
+    }
+
     /** Every world generates a package tree mirroring the WIT ids, which is what this pins. */
     private static void assertGenerated(Compilation compilation, List<String> expected) {
         List<String> actual =

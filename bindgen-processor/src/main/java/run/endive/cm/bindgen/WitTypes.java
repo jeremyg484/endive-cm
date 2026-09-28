@@ -60,13 +60,14 @@ final class WitTypes {
         }
         int index = valType.typeIdx();
         DefValType defined = definedAt(scope, index);
+        WitScope inner = scope.declaringScope(index);
         switch (defined.kind()) {
             case LIST:
                 ListType list = (ListType) defined;
                 return AstBuilders.generic(
-                        unit.use(QualifiedTypes.LIST), javaType(list.elementType(), scope));
+                        unit.use(QualifiedTypes.LIST), javaType(list.elementType(), inner));
             case OPTION:
-                return javaType(optionPayload((OptionType) defined, scope), scope);
+                return javaType(optionPayload((OptionType) defined, inner), inner);
             case ENUM:
             case FLAGS:
             case VARIANT:
@@ -75,7 +76,7 @@ final class WitTypes {
             case TUPLE:
                 List<Type> elements = new ArrayList<>();
                 for (ValType element : ((TupleType) defined).elementTypes()) {
-                    elements.add(elementJavaType(element, scope));
+                    elements.add(elementJavaType(element, inner));
                 }
                 return AstBuilders.generic(
                         unit.use(tupleClass(elements.size())), elements.toArray(new Type[0]));
@@ -162,6 +163,46 @@ final class WitTypes {
         }
     }
 
+    /** The value types {@code defined} names, which have to be declared before it can be. */
+    static List<ValType> references(DefValType defined) {
+        List<ValType> found = new ArrayList<>();
+        switch (defined.kind()) {
+            case LIST:
+                found.add(((ListType) defined).elementType());
+                break;
+            case OPTION:
+                found.add(((OptionType) defined).valType());
+                break;
+            case TUPLE:
+                found.addAll(((TupleType) defined).elementTypes());
+                break;
+            case RECORD:
+                for (LabelValType field : ((RecordType) defined).fields()) {
+                    found.add(field.valType());
+                }
+                break;
+            case VARIANT:
+                for (Case declaredCase : ((VariantType) defined).cases()) {
+                    if (declaredCase.hasValType()) {
+                        found.add(declaredCase.valType());
+                    }
+                }
+                break;
+            case RESULT:
+                ResultType result = (ResultType) defined;
+                if (result.hasOk()) {
+                    found.add(result.ok());
+                }
+                if (result.hasError()) {
+                    found.add(result.error());
+                }
+                break;
+            default:
+                break;
+        }
+        return found;
+    }
+
     /**
      * Whether a Java value of this kind differs from what the ABI carries, so that the generated
      * code has to convert at the boundary rather than pass it through.
@@ -195,7 +236,8 @@ final class WitTypes {
             throw resultOutOfPlace();
         }
         if (defined.kind() == DefValType.Kind.LIST) {
-            return needsConversion(((ListType) defined).elementType(), scope);
+            return needsConversion(
+                    ((ListType) defined).elementType(), scope.declaringScope(valType.typeIdx()));
         }
         return convertsAtBoundary(defined.kind());
     }
@@ -226,16 +268,17 @@ final class WitTypes {
             return value;
         }
         DefValType defined = definedAt(scope, valType.typeIdx());
+        WitScope inner = scope.declaringScope(valType.typeIdx());
         switch (defined.kind()) {
             case OPTION:
-                return lowerOption(value, (OptionType) defined, scope, depth);
+                return lowerOption(value, (OptionType) defined, inner, depth);
             case LIST:
                 return mapElements(
                         value,
                         lower(
                                 new NameExpr(elementName(depth)),
                                 ((ListType) defined).elementType(),
-                                scope,
+                                inner,
                                 depth + 1),
                         depth);
             default:
@@ -262,13 +305,14 @@ final class WitTypes {
     private Expression lift(Expression value, ValType valType, WitScope scope, int depth) {
         if (needsConversion(valType, scope)) {
             DefValType defined = definedAt(scope, valType.typeIdx());
+            WitScope inner = scope.declaringScope(valType.typeIdx());
             switch (defined.kind()) {
                 case TUPLE:
-                    return tupleFromComponent(value, (TupleType) defined, scope);
+                    return tupleFromComponent(value, (TupleType) defined, inner);
                 case OPTION:
-                    return liftOption(value, (OptionType) defined, scope, depth);
+                    return liftOption(value, (OptionType) defined, inner, depth);
                 case LIST:
-                    return liftElements(value, ((ListType) defined).elementType(), scope, depth);
+                    return liftElements(value, ((ListType) defined).elementType(), inner, depth);
                 default:
                     return AstBuilders.call(
                             AstBuilders.name(nominalJavaType(scope, valType.typeIdx())),
@@ -632,14 +676,16 @@ final class WitTypes {
      * The Java type generated for a nominal type, which is named by the export declaring it.
      *
      * <p>Only the nominal kinds come through here. A structural type such as a list or an option
-     * is written anonymously and has no name to find.
+     * is written anonymously and has no name to find. A type used from another interface is named
+     * and packaged by the interface declaring it.
      */
     private String nominalJavaType(WitScope scope, int index) {
-        String name = scope.nameAt(index);
+        WitScope declaring = scope.declaringScope(index);
+        String name = declaring.nameAt(scope.declaringIndex(index));
         if (name == null) {
             throw unsupported("an unnamed " + definedAt(scope, index).kind().name());
         }
-        return reference(scope, name);
+        return reference(declaring, name);
     }
 
     private ClassOrInterfaceType primitiveJavaType(DefValType.Kind kind) {

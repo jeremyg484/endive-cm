@@ -52,6 +52,7 @@ public final class VariantTypes {
         endive.testing.example.varianttypes.commands.Host commands = imports.commands();
         HostInstance.Builder commandsBuilder = HostInstance.builder(store);
         ValType commandsCommand = commandsBuilder.declareType(Type.of(VariantType.builder().addCase(Case.builder().withLabel("stop").build()).addCase(Case.builder().withLabel("jump").withValType(ValType.builder().withPrimValType(PrimValType.U32).build()).build()).addCase(Case.builder().withLabel("speak").withValType(ValType.builder().withPrimValType(PrimValType.STRING).build()).build()).build()));
+        commandsBuilder.addType("command", commandsCommand);
         commandsBuilder.addFunction("handle", FuncType.builder().addParam(LabelValType.builder().withLabel("cmd").withValType(commandsCommand).build()).withResult(commandsCommand).build(), args -> new Object[] { commands.handle(endive.testing.example.varianttypes.commands.Command.fromComponent(args[0])).toComponent() });
         values.put("example:variant-types/commands", commandsBuilder.build());
         return new VariantTypes(ComponentLinker.builder().build().instantiate(store, component, values));

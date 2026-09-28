@@ -57,8 +57,10 @@ public final class RecordTypes {
         endive.testing.example.records.types.Host types = imports.types();
         HostInstance.Builder typesBuilder = HostInstance.builder(store);
         ValType typesPoint = typesBuilder.declareType(Type.of(RecordType.builder().addField(LabelValType.builder().withLabel("x").withValType(ValType.builder().withPrimValType(PrimValType.U32).build()).build()).addField(LabelValType.builder().withLabel("y").withValType(ValType.builder().withPrimValType(PrimValType.U32).build()).build()).build()));
+        typesBuilder.addType("point", typesPoint);
         ValType typesType2 = typesBuilder.declareType(Type.of(ListType.builder().withElementType(ValType.builder().withPrimValType(PrimValType.STRING).build()).build()));
         ValType typesPerson = typesBuilder.declareType(Type.of(RecordType.builder().addField(LabelValType.builder().withLabel("name").withValType(ValType.builder().withPrimValType(PrimValType.STRING).build()).build()).addField(LabelValType.builder().withLabel("active").withValType(ValType.builder().withPrimValType(PrimValType.BOOL).build()).build()).addField(LabelValType.builder().withLabel("id").withValType(ValType.builder().withPrimValType(PrimValType.U64).build()).build()).addField(LabelValType.builder().withLabel("initial").withValType(ValType.builder().withPrimValType(PrimValType.CHAR).build()).build()).addField(LabelValType.builder().withLabel("tags").withValType(typesType2).build()).addField(LabelValType.builder().withLabel("home").withValType(typesPoint).build()).build()));
+        typesBuilder.addType("person", typesPerson);
         typesBuilder.addFunction("resident", FuncType.builder().withResult(typesPerson).build(), args -> new Object[] { types.resident().toComponent() });
         values.put("example:records/types", typesBuilder.build());
         return new RecordTypes(ComponentLinker.builder().build().instantiate(store, component, values));

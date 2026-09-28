@@ -53,6 +53,7 @@ public final class ResultTypes {
         endive.testing.example.resulttypes.parsing.Host parsing = imports.parsing();
         HostInstance.Builder parsingBuilder = HostInstance.builder(store);
         ValType parsingParseError = parsingBuilder.declareType(Type.of(EnumType.builder().addLabel("empty").addLabel("overflow").build()));
+        parsingBuilder.addType("parse-error", parsingParseError);
         ValType parsingType2 = parsingBuilder.declareType(Type.of(ResultType.builder().withOk(ValType.builder().withPrimValType(PrimValType.U32).build()).withError(parsingParseError).build()));
         parsingBuilder.addFunction("parse", FuncType.builder().addParam(LabelValType.builder().withLabel("text").withValType(ValType.builder().withPrimValType(PrimValType.STRING).build()).build()).withResult(parsingType2).build(), args -> {
             try {

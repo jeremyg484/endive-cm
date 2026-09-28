@@ -51,6 +51,7 @@ public final class ImportSomeResources {
         endive.testing.example.importedresources.logging.Host logging = imports.logging();
         HostInstance.Builder loggingBuilder = HostInstance.builder(store);
         ValType loggingLevel = loggingBuilder.declareType(Type.of(EnumType.builder().addLabel("debug").addLabel("info").addLabel("warn").addLabel("error").build()));
+        loggingBuilder.addType("level", loggingLevel);
         HostResourceTable<endive.testing.example.importedresources.logging.Logger> loggingLoggerTable = new HostResourceTable<>();
         HostResource loggingLogger = loggingBuilder.declareResource(rep -> loggingLoggerTable.drop(rep, endive.testing.example.importedresources.logging.Logger::drop));
         loggingBuilder.addResource("logger", loggingLogger);

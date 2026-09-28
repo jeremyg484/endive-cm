@@ -104,6 +104,25 @@ public class HostInstanceTests {
         assertEquals(1, builder.declareType(Type.of(RecordType.builder().build())).typeIdx());
     }
 
+    /** A declared type may be exported, so that an importer can alias it by name. */
+    @Test
+    public void aDeclaredTypeMayBeExported() {
+        var builder = HostInstance.builder(new ComponentStore());
+        Type point = Type.of(RecordType.builder().addField(param("x", u32())).build());
+
+        ComponentInstance host = builder.addType("point", builder.declareType(point)).build();
+
+        assertSame(point, ((ComponentInstance.TypeSlot) host.getExport("point")).type());
+    }
+
+    /** A primitive takes no slot in the index space, so there is nothing to export. */
+    @Test
+    public void aPrimitiveCannotBeExportedAsAType() {
+        var builder = HostInstance.builder(new ComponentStore());
+
+        assertThrows(IllegalArgumentException.class, () -> builder.addType("count", u32()));
+    }
+
     /**
      * Resource types are generative, so two declarations that read alike are still two types. The
      * spec suite leans on this to check that a handle minted from one is refused by the other.

@@ -48,6 +48,7 @@ public final class WithImports {
         endive.testing.example.interfaceimports.logging.Host logging = imports.logging();
         HostInstance.Builder loggingBuilder = HostInstance.builder(store);
         ValType loggingLevel = loggingBuilder.declareType(Type.of(EnumType.builder().addLabel("debug").addLabel("info").addLabel("warn").addLabel("error").build()));
+        loggingBuilder.addType("level", loggingLevel);
         loggingBuilder.addFunction("log", FuncType.builder().addParam(LabelValType.builder().withLabel("level").withValType(loggingLevel).build()).addParam(LabelValType.builder().withLabel("msg").withValType(ValType.builder().withPrimValType(PrimValType.STRING).build()).build()).build(), args -> {
             logging.log(endive.testing.example.interfaceimports.logging.Level.fromComponent(args[0]), (String) args[1]);
             return new Object[0];

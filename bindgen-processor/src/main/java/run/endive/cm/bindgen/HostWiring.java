@@ -7,7 +7,9 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import run.endive.cm.types.DefValType;
 import run.endive.cm.types.Type;
+import run.endive.cm.types.ValType;
 
 /**
  * Builds the host side of an interface a world imports, as statements inside {@code instantiate}.
@@ -37,7 +39,7 @@ final class HostWiring {
         WitScope scope = iface.scope();
         for (int i = 0; i < scope.size(); i++) {
             Type declared = scope.at(i);
-            if (declared != null && declared.defValType() != null && isCompound(declared)) {
+            if (isCompound(declared)) {
                 found.put(i, declared);
             }
         }
@@ -88,31 +90,88 @@ final class HostWiring {
                         AstBuilders.call(locals.builder(), "build")));
     }
 
-    /** Declares each compound type into the instance, since a function type names one by index. */
+    /**
+     * Declares each compound type into the instance, since a function type names one by index. A
+     * named type is exported as well, since a component using it aliases it from the instance.
+     */
     private void declareTypes(BlockStmt body, WitInterface imported, Locals locals) {
-        Map<Type, String> byType = new IdentityHashMap<>();
+        WitScope scope = imported.scope();
         for (Map.Entry<Integer, Type> entry : compoundTypes(imported).entrySet()) {
-            String existing = byType.get(entry.getValue());
-            if (existing != null) {
-                locals.declared.put(entry.getKey(), existing);
-                continue;
-            }
+            String preferred = typeName(scope, entry.getValue(), entry.getKey());
             String local =
-                    locals.host + Names.type(typeName(imported, entry.getValue(), entry.getKey()));
-            byType.put(entry.getValue(), local);
+                    declare(
+                            body,
+                            scope,
+                            entry.getKey(),
+                            locals.host + Names.type(preferred),
+                            locals);
             locals.declared.put(entry.getKey(), local);
-            body.addStatement(
-                    AstBuilders.declare(
-                            unit.use(QualifiedTypes.VAL_TYPE),
-                            local,
-                            AstBuilders.call(
-                                    locals.builder(),
-                                    "declareType",
-                                    types.defValType(
-                                            entry.getValue().defValType(),
-                                            imported.scope(),
-                                            locals.declared))));
+            String name = scope.nameAt(entry.getKey());
+            if (name != null) {
+                body.addStatement(
+                        AstBuilders.call(
+                                locals.builder(),
+                                "addType",
+                                AstBuilders.text(name),
+                                new NameExpr(local)));
+            }
         }
+    }
+
+    /**
+     * Declares the type at {@code index} unless it was declared already, and gives back the local
+     * holding it.
+     *
+     * <p>A type used from another interface is declared into this instance too, since the host
+     * instance has a type index space of its own. Its definition is numbered by the interface that
+     * declared it, so whatever it refers to is declared first, against that interface's space.
+     *
+     * @param local the name for the local, or {@code null} to derive one from the declaring scope
+     */
+    private String declare(BlockStmt body, WitScope scope, int index, String local, Locals locals) {
+        Map<Integer, String> declared = locals.declaredIn(scope);
+        if (scope.isUsed(index)) {
+            String used =
+                    declare(
+                            body,
+                            scope.declaringScope(index),
+                            scope.declaringIndex(index),
+                            local,
+                            locals);
+            declared.put(index, used);
+            return used;
+        }
+        String existing = declared.get(index);
+        if (existing == null) {
+            existing = locals.byType.get(scope.at(index));
+        }
+        if (existing != null) {
+            declared.put(index, existing);
+            return existing;
+        }
+        DefValType defined = scope.at(index).defValType();
+        for (ValType reference : WitTypes.references(defined)) {
+            if (reference.primValType() == null && isCompound(scope.at(reference.typeIdx()))) {
+                declare(body, scope, reference.typeIdx(), null, locals);
+            }
+        }
+        String name =
+                local != null
+                        ? local
+                        : locals.host
+                                + Names.type(scope.owner())
+                                + Names.type(typeName(scope, scope.at(index), index));
+        body.addStatement(
+                AstBuilders.declare(
+                        unit.use(QualifiedTypes.VAL_TYPE),
+                        name,
+                        AstBuilders.call(
+                                locals.builder(),
+                                "declareType",
+                                types.defValType(defined, scope, declared))));
+        locals.byType.put(scope.at(index), name);
+        declared.put(index, name);
+        return name;
     }
 
     /**
@@ -237,12 +296,13 @@ final class HostWiring {
     }
 
     private static boolean isCompound(Type type) {
-        return WitTypes.isCompound(type.defValType().kind());
+        return type != null
+                && type.defValType() != null
+                && WitTypes.isCompound(type.defValType().kind());
     }
 
     /** Only the export declaring a type says what it is called, so an unnamed one gets an index. */
-    private static String typeName(WitInterface imported, Type type, int index) {
-        WitScope scope = imported.scope();
+    private static String typeName(WitScope scope, Type type, int index) {
         for (int i = 0; i < scope.size(); i++) {
             if (scope.at(i) == type && scope.nameAt(i) != null) {
                 return scope.nameAt(i);
@@ -259,11 +319,26 @@ final class HostWiring {
 
         private final String host;
         private final String builder;
+        private final WitScope scope;
         private final Map<Integer, String> declared = new LinkedHashMap<>();
+
+        /** What types used from other interfaces were declared as, by the scope declaring them. */
+        private final Map<WitScope, Map<Integer, String>> elsewhere = new IdentityHashMap<>();
+
+        /** One local per type, however many indices name it. */
+        private final Map<Type, String> byType = new IdentityHashMap<>();
 
         Locals(WitInterface imported) {
             this.host = Names.member(imported.simpleName());
             this.builder = host + "Builder";
+            this.scope = imported.scope();
+        }
+
+        /** The locals holding the types {@code declaring} numbers, keyed by its indices. */
+        Map<Integer, String> declaredIn(WitScope declaring) {
+            return declaring == scope
+                    ? declared
+                    : elsewhere.computeIfAbsent(declaring, s -> new LinkedHashMap<>());
         }
 
         Expression builder() {
