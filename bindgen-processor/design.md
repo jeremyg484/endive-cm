@@ -658,11 +658,8 @@ The WIT under `src/test/resources/wit` in `bindgen-processor` is the bindgen! ex
 That is what the approved files are generated from, so a difference from the example is visible rather than assumed.
 
 All seven of the non-async example worlds are present. A world covering a WIT feature no example declares is written
-for the purpose and named after it, which is where `record-types`, `variant-types`, `static-functions` and
-`use-types` come from, and each such fixture says so at the top.
-
-All seven of the non-async example worlds are present. `result-types` is not one of them, because no bindgen! example
-uses a `result`, so that world is written for these tests and its fixtures say so at the top.
+for the purpose and named after it, such as `record-types`, `result-types` or `use-types`, and each such fixture says
+so at the top.
 
 The end-to-end fixtures use the same WIT, with one exception that has to be stated wherever it appears. A world that
 imports without exporting cannot be driven, since nothing enters the guest, so `with-imports`,
