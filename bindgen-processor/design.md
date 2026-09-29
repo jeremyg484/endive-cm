@@ -306,9 +306,15 @@ split, and it is what lets a world import and export one name at once.
 The point of it is the use site. A type reached as `ImportSomeResources.Logging.Level` cannot be imported and has to be
 written whole every time. As `Level` in a package of its own it is imported once.
 
-Package segments are lowercase with the words run together, since Google's Java style allows no underscores, which is
-why `imported-resources` becomes `importedresources`. Real WASI ids are mostly single words, so the run-together
-spelling rarely shows.
+Java package segments are lowercase with the words run together, since Google's Java style allows no underscores.
+For example, `imported-resources` becomes `importedresources`. Real WASI ids are mostly single words, so the
+run-together spelling rarely shows.
+
+A versioned WIT id keeps its version for component imports and exports, but Java package segments and member names
+use the unversioned interface name. For example, `streams@0.2.0` and `streams@0.3.0` both generate a `streams` package
+and accessor. Changing the WIT version does not by itself rename Java types or methods. A Java library can express
+which WIT version it implements through its own artifact version. A world importing both versions cannot generate
+both into one Java package, so bindgen reports the conflicting WIT ids.
 
 Two things follow from generating more than one file.
 
@@ -754,8 +760,6 @@ way today, which means adding one is a matter of finding its rejection and repla
 - **A compound type on a world's bare function import.** `HostFunction` builds an instance with no type space,
   leaving an index nothing to resolve. Either `HostFunction` grows type declarations or such an import is built
   through `HostInstance` like an interface.
-- **Versioned interface ids.** `wasi:io/streams@0.2.0` has no package spelling yet. Nothing decides what to do with the
-  version, and WASI will hit it immediately.
 
 A few refusals are limits of the chosen Java shapes rather than missing work, and
 [What Is Built](#what-is-built) gives the reason for each. They are `option<option<T>>`, a `result` reached as a value

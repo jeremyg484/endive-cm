@@ -55,10 +55,9 @@ final class WitInterface {
         return scope;
     }
 
-    /** The interface's own name, with any package qualification dropped. */
+    /** The interface name without its package or version. */
     String simpleName() {
-        int slash = name.lastIndexOf('/');
-        return slash < 0 ? name : name.substring(slash + 1);
+        return Names.simpleName(name);
     }
 
     /**

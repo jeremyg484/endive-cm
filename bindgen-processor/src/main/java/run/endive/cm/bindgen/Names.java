@@ -109,20 +109,34 @@ final class Names {
     }
 
     /**
-     * A WIT name as a Java package segment, which Google's style says is lowercase letters and
-     * digits with consecutive words run together. A segment Java reserves gains a trailing
-     * underscore, since there is no lowercase-only spelling that would not be a keyword.
+     * A WIT name as a Java package segment, without its version.
+     *
+     * <p>A Java reserved word gains a trailing underscore, so {@code class} becomes {@code class_}.
      */
     static String packageSegment(String witName) {
-        StringBuilder result = new StringBuilder(witName.length());
-        for (int i = 0; i < witName.length(); i++) {
-            char c = witName.charAt(i);
+        String name = withoutVersion(witName);
+        StringBuilder result = new StringBuilder(name.length());
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
             if (c != '-') {
                 result.append(Character.toLowerCase(c));
             }
         }
+
         String segment = result.toString();
         return RESERVED.contains(segment) ? segment + "_" : segment;
+    }
+
+    /** Leaves the WIT version out of names used by Java source. */
+    static String withoutVersion(String witName) {
+        int at = witName.indexOf('@');
+        return at < 0 ? witName : witName.substring(0, at);
+    }
+
+    /** The unqualified, unversioned name of a WIT interface. */
+    static String simpleName(String witName) {
+        int slash = witName.lastIndexOf('/');
+        return withoutVersion(slash < 0 ? witName : witName.substring(slash + 1));
     }
 
     private static String join(String witName, boolean leadingCapital) {

@@ -1,0 +1,9 @@
+package wasi:cli@0.2.0;
+
+interface run {
+  run: func() -> result;
+}
+
+world versioned-results {
+  import run;
+}

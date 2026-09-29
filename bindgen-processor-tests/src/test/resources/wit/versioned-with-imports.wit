@@ -1,0 +1,18 @@
+package example:interface-imports@0.2.0;
+
+interface logging {
+    enum level {
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    log: func(level: level, msg: string);
+}
+
+world versioned-with-imports {
+    import logging;
+
+    export run: func();
+}

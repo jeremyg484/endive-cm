@@ -295,7 +295,7 @@ final class WorldReader {
      */
     private static WitInterface readInterface(String name, InstanceType type, WitScope world) {
         WitScope scope = new WitScope();
-        scope.withOwner(simpleNameOf(name));
+        scope.withOwner(Names.simpleName(name));
         List<WitFunction> functions = new ArrayList<>();
         List<WitType> types = new ArrayList<>();
         Map<String, ResourceFunctions> resources = new LinkedHashMap<>();
@@ -413,12 +413,6 @@ final class WorldReader {
                             + declaredBy
                             + "\", which is not yet supported");
         }
-    }
-
-    /** An interface's own name, with any package qualification dropped. */
-    private static String simpleNameOf(String name) {
-        int slash = name.lastIndexOf('/');
-        return slash < 0 ? name : name.substring(slash + 1);
     }
 
     /** The resource owning a {@code [constructor]}, {@code [method]} or {@code [static]} name. */

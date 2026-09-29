@@ -9,6 +9,7 @@ import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ReturnStmt;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,7 @@ final class WorldGenerator {
     }
 
     private List<GeneratedUnit> sources() {
+        checkInterfacePackages();
         List<GeneratedUnit> sources = new ArrayList<>();
         InterfaceGenerator interfaces = new InterfaceGenerator(generatedBy);
         for (WitInterface imported : world.importedInterfaces()) {
@@ -57,6 +59,33 @@ final class WorldGenerator {
         }
         sources.add(worldSource());
         return sources;
+    }
+
+    /** Fails when two WIT interfaces would generate into the same Java package. */
+    private void checkInterfacePackages() {
+        Map<String, String> interfaces = new HashMap<>();
+        for (WitInterface imported : world.importedInterfaces()) {
+            checkInterfacePackage(interfaces, imported, false);
+        }
+        for (WitInterface exported : world.exportedInterfaces()) {
+            checkInterfacePackage(interfaces, exported, true);
+        }
+    }
+
+    private void checkInterfacePackage(
+            Map<String, String> interfaces, WitInterface iface, boolean exported) {
+        String javaPackage = iface.javaPackage(base, exported);
+        String previous = interfaces.putIfAbsent(javaPackage, iface.name());
+        if (previous != null && !previous.equals(iface.name())) {
+            throw new BindgenException(
+                    "WIT interfaces \""
+                            + previous
+                            + "\" and \""
+                            + iface.name()
+                            + "\" both generate Java package \""
+                            + javaPackage
+                            + "\" and cannot be bound together");
+        }
     }
 
     private GeneratedUnit worldSource() {
