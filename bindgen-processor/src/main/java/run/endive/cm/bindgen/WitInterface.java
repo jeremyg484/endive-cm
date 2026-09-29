@@ -55,6 +55,22 @@ final class WitInterface {
         return scope;
     }
 
+    /**
+     * Whether an embedder importing this interface has anything to implement. One declaring only
+     * types, such as the types other interfaces {@code use}, gets no {@code Host}.
+     */
+    boolean needsHost() {
+        if (!functions.isEmpty()) {
+            return true;
+        }
+        for (WitResource resource : resources) {
+            if (resource.constructor() != null || !resource.statics().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** The interface name without its package or version. */
     String simpleName() {
         return Names.simpleName(name);

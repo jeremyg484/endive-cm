@@ -164,6 +164,9 @@ final class WorldGenerator {
             imports.addMember(bindings.signature(imported, 0));
         }
         for (WitInterface imported : world.importedInterfaces()) {
+            if (!imported.needsHost()) {
+                continue;
+            }
             MethodDeclaration reader = new MethodDeclaration();
             reader.setName(Names.member(imported.simpleName()));
             reader.setType(AstBuilders.type(hostType(imported)));

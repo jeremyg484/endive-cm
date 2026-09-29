@@ -98,7 +98,11 @@ final class InterfaceGenerator {
                             ? guestResourceSource(iface, resource)
                             : hostResourceSource(iface, resource));
         }
-        sources.add(exported ? guestSource(iface) : hostSource(iface));
+        if (exported) {
+            sources.add(guestSource(iface));
+        } else if (iface.needsHost()) {
+            sources.add(hostSource(iface));
+        }
         return sources;
     }
 

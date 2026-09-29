@@ -455,6 +455,9 @@ public interface Host {
 The interface is resolved from `Imports` once at instantiation rather than per call, and wired in with `HostInstance`.
 Function type constants are prefixed by the interface they belong to, so two interfaces may each declare a `tick`.
 
+An interface that leaves the embedder nothing to implement, such as one declaring only the types others `use`, gets no
+`Host` and no accessor. Its instance is still built, so a component can alias its types.
+
 A resource a world exports is implemented by the guest rather than by the host, so the handle runs the other way. It
 becomes an `AutoCloseable` wrapper holding the handle the constructor returned.
 

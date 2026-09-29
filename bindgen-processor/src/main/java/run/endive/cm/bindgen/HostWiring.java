@@ -55,11 +55,13 @@ final class HostWiring {
     void addTo(BlockStmt body, WitInterface imported, String values) {
         Locals locals = new Locals(imported);
 
-        body.addStatement(
-                AstBuilders.declare(
-                        AstBuilders.type(imported.scope().javaPackage() + ".Host"),
-                        locals.host,
-                        AstBuilders.call(new NameExpr("imports"), locals.host)));
+        if (imported.needsHost()) {
+            body.addStatement(
+                    AstBuilders.declare(
+                            AstBuilders.type(imported.scope().javaPackage() + ".Host"),
+                            locals.host,
+                            AstBuilders.call(new NameExpr("imports"), locals.host)));
+        }
         body.addStatement(
                 AstBuilders.declare(
                         unit.use(QualifiedTypes.HOST_INSTANCE, "Builder"),

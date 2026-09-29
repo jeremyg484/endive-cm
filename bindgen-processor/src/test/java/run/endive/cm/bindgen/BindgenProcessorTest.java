@@ -331,9 +331,7 @@ class BindgenProcessorTest {
                 compilation,
                 List.of(
                         "endive.testing.Chain",
-                        "endive.testing.example.chain.base.Host",
                         "endive.testing.example.chain.base.Level",
-                        "endive.testing.example.chain.middle.Host",
                         "endive.testing.example.chain.middle.Note",
                         "endive.testing.example.chain.top.Host"));
         assertThat(compilation)

@@ -39,11 +39,6 @@ public final class UseTypes {
     public interface Imports {
 
         /**
-         * The imported interface {@code example:use-types/types}.
-         */
-        endive.testing.example.usetypes.types.Host types();
-
-        /**
          * The imported interface {@code example:use-types/logging}.
          */
         endive.testing.example.usetypes.logging.Host logging();
@@ -63,7 +58,6 @@ public final class UseTypes {
      */
     public static UseTypes instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
-        endive.testing.example.usetypes.types.Host types = imports.types();
         HostInstance.Builder typesBuilder = HostInstance.builder(store);
         ValType typesLevel = typesBuilder.declareType(Type.of(EnumType.builder().addLabel("debug").addLabel("info").addLabel("warn").addLabel("error").build()));
         typesBuilder.addType("level", typesLevel);
@@ -191,19 +185,6 @@ public final class Entry {
     public String toString() {
         return "Entry{" + "level=" + level + ", code=" + code + "}";
     }
-}
-
-// endive.testing.example.usetypes.types.Host
-
-package endive.testing.example.usetypes.types;
-
-import javax.annotation.processing.Generated;
-
-/**
- * The WIT interface {@code example:use-types/types}, which the embedder implements.
- */
-@Generated("run.endive.cm.bindgen.BindgenProcessor")
-public interface Host {
 }
 
 // endive.testing.example.usetypes.types.Level

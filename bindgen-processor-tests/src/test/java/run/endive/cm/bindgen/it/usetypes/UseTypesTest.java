@@ -81,21 +81,7 @@ public class UseTypesTest {
     }
 
     private static UseTypes instantiate(Recorder recorder) {
-        return UseTypes.instantiate(
-                new ComponentStore(),
-                component,
-                new UseTypes.Imports() {
-                    @Override
-                    public run.endive.cm.bindgen.it.usetypes.example.usetypes.types.Host types() {
-                        return new run.endive.cm.bindgen.it.usetypes.example.usetypes.types
-                                .Host() {};
-                    }
-
-                    @Override
-                    public Host logging() {
-                        return recorder;
-                    }
-                });
+        return UseTypes.instantiate(new ComponentStore(), component, () -> recorder);
     }
 
     /** The host side of {@code example:use-types/logging}. */
