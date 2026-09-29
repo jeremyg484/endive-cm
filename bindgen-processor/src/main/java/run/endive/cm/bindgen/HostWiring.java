@@ -3,10 +3,12 @@ package run.endive.cm.bindgen;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import run.endive.cm.types.DefValType;
 import run.endive.cm.types.Type;
 import run.endive.cm.types.ValType;
@@ -26,6 +28,9 @@ final class HostWiring {
     private final GeneratedUnit unit;
     private final WitTypes types;
     private final FunctionBindings bindings;
+
+    /** Every type local {@code instantiate} declares, so that no two share a name. */
+    private final Set<String> typeLocals = new HashSet<>();
 
     HostWiring(GeneratedUnit unit, FunctionBindings bindings) {
         this.unit = unit;
@@ -128,7 +133,8 @@ final class HostWiring {
      * instance has a type index space of its own. Its definition is numbered by the interface that
      * declared it, so whatever it refers to is declared first, against that interface's space.
      *
-     * @param local the name for the local, or {@code null} to derive one from the declaring scope
+     * @param local the preferred name for the local, or {@code null} to derive one from the
+     *     declaring scope
      */
     private String declare(BlockStmt body, WitScope scope, int index, String local, Locals locals) {
         Map<Integer, String> declared = locals.declaredIn(scope);
@@ -158,11 +164,14 @@ final class HostWiring {
             }
         }
         String name =
-                local != null
-                        ? local
-                        : locals.host
-                                + Names.type(scope.owner())
-                                + Names.type(typeName(scope, scope.at(index), index));
+                Names.free(
+                        local != null
+                                ? local
+                                : locals.host
+                                        + Names.type(scope.owner())
+                                        + Names.type(typeName(scope, scope.at(index), index)),
+                        typeLocals);
+        typeLocals.add(name);
         body.addStatement(
                 AstBuilders.declare(
                         unit.use(QualifiedTypes.VAL_TYPE),

@@ -295,6 +295,35 @@ class BindgenProcessorTest {
                 .contains("withLabel(\"level\").withValType(loggingTypesLevel)");
     }
 
+    /** The local derived for a type a used type names stays clear of the user's own type names. */
+    @Test
+    void aLocalDerivedForAUsedTypeKeepsClearOfTheUsersOwn() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.UsedLocalsHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"used-locals\", inline ="
+                                        + " \"package example:used;\\n"
+                                        + "interface types {\\n"
+                                        + "  enum level { debug, info }\\n"
+                                        + "  record entry { level: level, code: u32 }\\n"
+                                        + "}\\n"
+                                        + "interface logging {\\n"
+                                        + "  use types.{entry};\\n"
+                                        + "  enum types-level { low, high }\\n"
+                                        + "  log: func(e: entry, t: types-level);\\n"
+                                        + "}\\n"
+                                        + "world used-locals {\\n"
+                                        + "  import logging;\\n"
+                                        + "  export go: func();\\n"
+                                        + "}\\n\")\n"
+                                        + "public class UsedLocalsHost {}\n"));
+
+        assertThat(compilation).succeededWithoutWarnings();
+    }
+
     /**
      * A type reached through a chain of uses belongs to the interface at the end of the chain, so
      * only that one generates it.
