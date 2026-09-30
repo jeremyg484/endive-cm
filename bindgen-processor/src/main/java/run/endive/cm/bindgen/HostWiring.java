@@ -6,10 +6,11 @@ import com.github.javaparser.ast.stmt.BlockStmt;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import run.endive.cm.types.BorrowType;
 import run.endive.cm.types.DefValType;
+import run.endive.cm.types.OwnType;
 import run.endive.cm.types.Type;
 import run.endive.cm.types.ValType;
 
@@ -22,9 +23,6 @@ import run.endive.cm.types.ValType;
  */
 final class HostWiring {
 
-    /** The name of the parameter carrying a dropped resource's representation. */
-    private static final String REP = "rep";
-
     private final GeneratedUnit unit;
     private final WitTypes types;
     private final FunctionBindings bindings;
@@ -32,10 +30,15 @@ final class HostWiring {
     /** Every type local {@code instantiate} declares, so that no two share a name. */
     private final Set<String> typeLocals = new HashSet<>();
 
+    /** The local holding each interface's {@code Handles}, by the scope of that interface. */
+    private final Map<WitScope, String> handles = new IdentityHashMap<>();
+
     HostWiring(GeneratedUnit unit, FunctionBindings bindings) {
         this.unit = unit;
         this.types = bindings.types();
         this.bindings = bindings;
+        types.withHandles(
+                scope -> handles.containsKey(scope) ? new NameExpr(handles.get(scope)) : null);
     }
 
     /** The compound types an interface declares, which a host instance has to be told about. */
@@ -76,18 +79,20 @@ final class HostWiring {
                                 "builder",
                                 new NameExpr("store"))));
 
+        declareResources(body, imported, locals);
         declareTypes(body, imported, locals);
+
+        Map<WitFunction, String> hostMethods = InterfaceGenerator.hostMethodNames(imported);
         for (WitResource resource : imported.resources()) {
-            addResource(body, imported, resource, locals);
+            addResourceFunctions(body, resource, hostMethods, locals);
         }
         for (WitFunction function : imported.functions()) {
-            body.addStatement(
-                    AstBuilders.call(
-                            locals.builder(),
-                            "addFunction",
-                            AstBuilders.text(function.name()),
-                            bindings.funcType(function, 0, null, locals.declared),
-                            bindings.importLambda(new NameExpr(locals.host), function, 0)));
+            addFunction(
+                    body,
+                    function.name(),
+                    function,
+                    locals,
+                    bindings.importLambda(new NameExpr(locals.host), function, 0));
         }
         body.addStatement(
                 AstBuilders.call(
@@ -95,6 +100,75 @@ final class HostWiring {
                         "put",
                         AstBuilders.text(imported.name()),
                         AstBuilders.call(locals.builder(), "build")));
+    }
+
+    /**
+     * Declares every resource the interface declares, through the interface's {@code Handles},
+     * and exports each under its WIT name.
+     *
+     * <p>A host instance is matched against the importer structurally rather than index by
+     * index, so its resources are declared ahead of everything else. That way every {@code own}
+     * and {@code borrow} names a resource that already exists, wherever the WIT declared it.
+     */
+    private void declareResources(BlockStmt body, WitInterface imported, Locals locals) {
+        if (imported.resources().isEmpty()) {
+            return;
+        }
+        String javaType = imported.scope().javaPackage() + "." + InterfaceGenerator.HANDLES;
+        String local = Names.free(locals.host + InterfaceGenerator.HANDLES, typeLocals);
+        typeLocals.add(local);
+        body.addStatement(
+                AstBuilders.declare(
+                        AstBuilders.type(javaType),
+                        local,
+                        AstBuilders.construct(AstBuilders.type(javaType), locals.builder())));
+        handles.put(imported.scope(), local);
+
+        for (WitResource resource : imported.resources()) {
+            String handle = Names.free(locals.host + Names.type(resource.name()), typeLocals);
+            typeLocals.add(handle);
+            locals.resources.put(resource.name(), handle);
+            body.addStatement(
+                    AstBuilders.declare(
+                            unit.use(QualifiedTypes.HOST_RESOURCE),
+                            handle,
+                            AstBuilders.call(
+                                    new NameExpr(local),
+                                    Names.resourceTypeGetter(resource.name()))));
+            body.addStatement(
+                    AstBuilders.call(
+                            locals.builder(),
+                            "addResource",
+                            AstBuilders.text(resource.name()),
+                            new NameExpr(handle)));
+        }
+
+        WitScope scope = imported.scope();
+        for (int i = 0; i < scope.size(); i++) {
+            Type slot = scope.at(i);
+            DefValType defined = slot == null ? null : slot.defValType();
+            if (defined instanceof OwnType) {
+                declareHandleType(locals, i, ((OwnType) defined).typeIdx(), "own");
+            } else if (defined instanceof BorrowType) {
+                declareHandleType(locals, i, ((BorrowType) defined).typeIdx(), "borrow");
+            }
+        }
+    }
+
+    /**
+     * Records the {@code own} or {@code borrow} at {@code index} as the one the resource it names
+     * brought with it. One naming a resource used from elsewhere is left undeclared, so a function
+     * naming it is refused.
+     */
+    private void declareHandleType(Locals locals, int index, int resource, String kind) {
+        WitScope scope = locals.scope;
+        if (scope.isUsed(resource)) {
+            return;
+        }
+        String handle = locals.resources.get(scope.nameAt(resource));
+        if (handle != null) {
+            locals.declared.put(index, AstBuilders.call(new NameExpr(handle), kind));
+        }
     }
 
     /**
@@ -112,7 +186,7 @@ final class HostWiring {
                             entry.getKey(),
                             locals.host + Names.type(preferred),
                             locals);
-            locals.declared.put(entry.getKey(), local);
+            locals.declared.put(entry.getKey(), new NameExpr(local));
             String name = scope.nameAt(entry.getKey());
             if (name != null) {
                 body.addStatement(
@@ -137,7 +211,7 @@ final class HostWiring {
      *     declaring scope
      */
     private String declare(BlockStmt body, WitScope scope, int index, String local, Locals locals) {
-        Map<Integer, String> declared = locals.declaredIn(scope);
+        Map<Integer, Expression> declared = locals.declaredIn(scope);
         if (scope.isUsed(index)) {
             String used =
                     declare(
@@ -146,15 +220,12 @@ final class HostWiring {
                             scope.declaringIndex(index),
                             local,
                             locals);
-            declared.put(index, used);
+            declared.put(index, new NameExpr(used));
             return used;
         }
-        String existing = declared.get(index);
-        if (existing == null) {
-            existing = locals.byType.get(scope.at(index));
-        }
+        String existing = locals.byType.get(scope.at(index));
         if (existing != null) {
-            declared.put(index, existing);
+            declared.put(index, new NameExpr(existing));
             return existing;
         }
         DefValType defined = scope.at(index).defValType();
@@ -181,129 +252,62 @@ final class HostWiring {
                                 "declareType",
                                 types.defValType(defined, scope, declared))));
         locals.byType.put(scope.at(index), name);
-        declared.put(index, name);
+        declared.put(index, new NameExpr(name));
         return name;
     }
 
     /**
-     * A handle carries an integer rather than an object, so a table maps one to the other and the
-     * destructor hands the object to {@code drop} before forgetting it.
+     * A constructor and a static are reached on the {@code Host}, and a method on the object its
+     * borrowed receiver stands for. Every handle crossing converts through the interface's
+     * {@code Handles}, so none of them needs wiring of its own.
      */
-    private void addResource(
-            BlockStmt body, WitInterface imported, WitResource resource, Locals locals) {
-        String implementation = imported.scope().javaPackage() + "." + Names.type(resource.name());
-        String table = locals.table(resource);
-        String handle = locals.handle(resource);
-
-        body.addStatement(
-                AstBuilders.declare(
-                        AstBuilders.generic(
-                                unit.use(QualifiedTypes.HOST_RESOURCE_TABLE),
-                                AstBuilders.type(implementation)),
-                        table,
-                        AstBuilders.construct(
-                                AstBuilders.diamond(
-                                        unit.use(QualifiedTypes.HOST_RESOURCE_TABLE)))));
-        Expression destructor =
-                AstBuilders.lambda(
-                        REP,
-                        AstBuilders.call(
-                                new NameExpr(table),
-                                "drop",
-                                new NameExpr(REP),
-                                AstBuilders.methodReference(
-                                        AstBuilders.name(implementation), "drop")));
-        body.addStatement(
-                AstBuilders.declare(
-                        unit.use(QualifiedTypes.HOST_RESOURCE),
-                        handle,
-                        AstBuilders.call(locals.builder(), "declareResource", destructor)));
-        body.addStatement(
-                AstBuilders.call(
-                        locals.builder(),
-                        "addResource",
-                        AstBuilders.text(resource.name()),
-                        new NameExpr(handle)));
-
+    private void addResourceFunctions(
+            BlockStmt body,
+            WitResource resource,
+            Map<WitFunction, String> hostMethods,
+            Locals locals) {
+        Expression host = new NameExpr(locals.host);
         if (resource.constructor() != null) {
-            addConstructor(body, resource, locals);
+            WitFunction constructor = resource.constructor();
+            addFunction(
+                    body,
+                    "[constructor]" + resource.name(),
+                    constructor,
+                    locals,
+                    bindings.importLambda(host, hostMethods.get(constructor), constructor, 0));
         }
         for (WitFunction function : resource.statics()) {
-            addStatic(body, resource, function, locals);
+            addFunction(
+                    body,
+                    "[static]" + resource.name() + "." + function.name(),
+                    function,
+                    locals,
+                    bindings.importLambda(host, hostMethods.get(function), function, 0));
         }
         for (WitFunction method : resource.methods()) {
             Expression receiver =
-                    AstBuilders.call(
-                            new NameExpr(table),
-                            "get",
-                            AstBuilders.cast(
-                                    unit.use(QualifiedTypes.RESOURCE_VALUE), bindings.argument(0)));
-            body.addStatement(
-                    AstBuilders.call(
-                            locals.builder(),
-                            "addFunction",
-                            AstBuilders.text("[method]" + resource.name() + "." + method.name()),
-                            bindings.funcType(
-                                    method,
-                                    1,
-                                    AstBuilders.call(new NameExpr(handle), "borrow"),
-                                    locals.declared),
-                            bindings.importLambda(receiver, method, 1)));
+                    types.fromComponent(
+                            bindings.argument(0),
+                            method.type().params().get(0).valType(),
+                            method.scope());
+            addFunction(
+                    body,
+                    "[method]" + resource.name() + "." + method.name(),
+                    method,
+                    locals,
+                    bindings.importLambda(receiver, method, 1));
         }
     }
 
-    private void addConstructor(BlockStmt body, WitResource resource, Locals locals) {
-        WitFunction constructor = resource.constructor();
+    private void addFunction(
+            BlockStmt body, String name, WitFunction function, Locals locals, Expression lambda) {
         body.addStatement(
                 AstBuilders.call(
                         locals.builder(),
                         "addFunction",
-                        AstBuilders.text("[constructor]" + resource.name()),
-                        bindings.funcType(
-                                constructor,
-                                0,
-                                AstBuilders.call(new NameExpr(locals.handle(resource)), "own"),
-                                locals.declared),
-                        minting(resource, constructor, Names.member(resource.name()), locals)));
-    }
-
-    /**
-     * A static function takes no receiver, so what it hands back is what decides its shape. One
-     * returning an {@code own} handle to its own resource mints it the way a constructor does, and
-     * one returning an ordinary value is wired like any other imported function.
-     */
-    private void addStatic(
-            BlockStmt body, WitResource resource, WitFunction function, Locals locals) {
-        String javaName = Names.qualifiedMember(resource.name(), function.name());
-        boolean owns = resource.returnsOwnHandle(function);
-        Expression result =
-                owns ? AstBuilders.call(new NameExpr(locals.handle(resource)), "own") : null;
-        Expression implementation =
-                owns
-                        ? minting(resource, function, javaName, locals)
-                        : bindings.importLambda(new NameExpr(locals.host), javaName, function, 0);
-        body.addStatement(
-                AstBuilders.call(
-                        locals.builder(),
-                        "addFunction",
-                        AstBuilders.text("[static]" + resource.name() + "." + function.name()),
-                        bindings.funcType(function, 0, result, locals.declared),
-                        implementation));
-    }
-
-    /** The lambda putting what the embedder made into the table and handing back a handle to it. */
-    private Expression minting(
-            WitResource resource, WitFunction function, String javaName, Locals locals) {
-        Expression made =
-                AstBuilders.call(
-                        new NameExpr(locals.host), javaName, bindings.lambdaArguments(function, 0));
-        Expression owned =
-                AstBuilders.call(
-                        unit.useName(QualifiedTypes.RESOURCE_VALUE),
-                        "owned",
-                        AstBuilders.call(new NameExpr(locals.handle(resource)), "type"),
-                        AstBuilders.call(new NameExpr(locals.table(resource)), "add", made));
-        return bindings.lambda(AstBuilders.objects(List.of(owned)));
+                        AstBuilders.text(name),
+                        bindings.funcType(function, locals.declared),
+                        lambda));
     }
 
     private static boolean isCompound(Type type) {
@@ -331,10 +335,13 @@ final class HostWiring {
         private final String host;
         private final String builder;
         private final WitScope scope;
-        private final Map<Integer, String> declared = new LinkedHashMap<>();
+        private final Map<Integer, Expression> declared = new LinkedHashMap<>();
+
+        /** The local holding each resource the interface declares, by its WIT name. */
+        private final Map<String, String> resources = new LinkedHashMap<>();
 
         /** What types used from other interfaces were declared as, by the scope declaring them. */
-        private final Map<WitScope, Map<Integer, String>> elsewhere = new IdentityHashMap<>();
+        private final Map<WitScope, Map<Integer, Expression>> elsewhere = new IdentityHashMap<>();
 
         /** One local per type, however many indices name it. */
         private final Map<Type, String> byType = new IdentityHashMap<>();
@@ -345,8 +352,8 @@ final class HostWiring {
             this.scope = imported.scope();
         }
 
-        /** The locals holding the types {@code declaring} numbers, keyed by its indices. */
-        Map<Integer, String> declaredIn(WitScope declaring) {
+        /** The types {@code declaring} numbers, as what declared them, keyed by its indices. */
+        Map<Integer, Expression> declaredIn(WitScope declaring) {
             return declaring == scope
                     ? declared
                     : elsewhere.computeIfAbsent(declaring, s -> new LinkedHashMap<>());
@@ -354,14 +361,6 @@ final class HostWiring {
 
         Expression builder() {
             return new NameExpr(builder);
-        }
-
-        String table(WitResource resource) {
-            return handle(resource) + "Table";
-        }
-
-        String handle(WitResource resource) {
-            return host + Names.type(resource.name());
         }
     }
 }

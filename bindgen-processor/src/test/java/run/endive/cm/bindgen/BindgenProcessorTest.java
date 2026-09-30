@@ -546,9 +546,9 @@ class BindgenProcessorTest {
         assertThat(compilation).hadErrorContaining("is named after the variant itself");
     }
 
-    /** A handle to another resource has no Java type to name, so a static returning one is refused. */
+    /** A handle converts through its interface's {@code Handles}, whichever resource returns it. */
     @Test
-    void aStaticReturningAnotherResourcesHandleIsReported() {
+    void aStaticMayReturnAnotherResourcesHandle() {
         Compilation compilation =
                 compile(
                         JavaFileObjects.forSourceString(
@@ -565,8 +565,87 @@ class BindgenProcessorTest {
                                         + "}\\n\")\n"
                                         + "public class OtherHandleHost {}\n"));
 
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.t.t.i.Host")
+                .contentsAsUtf8String()
+                .contains("A bMake();");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.W")
+                .contentsAsUtf8String()
+                .contains("iHandles.ownA(i.bMake())");
+    }
+
+    /** The guest side reaches no {@code Handles}, so a handle crossing there is still refused. */
+    @Test
+    void anExportedStaticReturningAnotherResourcesHandleIsReported() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.ExportedHandleHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"w\", inline = \"package t:t;\\n"
+                                        + "interface i {\\n"
+                                        + "  resource a { constructor(); }\\n"
+                                        + "  resource b { make: static func() -> a; }\\n"
+                                        + "}\\n"
+                                        + "world w {\\n"
+                                        + "  export i;\\n"
+                                        + "}\\n\")\n"
+                                        + "public class ExportedHandleHost {}\n"));
+
         assertThat(compilation).failed();
         assertThat(compilation).hadErrorContaining("own is not yet supported");
+    }
+
+    /** An owned handle handed to the host would leave its table entry behind, so it is refused. */
+    @Test
+    void anOwnedHandleHandedToTheHostIsReported() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.OwnedArgumentHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"w\", inline = \"package t:t;\\n"
+                                        + "interface i {\\n"
+                                        + "  resource a {}\\n"
+                                        + "  close: func(a: a);\\n"
+                                        + "}\\n"
+                                        + "world w {\\n"
+                                        + "  import i;\\n"
+                                        + "}\\n\")\n"
+                                        + "public class OwnedArgumentHost {}\n"));
+
+        assertThat(compilation).failed();
+        assertThat(compilation)
+                .hadErrorContaining("an owned handle handed to the host is not yet supported");
+    }
+
+    /** {@code Handles} is generated beside the interface's own types, so one named alike clashes. */
+    @Test
+    void aTypeNamedLikeTheGeneratedHandlesIsReported() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.HandlesClashHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"w\", inline = \"package t:t;\\n"
+                                        + "interface i {\\n"
+                                        + "  resource a { constructor(); }\\n"
+                                        + "  record handles { count: u32 }\\n"
+                                        + "  count: func(h: handles) -> u32;\\n"
+                                        + "}\\n"
+                                        + "world w {\\n"
+                                        + "  import i;\\n"
+                                        + "}\\n\")\n"
+                                        + "public class HandlesClashHost {}\n"));
+
+        assertThat(compilation).failed();
+        assertThat(compilation)
+                .hadErrorContaining("would collide with the generated Handles class");
     }
 
     /**

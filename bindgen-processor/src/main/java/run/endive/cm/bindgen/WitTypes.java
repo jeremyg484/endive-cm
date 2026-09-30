@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import run.endive.cm.types.BorrowType;
 import run.endive.cm.types.Case;
 import run.endive.cm.types.DefValType;
 import run.endive.cm.types.EnumType;
@@ -16,6 +18,7 @@ import run.endive.cm.types.FlagsType;
 import run.endive.cm.types.LabelValType;
 import run.endive.cm.types.ListType;
 import run.endive.cm.types.OptionType;
+import run.endive.cm.types.OwnType;
 import run.endive.cm.types.RecordType;
 import run.endive.cm.types.ResultType;
 import run.endive.cm.types.TupleType;
@@ -49,8 +52,22 @@ final class WitTypes {
     /** What the scope holding the conversion being written already names. */
     private Set<String> taken = Set.of();
 
+    /** Reaches the {@code Handles} of the interface a scope belongs to, or {@code null}. */
+    private Function<WitScope, Expression> handles = scope -> null;
+
     WitTypes(GeneratedUnit unit) {
         this.unit = unit;
+    }
+
+    /**
+     * Names where the {@code Handles} of each interface can be reached, which is what converts a
+     * resource handle. A conversion with no {@code Handles} in reach refuses a handle.
+     *
+     * @param handles gives the expression reaching the {@code Handles} of the interface owning a
+     *     scope, or {@code null} when none is in reach
+     */
+    void withHandles(Function<WitScope, Expression> handles) {
+        this.handles = handles;
     }
 
     /** The Java type carrying values of {@code valType}. */
@@ -80,6 +97,9 @@ final class WitTypes {
                 }
                 return AstBuilders.generic(
                         unit.use(tupleClass(elements.size())), elements.toArray(new Type[0]));
+            case OWN:
+            case BORROW:
+                return AstBuilders.type(resourceJavaType(defined, inner));
             case RESULT:
                 throw resultOutOfPlace();
             default:
@@ -215,6 +235,8 @@ final class WitTypes {
             case VARIANT:
             case OPTION:
             case RECORD:
+            case OWN:
+            case BORROW:
                 return true;
             default:
                 return false;
@@ -281,6 +303,13 @@ final class WitTypes {
                                 inner,
                                 depth + 1),
                         depth);
+            case OWN:
+                return AstBuilders.call(
+                        handlesOf(defined, inner),
+                        Names.ownHandle(resourceName(defined, inner)),
+                        value);
+            case BORROW:
+                throw unsupported("a borrowed handle handed to the guest");
             default:
                 return AstBuilders.call(value, "toComponent");
         }
@@ -313,6 +342,15 @@ final class WitTypes {
                     return liftOption(value, (OptionType) defined, inner, depth);
                 case LIST:
                     return liftElements(value, ((ListType) defined).elementType(), inner, depth);
+                case BORROW:
+                    return AstBuilders.call(
+                            handlesOf(defined, inner),
+                            Names.handleGetter(resourceName(defined, inner)),
+                            AstBuilders.cast(unit.use(QualifiedTypes.RESOURCE_VALUE), value));
+                case OWN:
+                    // Checked first, so a handle with no Handles in reach reads as such.
+                    handlesOf(defined, inner);
+                    throw unsupported("an owned handle handed to the host");
                 default:
                     return AstBuilders.call(
                             AstBuilders.name(nominalJavaType(scope, valType.typeIdx())),
@@ -457,7 +495,7 @@ final class WitTypes {
      * Rebuilds {@code valType}, either as a primitive written inline or as the local holding a
      * compound type that was declared already.
      */
-    Expression valType(ValType valType, WitScope scope, Map<Integer, String> declared) {
+    Expression valType(ValType valType, WitScope scope, Map<Integer, Expression> declared) {
         if (valType.primValType() != null) {
             Expression kind =
                     AstBuilders.field(
@@ -466,15 +504,15 @@ final class WitTypes {
             Expression builder = AstBuilders.call(unit.useName(QualifiedTypes.VAL_TYPE), "builder");
             return AstBuilders.call(AstBuilders.call(builder, "withPrimValType", kind), "build");
         }
-        String local = declared.get(valType.typeIdx());
+        Expression local = declared.get(valType.typeIdx());
         if (local == null) {
             throw undeclared(scope, valType.typeIdx());
         }
-        return AstBuilders.name(local);
+        return local.clone();
     }
 
     /** Rebuilds a compound type for declaring it into a host instance. */
-    Expression defValType(DefValType defined, WitScope scope, Map<Integer, String> declared) {
+    Expression defValType(DefValType defined, WitScope scope, Map<Integer, Expression> declared) {
         switch (defined.kind()) {
             case LIST:
                 ListType list = (ListType) defined;
@@ -651,7 +689,8 @@ final class WitTypes {
     }
 
     /** Rebuilds one case of a variant, whose payload type is written only when it has one. */
-    private Expression caseOf(Case declaredCase, WitScope scope, Map<Integer, String> declared) {
+    private Expression caseOf(
+            Case declaredCase, WitScope scope, Map<Integer, Expression> declared) {
         Expression builder = AstBuilders.call(unit.useName(QualifiedTypes.CASE), "builder");
         builder = AstBuilders.call(builder, "withLabel", AstBuilders.text(declaredCase.label()));
         if (declaredCase.hasValType()) {
@@ -670,6 +709,42 @@ final class WitTypes {
 
     private Expression instanceOf(String descriptor) {
         return AstBuilders.call(unit.useName(descriptor), "instance");
+    }
+
+    /**
+     * The {@code Handles} converting a handle to the resource {@code handle} names, which belongs
+     * to the interface declaring that resource.
+     */
+    private Expression handlesOf(DefValType handle, WitScope scope) {
+        int resource = resourceIndex(handle);
+        Expression reached = handles.apply(scope.declaringScope(resource));
+        if (reached == null) {
+            throw unsupported(handle.kind().name());
+        }
+        return reached;
+    }
+
+    /** The interface type the embedder implements for the resource {@code handle} names. */
+    private String resourceJavaType(DefValType handle, WitScope scope) {
+        return qualify(
+                scope.declaringScope(resourceIndex(handle)),
+                Names.type(resourceName(handle, scope)));
+    }
+
+    /** The WIT name of the resource an {@code own} or a {@code borrow} names. */
+    private static String resourceName(DefValType handle, WitScope scope) {
+        int resource = resourceIndex(handle);
+        String name = scope.declaringScope(resource).nameAt(scope.declaringIndex(resource));
+        if (name == null) {
+            throw unsupported("an unnamed resource");
+        }
+        return name;
+    }
+
+    private static int resourceIndex(DefValType handle) {
+        return handle instanceof OwnType
+                ? ((OwnType) handle).typeIdx()
+                : ((BorrowType) handle).typeIdx();
     }
 
     /**

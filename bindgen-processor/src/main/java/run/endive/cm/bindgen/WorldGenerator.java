@@ -101,7 +101,7 @@ final class WorldGenerator {
             type.addFieldWithInitializer(
                     unit.use(QualifiedTypes.FUNC_TYPE),
                     constantName(imported.name()),
-                    bindings.funcType(imported, 0, null, Map.of()),
+                    bindings.funcType(imported, Map.of()),
                     Modifier.Keyword.PRIVATE,
                     Modifier.Keyword.STATIC,
                     Modifier.Keyword.FINAL);

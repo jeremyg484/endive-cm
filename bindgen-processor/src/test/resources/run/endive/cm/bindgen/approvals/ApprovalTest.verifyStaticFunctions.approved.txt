@@ -12,7 +12,6 @@ import run.endive.cm.runtime.ComponentLinker;
 import run.endive.cm.runtime.ComponentStore;
 import run.endive.cm.runtime.HostInstance;
 import run.endive.cm.runtime.HostResource;
-import run.endive.cm.runtime.HostResourceTable;
 import run.endive.cm.runtime.PrimitiveHostTypeDescriptor;
 import run.endive.cm.types.FuncType;
 import run.endive.cm.types.LabelValType;
@@ -56,13 +55,13 @@ public final class StaticFunctions {
         Map<String, Object> values = new LinkedHashMap<>();
         endive.testing.example.staticfunctions.hostcounters.Host hostCounters = imports.hostCounters();
         HostInstance.Builder hostCountersBuilder = HostInstance.builder(store);
-        HostResourceTable<endive.testing.example.staticfunctions.hostcounters.Counter> hostCountersCounterTable = new HostResourceTable<>();
-        HostResource hostCountersCounter = hostCountersBuilder.declareResource(rep -> hostCountersCounterTable.drop(rep, endive.testing.example.staticfunctions.hostcounters.Counter::drop));
+        endive.testing.example.staticfunctions.hostcounters.Handles hostCountersHandles = new endive.testing.example.staticfunctions.hostcounters.Handles(hostCountersBuilder);
+        HostResource hostCountersCounter = hostCountersHandles.counterResourceType();
         hostCountersBuilder.addResource("counter", hostCountersCounter);
-        hostCountersBuilder.addFunction("[constructor]counter", FuncType.builder().addParam(LabelValType.builder().withLabel("start").withValType(ValType.builder().withPrimValType(PrimValType.U32).build()).build()).withResult(hostCountersCounter.own()).build(), args -> new Object[] { ResourceValue.owned(hostCountersCounter.type(), hostCountersCounterTable.add(hostCounters.counter((Long) args[0]))) });
-        hostCountersBuilder.addFunction("[static]counter.open", FuncType.builder().addParam(LabelValType.builder().withLabel("start").withValType(ValType.builder().withPrimValType(PrimValType.U32).build()).build()).withResult(hostCountersCounter.own()).build(), args -> new Object[] { ResourceValue.owned(hostCountersCounter.type(), hostCountersCounterTable.add(hostCounters.counterOpen((Long) args[0]))) });
+        hostCountersBuilder.addFunction("[constructor]counter", FuncType.builder().addParam(LabelValType.builder().withLabel("start").withValType(ValType.builder().withPrimValType(PrimValType.U32).build()).build()).withResult(hostCountersCounter.own()).build(), args -> new Object[] { hostCountersHandles.ownCounter(hostCounters.counter((Long) args[0])) });
+        hostCountersBuilder.addFunction("[static]counter.open", FuncType.builder().addParam(LabelValType.builder().withLabel("start").withValType(ValType.builder().withPrimValType(PrimValType.U32).build()).build()).withResult(hostCountersCounter.own()).build(), args -> new Object[] { hostCountersHandles.ownCounter(hostCounters.counterOpen((Long) args[0])) });
         hostCountersBuilder.addFunction("[static]counter.made", FuncType.builder().withResult(ValType.builder().withPrimValType(PrimValType.U32).build()).build(), args -> new Object[] { hostCounters.counterMade() });
-        hostCountersBuilder.addFunction("[method]counter.get", FuncType.builder().addParam(LabelValType.builder().withLabel("self").withValType(hostCountersCounter.borrow()).build()).withResult(ValType.builder().withPrimValType(PrimValType.U32).build()).build(), args -> new Object[] { hostCountersCounterTable.get((ResourceValue) args[0]).get() });
+        hostCountersBuilder.addFunction("[method]counter.get", FuncType.builder().addParam(LabelValType.builder().withLabel("self").withValType(hostCountersCounter.borrow()).build()).withResult(ValType.builder().withPrimValType(PrimValType.U32).build()).build(), args -> new Object[] { hostCountersHandles.getCounter((ResourceValue) args[0]).get() });
         values.put("example:static-functions/host-counters", hostCountersBuilder.build());
         return new StaticFunctions(ComponentLinker.builder().build().instantiate(store, component, values));
     }
@@ -104,6 +103,55 @@ public interface Counter {
      * Called when the guest drops an owned handle to this resource.
      */
     default void drop() {
+    }
+}
+
+// endive.testing.example.staticfunctions.hostcounters.Handles
+
+package endive.testing.example.staticfunctions.hostcounters;
+
+import javax.annotation.processing.Generated;
+import run.endive.cm.abi.ResourceValue;
+import run.endive.cm.runtime.HostInstance;
+import run.endive.cm.runtime.HostResource;
+import run.endive.cm.runtime.HostResourceTable;
+
+/**
+ * The resources {@code example:static-functions/host-counters} declares, and the objects the handles to them stand for.
+ */
+@Generated("run.endive.cm.bindgen.BindgenProcessor")
+public final class Handles {
+
+    private final HostResource counter;
+
+    private final HostResourceTable<Counter> counterTable = new HostResourceTable<>();
+
+    /**
+     * Declares each resource into {@code builder}.
+     */
+    public Handles(HostInstance.Builder builder) {
+        this.counter = builder.declareResource(rep -> counterTable.drop(rep, Counter::drop));
+    }
+
+    /**
+     * The resource type {@code counter}, with its {@code own} and {@code borrow}.
+     */
+    public HostResource counterResourceType() {
+        return counter;
+    }
+
+    /**
+     * Hands {@code value} over as a new owned handle to {@code counter}.
+     */
+    public ResourceValue ownCounter(Counter value) {
+        return ResourceValue.owned(counter.type(), counterTable.add(value));
+    }
+
+    /**
+     * The {@code counter} a handle stands for.
+     */
+    public Counter getCounter(ResourceValue handle) {
+        return counterTable.get(handle);
     }
 }
 

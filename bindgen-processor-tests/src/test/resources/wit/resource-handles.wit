@@ -1,0 +1,29 @@
+package example:resource-handles;
+
+interface streams {
+    resource pollable {
+        ready: func() -> bool;
+    }
+
+    resource input-stream {
+        /// A pollable that is ready once the stream has bytes to read.
+        subscribe: func() -> pollable;
+    }
+
+    resource output-stream {
+        /// Moves up to len bytes from src into this stream, answering how many moved.
+        splice: func(src: borrow<input-stream>, len: u64) -> u64;
+    }
+
+    open-input: func() -> input-stream;
+    open-output: func() -> output-stream;
+
+    /// The indices of the pollables given that are ready.
+    poll: func(in: list<borrow<pollable>>) -> list<u32>;
+}
+
+world resource-handles {
+    import streams;
+
+    export run: func() -> u64;
+}

@@ -63,6 +63,9 @@ final class InterfaceGenerator {
     /** The name a variant case gives the payload it carries, since a WIT case payload has none. */
     private static final String VALUE = "value";
 
+    /** The class an imported interface declaring resources converts every handle through. */
+    static final String HANDLES = "Handles";
+
     private final String generatedBy;
 
     InterfaceGenerator(String generatedBy) {
@@ -92,6 +95,9 @@ final class InterfaceGenerator {
             }
         }
         sources.addAll(exceptionSources(iface));
+        if (!exported && !iface.resources().isEmpty()) {
+            sources.add(handlesSource(iface));
+        }
         for (WitResource resource : iface.resources()) {
             sources.add(
                     exported
@@ -1045,15 +1051,13 @@ final class InterfaceGenerator {
                 MethodDeclaration factory =
                         hostSignature(
                                 bindings,
-                                resource,
                                 resource.constructor(),
                                 methods.get(resource.constructor()));
                 factory.setJavadocComment("Makes a {@code " + resource.name() + "}.");
                 type.addMember(factory);
             }
             for (WitFunction function : resource.statics()) {
-                MethodDeclaration method =
-                        hostSignature(bindings, resource, function, methods.get(function));
+                MethodDeclaration method = hostSignature(bindings, function, methods.get(function));
                 method.setJavadocComment(
                         "The static {@code " + resource.name() + "." + function.name() + "}.");
                 type.addMember(method);
@@ -1064,19 +1068,161 @@ final class InterfaceGenerator {
 
     /**
      * One signature on a {@code Host}, named by the caller because neither a constructor nor a
-     * static is called what its own WIT name says. A returned handle is named by hand too, since
-     * an {@code own} has no Java type of its own.
+     * static is called what its own WIT name says.
      */
     private MethodDeclaration hostSignature(
-            FunctionBindings bindings, WitResource resource, WitFunction function, String name) {
-        if (!resource.returnsOwnHandle(function)) {
-            return bindings.signature(function, 0).setName(name);
+            FunctionBindings bindings, WitFunction function, String name) {
+        return bindings.signature(function, 0).setName(name);
+    }
+
+    /**
+     * The resources an imported interface declares, together with the objects the handles to them
+     * stand for.
+     *
+     * <p>A handle carries an integer rather than an object, so a table per resource maps one to the
+     * other, and the destructor hands the object to {@code drop} before forgetting it. Every
+     * handle crossing the boundary converts through here, whichever function it crosses on.
+     */
+    private GeneratedUnit handlesSource(WitInterface iface) {
+        requireNoHandlesClash(iface);
+        GeneratedUnit unit = unitFor(iface);
+
+        ClassOrInterfaceDeclaration type = unit.addClass(HANDLES);
+        type.setJavadocComment(
+                "The resources {@code "
+                        + iface.name()
+                        + "} declares, and the objects the handles to them stand for.");
+
+        Set<String> taken = new HashSet<>();
+        for (WitResource resource : iface.resources()) {
+            taken.add(Names.member(resource.name()));
         }
-        MethodDeclaration method = new MethodDeclaration();
-        method.setName(name);
-        method.setType(AstBuilders.type(Names.type(resource.name())));
-        method.removeBody();
-        return bindings.addParameters(method, function, 0);
+        Map<WitResource, String> tables = new IdentityHashMap<>();
+        for (WitResource resource : iface.resources()) {
+            String table = Names.free(Names.member(resource.name()) + "Table", taken);
+            taken.add(table);
+            tables.put(resource, table);
+        }
+
+        for (WitResource resource : iface.resources()) {
+            type.addField(
+                    unit.use(QualifiedTypes.HOST_RESOURCE),
+                    Names.member(resource.name()),
+                    Modifier.Keyword.PRIVATE,
+                    Modifier.Keyword.FINAL);
+            type.addFieldWithInitializer(
+                    AstBuilders.generic(
+                            unit.use(QualifiedTypes.HOST_RESOURCE_TABLE),
+                            AstBuilders.type(Names.type(resource.name()))),
+                    tables.get(resource),
+                    AstBuilders.construct(
+                            AstBuilders.diamond(unit.use(QualifiedTypes.HOST_RESOURCE_TABLE))),
+                    Modifier.Keyword.PRIVATE,
+                    Modifier.Keyword.FINAL);
+        }
+
+        String builder = Names.free("builder", taken);
+        ConstructorDeclaration constructor = type.addConstructor(Modifier.Keyword.PUBLIC);
+        constructor.addParameter(unit.use(QualifiedTypes.HOST_INSTANCE, "Builder"), builder);
+        constructor.setJavadocComment("Declares each resource into {@code " + builder + "}.");
+        for (WitResource resource : iface.resources()) {
+            Expression destructor =
+                    AstBuilders.lambda(
+                            "rep",
+                            AstBuilders.call(
+                                    new NameExpr(tables.get(resource)),
+                                    "drop",
+                                    new NameExpr("rep"),
+                                    AstBuilders.methodReference(
+                                            AstBuilders.name(Names.type(resource.name())),
+                                            "drop")));
+            constructor
+                    .getBody()
+                    .addStatement(
+                            AstBuilders.assign(
+                                    AstBuilders.thisField(Names.member(resource.name())),
+                                    AstBuilders.call(
+                                            new NameExpr(builder), "declareResource", destructor)));
+        }
+
+        for (WitResource resource : iface.resources()) {
+            addHandleMethods(unit, type, resource, tables.get(resource));
+        }
+        return unit;
+    }
+
+    /**
+     * The resource type, and the two conversions every handle to it goes through, one minting an
+     * owned handle and one finding what a handle stands for.
+     */
+    private void addHandleMethods(
+            GeneratedUnit unit,
+            ClassOrInterfaceDeclaration type,
+            WitResource resource,
+            String table) {
+        ClassOrInterfaceType implementation = AstBuilders.type(Names.type(resource.name()));
+        String field = Names.member(resource.name());
+
+        type.addMethod(Names.resourceTypeGetter(resource.name()), Modifier.Keyword.PUBLIC)
+                .setType(unit.use(QualifiedTypes.HOST_RESOURCE))
+                .setBody(returning(new NameExpr(field)))
+                .setJavadocComment(
+                        "The resource type {@code "
+                                + resource.name()
+                                + "}, with its {@code own} and {@code borrow}.");
+
+        MethodDeclaration own =
+                type.addMethod(Names.ownHandle(resource.name()), Modifier.Keyword.PUBLIC)
+                        .setType(unit.use(QualifiedTypes.RESOURCE_VALUE));
+        own.addParameter(implementation, VALUE);
+        own.setBody(
+                returning(
+                        AstBuilders.call(
+                                unit.useName(QualifiedTypes.RESOURCE_VALUE),
+                                "owned",
+                                AstBuilders.call(new NameExpr(field), "type"),
+                                AstBuilders.call(
+                                        new NameExpr(table), "add", new NameExpr(VALUE)))));
+        own.setJavadocComment(
+                "Hands {@code value} over as a new owned handle to {@code "
+                        + resource.name()
+                        + "}.");
+
+        MethodDeclaration target =
+                type.addMethod(Names.handleGetter(resource.name()), Modifier.Keyword.PUBLIC)
+                        .setType(implementation);
+        target.addParameter(unit.use(QualifiedTypes.RESOURCE_VALUE), "handle");
+        target.setBody(
+                returning(AstBuilders.call(new NameExpr(table), "get", new NameExpr("handle"))));
+        target.setJavadocComment("The {@code " + resource.name() + "} a handle stands for.");
+    }
+
+    /** A WIT type whose Java name would be {@code Handles} is refused, since that name is taken. */
+    private static void requireNoHandlesClash(WitInterface iface) {
+        for (WitType declared : iface.types()) {
+            if (Names.type(declared.name()).equals(HANDLES)) {
+                throw new BindgenException(
+                        "type \""
+                                + declared.name()
+                                + "\" in \""
+                                + iface.name()
+                                + "\" would collide with the generated "
+                                + HANDLES
+                                + " class");
+            }
+        }
+        for (WitResource resource : iface.resources()) {
+            if (Names.type(resource.name()).equals(HANDLES)) {
+                throw new BindgenException(
+                        "resource \""
+                                + resource.name()
+                                + "\" in \""
+                                + iface.name()
+                                + "\" would collide with the generated "
+                                + HANDLES
+                                + " class");
+            }
+        }
     }
 
     /** A resource an imported interface declares, which the embedder implements. */
@@ -1358,6 +1504,11 @@ final class InterfaceGenerator {
         bindings.addParameters(factory, function, 0);
         factory.setBody(body);
         return factory;
+    }
+
+    /** The Java method each resource constructor and static is reached through on a {@code Host}. */
+    static Map<WitFunction, String> hostMethodNames(WitInterface iface) {
+        return ResourceFields.methodNames(iface);
     }
 
     private GeneratedUnit unitFor(WitInterface iface) {

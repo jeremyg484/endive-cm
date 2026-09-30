@@ -311,26 +311,17 @@ final class FunctionBindings {
     /**
      * Rebuilds {@code function}'s type, for declaring it into a host instance.
      *
-     * @param leading the type of a receiver or of a returned handle, neither of which the
-     *     function's own type can name
-     * @param declared the locals holding the compound types the enclosing instance declared
+     * @param declared what the enclosing instance declared each type as, by index, which covers
+     *     the {@code own} and {@code borrow} of a resource as well as its compound types
      */
-    Expression funcType(
-            WitFunction function, int skip, Expression leading, Map<Integer, String> declared) {
+    Expression funcType(WitFunction function, Map<Integer, Expression> declared) {
         FuncType type = function.type();
         Expression builder = AstBuilders.call(unit.useName(QualifiedTypes.FUNC_TYPE), "builder");
-        if (skip > 0) {
-            builder =
-                    AstBuilders.call(
-                            builder, "addParam", param(type.params().get(0).label(), leading));
-        }
-        for (LabelValType param : parameters(function, skip)) {
+        for (LabelValType param : type.params()) {
             Expression valType = types.valType(param.valType(), function.scope(), declared);
             builder = AstBuilders.call(builder, "addParam", param(param.label(), valType));
         }
-        if (skip == 0 && leading != null) {
-            builder = AstBuilders.call(builder, "withResult", leading);
-        } else if (type.hasResult()) {
+        if (type.hasResult()) {
             builder =
                     AstBuilders.call(
                             builder,

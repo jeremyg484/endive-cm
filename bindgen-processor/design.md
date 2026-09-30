@@ -525,9 +525,26 @@ public interface File {
 ```
 
 A method's borrowed receiver is what Java carries as `this`, so it is dropped from the signature. A handle carries an
-integer rather than an object, so the bindings keep a `HostResourceTable` per resource type mapping one to the other,
-and the generated destructor hands the object to `drop` before forgetting it. `drop` is a default method, so observing
-a drop is optional rather than forced on every embedder.
+integer rather than an object, so an imported interface declaring resources also generates a `Handles` class holding a
+`HostResourceTable` per resource, mapping one to the other. Its generated destructor hands the object to `drop` before
+forgetting it. `drop` is a default method, so observing a drop is optional rather than forced on every embedder.
+
+```java
+// <base>.example.resources.types.Handles
+public final class Handles {
+    public Handles(HostInstance.Builder builder);
+
+    public HostResource fileResourceType();
+    public ResourceValue ownFile(File value);
+    public File getFile(ResourceValue handle);
+}
+```
+
+Every handle crossing the boundary converts through it, wherever it appears. An `own` the host hands over is minted by
+`ownFile`, and a `borrow` the guest hands over is looked up by `getFile`, so a constructor, a static, a method returning
+another resource's handle, a borrowed argument that is not the receiver and a list of borrows are all one case. An
+`own` the guest hands to the host is refused, because the host would then own a representation its table still holds
+and nothing would ever drop.
 
 A resource may also carry `static` functions, which reach it without a receiver, so there is no borrowed first
 parameter to drop. What a static hands back is what decides its shape, and that is read off its declared result rather
@@ -553,9 +570,11 @@ The `Guest` field holding a narrowed resource function is named the same way, wh
 `[static]file.file` both want the first spelling.
 
 An interface declaring a resource is built through a local rather than in one chained expression, because a resource
-has to be declared before anything names it. That is also why its constructor and method types are built inside
-`instantiate` rather than held as constants. `own` and `borrow` name the resource by index, and the index is only known
-once `declareResource` has run.
+has to be declared before anything names it. That is also why its function types are built inside `instantiate`
+rather than held as constants. A host instance is matched against its importer structurally rather than index by
+index, so `Handles` declares every resource ahead of the interface's other types. Each `own` and `borrow` then names a
+resource that exists already, even where the WIT declares a type naming a handle before the resource itself, as
+`wasi:io/poll` does with `list<borrow<pollable>>`.
 
 An interface may also declare a `list`, an `enum` or a `flags`. A list is carried by `java.util.List` of whatever
 carries its element, so `list<u8>` arrives as `List<Short>`. An enum becomes a Java enum carrying the label the ABI
@@ -612,8 +631,9 @@ declaration order, accessors named after the fields, and `equals`, `hashCode` an
 as a map keyed by field label, so it converts at the boundary and `toComponent` writes every field, because
 `CanonicalAbi.storeRecord` reads each by label and a label the map leaves out is stored as a null field rather than
 reported. A field naming another record converts through that record's own pair, since the encoding orders a
-definition before whatever uses it. Three things a record cannot yet carry are refused by name: a resource handle,
-whose type is declared into the instance only after its value types, and any field of a kind the generator does not yet read.
+definition before whatever uses it. Two things a record cannot yet carry are refused by name: a resource handle, whose
+conversion needs a `Handles` that the record's own `toComponent` cannot reach, and any field of a kind the generator
+does not yet read.
 
 An interface may also declare a `result`, which becomes control flow rather than a value. The ok payload is the Java
 return value and the error case is a generated unchecked exception carrying the error payload, so `parse: func(text:
@@ -658,8 +678,8 @@ The WIT under `src/test/resources/wit` in `bindgen-processor` is the bindgen! ex
 That is what the approved files are generated from, so a difference from the example is visible rather than assumed.
 
 All seven of the non-async example worlds are present. A world covering a WIT feature no example declares is written
-for the purpose and named after it, such as `record-types`, `result-types` or `use-types`, and each such fixture says
-so at the top.
+for the purpose and named after it, such as `record-types`, `result-types`, `use-types` or `resource-handles`, and each
+such fixture says so at the top.
 
 The end-to-end fixtures use the same WIT, with one exception that has to be stated wherever it appears. A world that
 imports without exporting cannot be driven, since nothing enters the guest, so `with-imports`,
@@ -740,12 +760,14 @@ Nothing here is started. Each item says what it is and what makes it awkward, so
 `WorldReader` and `WitTypes` reject what they cannot read, by name, rather than guessing. Everything below fails that
 way today, which means adding one is a matter of finding its rejection and replacing it.
 
-- **A resource handle anywhere but a receiver or a constructor's result.** A method's `self` and what a constructor,
-  or a static returning its own resource, hands back are wired. An `own` or `borrow` as any other parameter or result,
-  including one returning another resource's handle, fails as `own is not yet supported`, and a record field holding
-  one is refused where the record is declared. Converting one needs the resource's `HostResourceTable` and
-  `HostResource`, which are locals of `instantiate`, so a generated type carrying a handle has no way to reach them
-  from its own `toComponent` and `fromComponent`.
+- **A resource handle inside a generated type.** A handle in an imported function's signature converts through the
+  interface's `Handles`, which is a local of `instantiate`. A record, a variant or a result's exception converts in its
+  own `toComponent` and `fromComponent`, which reach no `Handles`, so a handle there is refused. Those conversions
+  need to take the `Handles` of every interface whose resources they carry.
+- **A resource handle on the guest side, and an `own` handed to the host.** An exported interface reaches no `Handles`,
+  so a handle anywhere but a constructor's result or a method's receiver fails as `own is not yet supported`. An `own`
+  the guest hands to the host needs the host to take the representation out of its table, which `HostResourceTable`
+  cannot yet do.
 - **`stream`, `future`, `error-context`, `map` and fixed-size lists.** None has a Java mapping yet. The first three
   belong to async, which the runtime rejects throughout.
 - **A `result` on a function a world declares in its own right.** The exception generated for one lives in the Java
