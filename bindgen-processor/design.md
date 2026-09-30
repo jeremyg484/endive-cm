@@ -292,12 +292,16 @@ lays out Rust modules.
 
 | WIT | Java |
 |---|---|
-| world `hello-world` | `<base>.HelloWorld` |
-| the world's own imports | `<base>.HelloWorld.Imports` |
+| world `hello-world` | `<base>.HelloWorldWorld` |
+| the world's own imports | `<base>.HelloWorldWorld.Imports` |
 | import `example:imported-resources/logging` | `<base>.example.importedresources.logging.Host` |
 | import written inline in the world | `<base>.<name>.Host` |
 | export `example:world-exports/units` | `<base>.exports.example.worldexports.units.Guest` |
 | export written inline in the world | `<base>.exports.<name>.Guest` |
+
+The world class always carries a `World` suffix, which is why `hello-world` becomes `HelloWorldWorld`. Every WASI
+package declares a world named `imports`, and without the suffix that world would become a class `Imports` holding its
+own nested `Imports` interface, which Java forbids.
 | a type the interface declares | that same package |
 
 An interface written inline has no id to contribute, so it sits directly under the base. `exports` is a deliberate
@@ -338,8 +342,8 @@ under `"new"`.
 
 | WIT | Java |
 |---|---|
-| world `calculator` | class `Calculator`, imports interface `Calculator.Imports` |
-| interface `example:calc/types` | nested class `Calculator.Types` |
+| world `calculator` | class `CalculatorWorld`, imports interface `CalculatorWorld.Imports` |
+| interface `example:calc/types` | nested class `CalculatorWorld.Types` |
 | function `host-log` | method `hostLog` |
 | type `point` | class `Point` |
 | record field `first-name` | field and accessor `firstName` |
@@ -353,13 +357,13 @@ and typed accessors for its exports. Everything an interface declares lands in a
 [Generated structure](#generated-structure) describes.
 
 ```java
-public final class Calculator {
+public final class CalculatorWorld {
 
     public interface Imports {
         void hostLog(String msg);
     }
 
-    public static Calculator instantiate(ComponentStore store, WasmComponent component, Imports imports);
+    public static CalculatorWorld instantiate(ComponentStore store, WasmComponent component, Imports imports);
 
     public ComponentInstance instance();
 
@@ -414,13 +418,13 @@ The Hello World world generates this, verified against a checked-in expected sou
 calling `greet` enters the guest, and the guest's call back into `name` returns the host's string through the ABI.
 
 ```java
-public final class HelloWorld {
+public final class HelloWorldWorld {
 
     public interface Imports {
         String name();
     }
 
-    public static HelloWorld instantiate(ComponentStore store, WasmComponent component, Imports imports);
+    public static HelloWorldWorld instantiate(ComponentStore store, WasmComponent component, Imports imports);
 
     public ComponentInstance instance();
 
@@ -438,7 +442,7 @@ argument call however many interfaces a world imports, and one embedder object c
 interfaces together.
 
 ```java
-// <base>.MyWorld
+// <base>.MyWorldWorld
 public interface Imports {
     String greet();
     void log(String msg);
@@ -537,14 +541,34 @@ public final class Handles {
     public HostResource fileResourceType();
     public ResourceValue ownFile(File value);
     public File getFile(ResourceValue handle);
+    public File takeFile(ResourceValue handle);
 }
 ```
 
 Every handle crossing the boundary converts through it, wherever it appears. An `own` the host hands over is minted by
 `ownFile`, and a `borrow` the guest hands over is looked up by `getFile`, so a constructor, a static, a method returning
 another resource's handle, a borrowed argument that is not the receiver and a list of borrows are all one case. An
-`own` the guest hands to the host is refused, because the host would then own a representation its table still holds
-and nothing would ever drop.
+`own` the guest hands to the host is taken by `takeFile`, which forgets the object without dropping it. Ownership
+passes to the host along with the handle, so the object is the host's to keep or to hand back, and leaving it in the
+table would leave an entry nothing ever drops.
+
+A record or a variant may carry a handle too, directly or through anything it holds. Such a type's `toComponent` and
+`fromComponent` take the `Handles` of each interface whose resources it carries a handle to, in an order
+`WitTypes.handleScopes` fixes for both the declaration and every caller. A caller passes the ones it reaches, which in
+`instantiate` are its locals and in another generated type are its own parameters. The exception generated for a
+`result` holds its payload unconverted, so it needs nothing of its own, and the `catch` turning it back into an error
+case converts the payload with whatever `instantiate` reaches.
+
+```java
+// <base>.wasi.io.streams.StreamError
+public abstract class StreamError {
+    public abstract VariantValue toComponent(wasi.io.error.Handles errorHandles);
+    public static StreamError fromComponent(Object value, wasi.io.error.Handles errorHandles);
+}
+```
+
+Nothing else reaches a `Handles`. An exported interface generates none, so a type it declares carrying a handle is
+refused where it is declared, and a world's own function naming such a type is refused where it is called.
 
 A resource may also carry `static` functions, which reach it without a receiver, so there is no borrowed first
 parameter to drop. What a static hands back is what decides its shape, and that is read off its declared result rather
@@ -631,9 +655,7 @@ declaration order, accessors named after the fields, and `equals`, `hashCode` an
 as a map keyed by field label, so it converts at the boundary and `toComponent` writes every field, because
 `CanonicalAbi.storeRecord` reads each by label and a label the map leaves out is stored as a null field rather than
 reported. A field naming another record converts through that record's own pair, since the encoding orders a
-definition before whatever uses it. Two things a record cannot yet carry are refused by name: a resource handle, whose
-conversion needs a `Handles` that the record's own `toComponent` cannot reach, and any field of a kind the generator
-does not yet read.
+definition before whatever uses it. A field of a kind the generator does not yet read is refused by name.
 
 An interface may also declare a `result`, which becomes control flow rather than a value. The ok payload is the Java
 return value and the error case is a generated unchecked exception carrying the error payload, so `parse: func(text:
@@ -685,8 +707,8 @@ The WIT under `src/test/resources/wit` in `bindgen-processor` is the bindgen! ex
 That is what the approved files are generated from, so a difference from the example is visible rather than assumed.
 
 All seven of the non-async example worlds are present. A world covering a WIT feature no example declares is written
-for the purpose and named after it, such as `record-types`, `result-types`, `use-types`, `use-resources` or
-`resource-handles`, and each such fixture says so at the top.
+for the purpose and named after it, such as `record-types`, `result-types`, `use-types`, `use-resources`,
+`handle-types` or `resource-handles`, and each such fixture says so at the top.
 
 The end-to-end fixtures use the same WIT, with one exception that has to be stated wherever it appears. A world that
 imports without exporting cannot be driven, since nothing enters the guest, so `with-imports`,
@@ -753,6 +775,7 @@ Generating bindings needed public API the runtime did not have. All of it is in 
 | `HostFunction` | An import declared as a bare function, which belongs to no instance |
 | `HostResource` | A resource type the embedder implements, with its `own` and `borrow` |
 | `HostResourceTable` | Mapping a resource representation to the Java object it stands for |
+| `HostResourceTable.take` | Handing over an object whose owned handle the guest passed to the host |
 | `GuestResource` | Dropping an owned handle to a resource the guest implements |
 | `ComponentInstance.exportedInstance` | Reaching an exported interface, which is an instance rather than a function |
 
@@ -768,14 +791,9 @@ Nothing here is started. Each item says what it is and what makes it awkward, so
 `WorldReader` and `WitTypes` reject what they cannot read, by name, rather than guessing. Everything below fails that
 way today, which means adding one is a matter of finding its rejection and replacing it.
 
-- **A resource handle inside a generated type.** A handle in an imported function's signature converts through the
-  interface's `Handles`, which is a local of `instantiate`. A record, a variant or a result's exception converts in its
-  own `toComponent` and `fromComponent`, which reach no `Handles`, so a handle there is refused. Those conversions
-  need to take the `Handles` of every interface whose resources they carry.
-- **A resource handle on the guest side, and an `own` handed to the host.** An exported interface reaches no `Handles`,
-  so a handle anywhere but a constructor's result or a method's receiver fails as `own is not yet supported`. An `own`
-  the guest hands to the host needs the host to take the representation out of its table, which `HostResourceTable`
-  cannot yet do.
+- **A resource handle on the guest side.** An exported interface reaches no `Handles`, so a handle anywhere but a
+  constructor's result or a method's receiver fails as `own is not yet supported`, and a type it declares carrying a
+  handle is refused. A world's own function reaches none either, so one naming a type carrying a handle is refused.
 - **`stream`, `future`, `error-context`, `map` and fixed-size lists.** None has a Java mapping yet. The first three
   belong to async, which the runtime rejects throughout.
 - **A `result` on a function a world declares in its own right.** The exception generated for one lives in the Java

@@ -1,4 +1,4 @@
-// endive.testing.UseTypes
+// endive.testing.UseTypesWorld
 
 package endive.testing;
 
@@ -31,7 +31,7 @@ import run.endive.cm.types.WasmComponent;
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
 @SuppressWarnings("unchecked")
-public final class UseTypes {
+public final class UseTypesWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -48,7 +48,7 @@ public final class UseTypes {
 
     private final ComponentFunction run;
 
-    private UseTypes(ComponentInstance instance) {
+    private UseTypesWorld(ComponentInstance instance) {
         this.instance = instance;
         this.run = instance.export("run").typed(VariantHostTypeDescriptor.instance());
     }
@@ -56,7 +56,7 @@ public final class UseTypes {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static UseTypes instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static UseTypesWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         HostInstance.Builder typesBuilder = HostInstance.builder(store);
         ValType typesLevel = typesBuilder.declareType(Type.of(EnumType.builder().addLabel("debug").addLabel("info").addLabel("warn").addLabel("error").build()));
@@ -82,7 +82,7 @@ public final class UseTypes {
         loggingBuilder.addFunction("latest", FuncType.builder().withResult(loggingEntry).build(), args -> new Object[] { logging.latest().toComponent() });
         loggingBuilder.addFunction("worst", FuncType.builder().addParam(LabelValType.builder().withLabel("levels").withValType(loggingLabels).build()).withResult(loggingType8).build(), args -> new Object[] { Optional.ofNullable(logging.worst(((List<Object>) args[0]).stream().map(element -> endive.testing.example.usetypes.types.Level.fromComponent(element)).collect(Collectors.toList()))).map(some -> VariantValue.of("some", some.toComponent())).orElse(VariantValue.of("none", null)) });
         values.put("example:use-types/logging", loggingBuilder.build());
-        return new UseTypes(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new UseTypesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

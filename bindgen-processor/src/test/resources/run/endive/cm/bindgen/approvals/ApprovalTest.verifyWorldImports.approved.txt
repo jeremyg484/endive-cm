@@ -1,4 +1,4 @@
-// endive.testing.MyWorld
+// endive.testing.MyWorldWorld
 
 package endive.testing;
 
@@ -20,7 +20,7 @@ import run.endive.cm.types.WasmComponent;
  * Bindings for the WIT world {@code example:imports/my-world}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class MyWorld {
+public final class MyWorldWorld {
 
     private static final FuncType GREET_FUNC = FuncType.builder().withResult(ValType.builder().withPrimValType(PrimValType.STRING).build()).build();
 
@@ -43,14 +43,14 @@ public final class MyWorld {
 
     private final ComponentInstance instance;
 
-    private MyWorld(ComponentInstance instance) {
+    private MyWorldWorld(ComponentInstance instance) {
         this.instance = instance;
     }
 
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static MyWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static MyWorldWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("greet", HostFunction.of(store, GREET_FUNC, args -> new Object[] { imports.greet() }));
         values.put("log", HostFunction.of(store, LOG_FUNC, args -> {
@@ -64,7 +64,7 @@ public final class MyWorld {
             return new Object[0];
         });
         values.put("my-custom-host", myCustomHostBuilder.build());
-        return new MyWorld(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new MyWorldWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

@@ -1,0 +1,36 @@
+package example:handle-types;
+
+interface error {
+    resource error {
+        to-debug-string: func() -> string;
+    }
+}
+
+interface streams {
+    use error.{error};
+
+    variant stream-error {
+        last-operation-failed(error),
+        closed,
+    }
+
+    resource input-stream {
+        read: func(len: u64) -> result<list<u8>, stream-error>;
+    }
+
+    record opened {
+        input: input-stream,
+        label: string,
+    }
+
+    open: func() -> opened;
+
+    /// Hands an opened stream back, and ownership of its input with it.
+    close: func(o: opened);
+}
+
+world handle-types {
+    import streams;
+
+    export run: func() -> u32;
+}

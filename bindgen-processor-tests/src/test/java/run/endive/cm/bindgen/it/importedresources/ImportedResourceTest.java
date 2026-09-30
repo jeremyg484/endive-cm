@@ -83,8 +83,8 @@ public class ImportedResourceTest {
         assertTrue(logging.built.get(0).dropped, "expected the dropped handle to reach the host");
     }
 
-    private static ImportSomeResources instantiate(HostLogging logging) {
-        return ImportSomeResources.instantiate(new ComponentStore(), component, () -> logging);
+    private static ImportSomeResourcesWorld instantiate(HostLogging logging) {
+        return ImportSomeResourcesWorld.instantiate(new ComponentStore(), component, () -> logging);
     }
 
     /** The host side of {@code example:imported-resources/logging}. */

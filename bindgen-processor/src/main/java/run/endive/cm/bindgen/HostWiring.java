@@ -33,10 +33,14 @@ final class HostWiring {
     /** The local holding each interface's {@code Handles}, by the scope of that interface. */
     private final Map<WitScope, String> handles = new IdentityHashMap<>();
 
-    HostWiring(GeneratedUnit unit, FunctionBindings bindings) {
+    /**
+     * The wiring converts through bindings of its own, since the {@code Handles} it reaches are
+     * locals of {@code instantiate} and nothing else in the world class may name them.
+     */
+    HostWiring(GeneratedUnit unit) {
         this.unit = unit;
+        this.bindings = FunctionBindings.forUnit(unit);
         this.types = bindings.types();
-        this.bindings = bindings;
         types.withHandles(
                 scope -> handles.containsKey(scope) ? new NameExpr(handles.get(scope)) : null);
     }
@@ -68,7 +72,7 @@ final class HostWiring {
                     AstBuilders.declare(
                             AstBuilders.type(imported.scope().javaPackage() + ".Host"),
                             locals.host,
-                            AstBuilders.call(new NameExpr("imports"), locals.host)));
+                            AstBuilders.call(new NameExpr("imports"), locals.accessor)));
         }
         body.addStatement(
                 AstBuilders.declare(
@@ -386,6 +390,16 @@ final class HostWiring {
      */
     private static final class Locals {
 
+        /**
+         * The names {@code instantiate} and the lambdas inside it use already, which an
+         * interface's locals give way to.
+         */
+        private static final Set<String> TAKEN =
+                Set.of("store", "component", "imports", "values", "args");
+
+        /** The accessor on {@code Imports} reaching the interface's {@code Host}. */
+        private final String accessor;
+
         private final String host;
         private final String builder;
         private final WitScope scope;
@@ -404,7 +418,8 @@ final class HostWiring {
         private final Map<Type, String> byType = new IdentityHashMap<>();
 
         Locals(WitInterface imported) {
-            this.host = Names.member(imported.simpleName());
+            this.accessor = Names.member(imported.simpleName());
+            this.host = Names.free(accessor, TAKEN);
             this.builder = host + "Builder";
             this.scope = imported.scope();
         }

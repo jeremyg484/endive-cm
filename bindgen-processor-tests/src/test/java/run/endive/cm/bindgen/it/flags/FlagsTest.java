@@ -104,7 +104,7 @@ public class FlagsTest {
     }
 
     private static Mode run(Host host, Mode requested) {
-        return FlagTypes.instantiate(new ComponentStore(), component, () -> host)
+        return FlagTypesWorld.instantiate(new ComponentStore(), component, () -> host)
                 .runner()
                 .run(requested);
     }

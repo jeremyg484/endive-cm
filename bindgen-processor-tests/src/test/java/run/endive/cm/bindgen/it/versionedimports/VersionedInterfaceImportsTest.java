@@ -32,7 +32,8 @@ public class VersionedInterfaceImportsTest {
     void theGuestCallsTheVersionedImport() {
         Recorder recorder = new Recorder();
 
-        VersionedWithImports.instantiate(new ComponentStore(), component, () -> recorder).run();
+        VersionedWithImportsWorld.instantiate(new ComponentStore(), component, () -> recorder)
+                .run();
 
         assertEquals(List.of(Level.WARN, Level.ERROR), recorder.levels);
         assertEquals(List.of("warn: starting", "error: done"), recorder.entries);

@@ -1,4 +1,4 @@
-// endive.testing.WithImports
+// endive.testing.WithImportsWorld
 
 package endive.testing;
 
@@ -21,7 +21,7 @@ import run.endive.cm.types.WasmComponent;
  * Bindings for the WIT world {@code example:interface-imports/with-imports}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class WithImports {
+public final class WithImportsWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -36,14 +36,14 @@ public final class WithImports {
 
     private final ComponentInstance instance;
 
-    private WithImports(ComponentInstance instance) {
+    private WithImportsWorld(ComponentInstance instance) {
         this.instance = instance;
     }
 
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static WithImports instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static WithImportsWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         endive.testing.example.interfaceimports.logging.Host logging = imports.logging();
         HostInstance.Builder loggingBuilder = HostInstance.builder(store);
@@ -54,7 +54,7 @@ public final class WithImports {
             return new Object[0];
         });
         values.put("example:interface-imports/logging", loggingBuilder.build());
-        return new WithImports(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new WithImportsWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

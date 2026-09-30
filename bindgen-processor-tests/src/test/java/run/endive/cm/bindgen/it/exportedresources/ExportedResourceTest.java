@@ -38,7 +38,7 @@ public class ExportedResourceTest {
     /** The constructor runs inside the guest and hands back a handle the wrapper holds. */
     @Test
     void theHostConstructsAGuestResource() {
-        ExportSomeResources bindings = instantiate();
+        ExportSomeResourcesWorld bindings = instantiate();
 
         Logger logger = bindings.logging().logger(Level.WARN);
 
@@ -81,7 +81,7 @@ public class ExportedResourceTest {
     /** Closing runs the guest's destructor, which nothing else would have run. */
     @Test
     void closingRunsTheGuestDestructor() {
-        ExportSomeResources bindings = instantiate();
+        ExportSomeResourcesWorld bindings = instantiate();
         Logger logger = bindings.logging().logger(Level.WARN);
 
         assertEquals(Long.valueOf(0L), bindings.drops());
@@ -93,7 +93,7 @@ public class ExportedResourceTest {
     /** Closing twice is harmless, so the wrapper suits try-with-resources. */
     @Test
     void closingTwiceRunsTheDestructorOnce() {
-        ExportSomeResources bindings = instantiate();
+        ExportSomeResourcesWorld bindings = instantiate();
         Logger logger = bindings.logging().logger(Level.WARN);
 
         logger.close();
@@ -105,7 +105,7 @@ public class ExportedResourceTest {
     /** What try-with-resources does, which is the point of the wrapper being closeable. */
     @Test
     void aResourceMayBeClosedByTryWithResources() {
-        ExportSomeResources bindings = instantiate();
+        ExportSomeResourcesWorld bindings = instantiate();
 
         try (Logger logger = bindings.logging().logger(Level.INFO)) {
             assertEquals(Level.INFO, logger.getMaxLevel());
@@ -114,10 +114,10 @@ public class ExportedResourceTest {
         assertEquals(Long.valueOf(1L), bindings.drops());
     }
 
-    private static ExportSomeResources instantiate() {
-        return ExportSomeResources.instantiate(new ComponentStore(), component, new Imports());
+    private static ExportSomeResourcesWorld instantiate() {
+        return ExportSomeResourcesWorld.instantiate(new ComponentStore(), component, new Imports());
     }
 
     /** The world imports nothing, so this carries only the interfaces it exports. */
-    private static final class Imports implements ExportSomeResources.Imports {}
+    private static final class Imports implements ExportSomeResourcesWorld.Imports {}
 }

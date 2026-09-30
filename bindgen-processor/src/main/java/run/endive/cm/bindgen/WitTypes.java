@@ -311,7 +311,7 @@ final class WitTypes {
             case BORROW:
                 throw unsupported("a borrowed handle handed to the guest");
             default:
-                return AstBuilders.call(value, "toComponent");
+                return AstBuilders.call(value, "toComponent", handlesArguments(valType, scope));
         }
     }
 
@@ -348,14 +348,18 @@ final class WitTypes {
                             Names.handleGetter(resourceName(defined, inner)),
                             AstBuilders.cast(unit.use(QualifiedTypes.RESOURCE_VALUE), value));
                 case OWN:
-                    // Checked first, so a handle with no Handles in reach reads as such.
-                    handlesOf(defined, inner);
-                    throw unsupported("an owned handle handed to the host");
+                    return AstBuilders.call(
+                            handlesOf(defined, inner),
+                            Names.handleTaker(resourceName(defined, inner)),
+                            AstBuilders.cast(unit.use(QualifiedTypes.RESOURCE_VALUE), value));
                 default:
+                    List<Expression> arguments = new ArrayList<>();
+                    arguments.add(value);
+                    arguments.addAll(handlesArguments(valType, scope));
                     return AstBuilders.call(
                             AstBuilders.name(nominalJavaType(scope, valType.typeIdx())),
                             "fromComponent",
-                            value);
+                            arguments);
             }
         }
         Type target = javaType(valType, scope);
@@ -571,7 +575,6 @@ final class WitTypes {
                                 AstBuilders.call(optionBuilder, "withValType", payload), "build"));
             case RECORD:
                 RecordType record = (RecordType) defined;
-                requireNoHandles(record, scope);
                 Expression recordBuilder =
                         AstBuilders.call(unit.useName(QualifiedTypes.RECORD_TYPE), "builder");
                 for (LabelValType field : record.fields()) {
@@ -615,23 +618,73 @@ final class WitTypes {
     }
 
     /**
-     * A handle names a resource the enclosing instance declares after its value types, so a record
-     * carrying one has nothing to resolve by the time it is built.
+     * The interfaces whose {@code Handles} converting a value of {@code valType} needs, in the
+     * order a generated conversion takes them. A conversion reaches every handle a type carries,
+     * through lists, options, fields and cases alike, and each converts through the {@code
+     * Handles} of the interface declaring its resource.
      */
-    void requireNoHandles(RecordType record, WitScope scope) {
-        for (LabelValType field : record.fields()) {
-            ValType valType = field.valType();
-            if (valType.primValType() != null) {
-                continue;
-            }
-            DefValType.Kind kind = definedAt(scope, valType.typeIdx()).kind();
-            if (kind == DefValType.Kind.OWN || kind == DefValType.Kind.BORROW) {
-                throw new BindgenException(
-                        "field \""
-                                + field.label()
-                                + "\" names a resource handle, which a record cannot yet carry");
-            }
+    List<WitScope> handleScopes(ValType valType, WitScope scope) {
+        List<WitScope> found = new ArrayList<>();
+        collectHandleScopes(valType, scope, found);
+        return found;
+    }
+
+    /**
+     * The same, for a type {@code scope} defines, which is what a generated type's own conversions
+     * take as parameters.
+     */
+    List<WitScope> handleScopes(DefValType defined, WitScope scope) {
+        List<WitScope> found = new ArrayList<>();
+        collectHandleScopes(defined, scope, found);
+        return found;
+    }
+
+    private void collectHandleScopes(ValType valType, WitScope scope, List<WitScope> found) {
+        if (valType == null || valType.primValType() != null) {
+            return;
         }
+        int index = valType.typeIdx();
+        collectHandleScopes(definedAt(scope, index), scope.declaringScope(index), found);
+    }
+
+    private void collectHandleScopes(DefValType defined, WitScope scope, List<WitScope> found) {
+        if (defined.kind() == DefValType.Kind.OWN || defined.kind() == DefValType.Kind.BORROW) {
+            WitScope declaring = scope.declaringScope(resourceIndex(defined));
+            if (found.stream().noneMatch(s -> s == declaring)) {
+                found.add(declaring);
+            }
+            return;
+        }
+        for (ValType reference : references(defined)) {
+            collectHandleScopes(reference, scope, found);
+        }
+    }
+
+    /** The type of the {@code Handles} the interface owning {@code scope} generates. */
+    ClassOrInterfaceType handlesType(WitScope scope) {
+        return AstBuilders.type(qualify(scope, InterfaceGenerator.HANDLES));
+    }
+
+    /**
+     * The {@code Handles} a generated type's conversion takes, as this conversion reaches them.
+     * Only an imported interface's bindings reach any, so a type carrying a handle anywhere else
+     * is refused.
+     */
+    private List<Expression> handlesArguments(ValType valType, WitScope scope) {
+        List<Expression> arguments = new ArrayList<>();
+        for (WitScope declaring : handleScopes(valType, scope)) {
+            Expression reached = handles.apply(declaring);
+            if (reached == null) {
+                WitScope named = scope.declaringScope(valType.typeIdx());
+                throw new BindgenException(
+                        "type \""
+                                + named.nameAt(scope.declaringIndex(valType.typeIdx()))
+                                + "\" carries a resource handle, which only an imported"
+                                + " interface's bindings can convert so far");
+            }
+            arguments.add(reached);
+        }
+        return arguments;
     }
 
     /** Describes {@code valType} to a typed function or void when there is no type. */

@@ -1,4 +1,4 @@
-// endive.testing.ResultTypes
+// endive.testing.ResultTypesWorld
 
 package endive.testing;
 
@@ -23,7 +23,7 @@ import run.endive.cm.types.WasmComponent;
  * Bindings for the WIT world {@code example:result-types/result-types}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class ResultTypes {
+public final class ResultTypesWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -40,7 +40,7 @@ public final class ResultTypes {
 
     private final endive.testing.exports.example.resulttypes.running.Guest running;
 
-    private ResultTypes(ComponentInstance instance) {
+    private ResultTypesWorld(ComponentInstance instance) {
         this.instance = instance;
         this.running = new endive.testing.exports.example.resulttypes.running.Guest(instance.exportedInstance("example:result-types/running"));
     }
@@ -48,7 +48,7 @@ public final class ResultTypes {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static ResultTypes instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static ResultTypesWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         endive.testing.example.resulttypes.parsing.Host parsing = imports.parsing();
         HostInstance.Builder parsingBuilder = HostInstance.builder(store);
@@ -63,7 +63,7 @@ public final class ResultTypes {
             }
         });
         values.put("example:result-types/parsing", parsingBuilder.build());
-        return new ResultTypes(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new ResultTypesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

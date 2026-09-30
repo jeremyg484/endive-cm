@@ -62,7 +62,7 @@ public class OptionTest {
     /** The guest expects a none back, so a host answering some traps. */
     @Test
     void aNoneAnsweredWithSomeTraps() {
-        OptionTypes bindings = instantiate(value -> 0L);
+        OptionTypesWorld bindings = instantiate(value -> 0L);
 
         assertThrows(TrapException.class, () -> bindings.run(null));
     }
@@ -70,13 +70,13 @@ public class OptionTest {
     /** The guest expects one more than it sent, so a host answering none traps. */
     @Test
     void aSomeAnsweredWithNoneTraps() {
-        OptionTypes bindings = instantiate(value -> null);
+        OptionTypesWorld bindings = instantiate(value -> null);
 
         assertThrows(TrapException.class, () -> bindings.run(5L));
     }
 
-    private static OptionTypes instantiate(Host maybe) {
-        return OptionTypes.instantiate(new ComponentStore(), component, () -> maybe);
+    private static OptionTypesWorld instantiate(Host maybe) {
+        return OptionTypesWorld.instantiate(new ComponentStore(), component, () -> maybe);
     }
 
     /** Answers a none with a none and a some with one more, recording what it was handed. */

@@ -105,8 +105,8 @@ public class StaticFunctionTest {
         assertThrows(TrapException.class, () -> guest.tallyOpen(0L));
     }
 
-    private static StaticFunctions instantiate(HostCounters counters) {
-        return StaticFunctions.instantiate(new ComponentStore(), component, () -> counters);
+    private static StaticFunctionsWorld instantiate(HostCounters counters) {
+        return StaticFunctionsWorld.instantiate(new ComponentStore(), component, () -> counters);
     }
 
     /** The host side of {@code example:static-functions/host-counters}. */

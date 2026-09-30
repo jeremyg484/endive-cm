@@ -39,7 +39,7 @@ public class HelloWorldTest {
 
     @Test
     void theGeneratedBindingsInstantiateTheComponent() {
-        HelloWorld bindings = instantiate(() -> "world");
+        HelloWorldWorld bindings = instantiate(() -> "world");
 
         assertNotNull(bindings.instance());
         assertEquals(Set.of("greet"), bindings.instance().exportNames());
@@ -49,7 +49,7 @@ public class HelloWorldTest {
     void callingAnExportEntersTheGuest() {
         boolean[] called = {false};
 
-        HelloWorld bindings =
+        HelloWorldWorld bindings =
                 instantiate(
                         () -> {
                             called[0] = true;
@@ -66,12 +66,12 @@ public class HelloWorldTest {
      */
     @Test
     void aStringTheGuestDoesNotExpectTraps() {
-        HelloWorld bindings = instantiate(() -> "mars");
+        HelloWorldWorld bindings = instantiate(() -> "mars");
 
         assertThrows(TrapException.class, bindings::greet);
     }
 
-    private static HelloWorld instantiate(HelloWorld.Imports imports) {
-        return HelloWorld.instantiate(new ComponentStore(), component, imports);
+    private static HelloWorldWorld instantiate(HelloWorldWorld.Imports imports) {
+        return HelloWorldWorld.instantiate(new ComponentStore(), component, imports);
     }
 }

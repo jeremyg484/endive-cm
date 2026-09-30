@@ -1,4 +1,4 @@
-// endive.testing.ResourceHandles
+// endive.testing.ResourceHandlesWorld
 
 package endive.testing;
 
@@ -29,7 +29,7 @@ import run.endive.cm.types.WasmComponent;
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
 @SuppressWarnings("unchecked")
-public final class ResourceHandles {
+public final class ResourceHandlesWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -46,7 +46,7 @@ public final class ResourceHandles {
 
     private final ComponentFunction run;
 
-    private ResourceHandles(ComponentInstance instance) {
+    private ResourceHandlesWorld(ComponentInstance instance) {
         this.instance = instance;
         this.run = instance.export("run").typed(PrimitiveHostTypeDescriptor.forClass(BigInteger.class));
     }
@@ -54,7 +54,7 @@ public final class ResourceHandles {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static ResourceHandles instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static ResourceHandlesWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         endive.testing.example.resourcehandles.streams.Host streams = imports.streams();
         HostInstance.Builder streamsBuilder = HostInstance.builder(store);
@@ -74,7 +74,7 @@ public final class ResourceHandles {
         streamsBuilder.addFunction("open-output", FuncType.builder().withResult(streamsOutputStream.own()).build(), args -> new Object[] { streamsHandles.ownOutputStream(streams.openOutput()) });
         streamsBuilder.addFunction("poll", FuncType.builder().addParam(LabelValType.builder().withLabel("in").withValType(streamsType14).build()).withResult(streamsType15).build(), args -> new Object[] { streams.poll(((List<Object>) args[0]).stream().map(element -> streamsHandles.getPollable((ResourceValue) element)).collect(Collectors.toList())) });
         values.put("example:resource-handles/streams", streamsBuilder.build());
-        return new ResourceHandles(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new ResourceHandlesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**
@@ -148,6 +148,13 @@ public final class Handles {
     }
 
     /**
+     * The {@code pollable} an owned handle stands for, whose ownership passes to the caller. It is forgotten here without being dropped.
+     */
+    public Pollable takePollable(ResourceValue handle) {
+        return pollableTable.take(handle);
+    }
+
+    /**
      * The resource type {@code input-stream}, with its {@code own} and {@code borrow}.
      */
     public HostResource inputStreamResourceType() {
@@ -169,6 +176,13 @@ public final class Handles {
     }
 
     /**
+     * The {@code input-stream} an owned handle stands for, whose ownership passes to the caller. It is forgotten here without being dropped.
+     */
+    public InputStream takeInputStream(ResourceValue handle) {
+        return inputStreamTable.take(handle);
+    }
+
+    /**
      * The resource type {@code output-stream}, with its {@code own} and {@code borrow}.
      */
     public HostResource outputStreamResourceType() {
@@ -187,6 +201,13 @@ public final class Handles {
      */
     public OutputStream getOutputStream(ResourceValue handle) {
         return outputStreamTable.get(handle);
+    }
+
+    /**
+     * The {@code output-stream} an owned handle stands for, whose ownership passes to the caller. It is forgotten here without being dropped.
+     */
+    public OutputStream takeOutputStream(ResourceValue handle) {
+        return outputStreamTable.take(handle);
     }
 }
 

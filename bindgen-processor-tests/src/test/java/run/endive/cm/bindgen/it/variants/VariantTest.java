@@ -54,7 +54,7 @@ public class VariantTest {
     void anImportedVariantTheGuestDoesNotExpectTraps() {
         Commands commands = scripted(new Command.Jump(1L), new Command.Jump(7L));
 
-        VariantTypes bindings = instantiate(commands);
+        VariantTypesWorld bindings = instantiate(commands);
 
         assertThrows(TrapException.class, () -> bindings.replies().run());
     }
@@ -64,7 +64,7 @@ public class VariantTest {
     void anImportedPayloadTheGuestDoesNotExpectTraps() {
         Commands commands = scripted(new Command.Stop(), new Command.Jump(1L));
 
-        VariantTypes bindings = instantiate(commands);
+        VariantTypesWorld bindings = instantiate(commands);
 
         assertThrows(TrapException.class, () -> bindings.replies().run());
     }
@@ -72,7 +72,7 @@ public class VariantTest {
     /** An exported call carries a payload in and answers with a case carrying none. */
     @Test
     void anExportedCallCarriesAPayloadIn() {
-        VariantTypes bindings = instantiate(scripted());
+        VariantTypesWorld bindings = instantiate(scripted());
 
         Reply answer = bindings.replies().echo(new Reply.Text("hello"));
 
@@ -82,7 +82,7 @@ public class VariantTest {
     /** The other way round, so a payload crosses back out of the guest. */
     @Test
     void anExportedCallCarriesAPayloadOut() {
-        VariantTypes bindings = instantiate(scripted());
+        VariantTypesWorld bindings = instantiate(scripted());
 
         Reply answer = bindings.replies().echo(new Reply.Silence());
 
@@ -93,7 +93,7 @@ public class VariantTest {
     /** The guest reads the payload it is handed, so a different one traps. */
     @Test
     void anExportedPayloadTheGuestDoesNotExpectTraps() {
-        VariantTypes bindings = instantiate(scripted());
+        VariantTypesWorld bindings = instantiate(scripted());
 
         assertThrows(TrapException.class, () -> bindings.replies().echo(new Reply.Text("wrong")));
     }
@@ -110,8 +110,8 @@ public class VariantTest {
         assertNotEquals(new Command.Jump(8L), jump);
     }
 
-    private static VariantTypes instantiate(Host commands) {
-        return VariantTypes.instantiate(new ComponentStore(), component, () -> commands);
+    private static VariantTypesWorld instantiate(Host commands) {
+        return VariantTypesWorld.instantiate(new ComponentStore(), component, () -> commands);
     }
 
     private static Commands scripted(Command... replies) {

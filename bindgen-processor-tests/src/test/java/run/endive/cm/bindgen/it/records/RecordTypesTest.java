@@ -51,7 +51,7 @@ public class RecordTypesTest {
     /** Every field of the record the host hands over reaches the guest. */
     @Test
     void aRecordReachesTheGuestWithEveryFieldIntact() {
-        RecordTypes bindings = instantiate(resident());
+        RecordTypesWorld bindings = instantiate(resident());
 
         assertEquals(20L, bindings.check());
     }
@@ -62,7 +62,7 @@ public class RecordTypesTest {
         Person other =
                 new Person("eve", true, ID, INITIAL, List.of("hot", "new"), new Point(7L, 11L));
 
-        RecordTypes bindings = instantiate(other);
+        RecordTypesWorld bindings = instantiate(other);
 
         assertThrows(TrapException.class, bindings::check);
     }
@@ -73,7 +73,7 @@ public class RecordTypesTest {
         Person other =
                 new Person("ada", true, ID, INITIAL, List.of("hot", "new"), new Point(7L, 12L));
 
-        RecordTypes bindings = instantiate(other);
+        RecordTypesWorld bindings = instantiate(other);
 
         assertThrows(TrapException.class, bindings::check);
     }
@@ -81,7 +81,7 @@ public class RecordTypesTest {
     /** A record travels the other way as an argument and comes back as a result. */
     @Test
     void aRecordCrossesIntoTheGuestAndBack() {
-        RecordTypes bindings = instantiate(resident());
+        RecordTypesWorld bindings = instantiate(resident());
 
         Span widened = bindings.shapes().widen(new Span(2L, 5L), 3L);
 
@@ -91,7 +91,7 @@ public class RecordTypesTest {
     /** The guest traps on a span it was not promised, so the argument above really arrived. */
     @Test
     void aSpanTheGuestDoesNotExpectTraps() {
-        RecordTypes bindings = instantiate(resident());
+        RecordTypesWorld bindings = instantiate(resident());
 
         assertThrows(TrapException.class, () -> bindings.shapes().widen(new Span(9L, 5L), 3L));
     }
@@ -109,8 +109,8 @@ public class RecordTypesTest {
         return new Person("ada", true, ID, INITIAL, List.of("hot", "new"), new Point(7L, 11L));
     }
 
-    private static RecordTypes instantiate(Person person) {
+    private static RecordTypesWorld instantiate(Person person) {
         Host host = () -> person;
-        return RecordTypes.instantiate(new ComponentStore(), component, () -> host);
+        return RecordTypesWorld.instantiate(new ComponentStore(), component, () -> host);
     }
 }

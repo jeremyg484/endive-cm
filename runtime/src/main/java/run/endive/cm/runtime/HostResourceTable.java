@@ -47,6 +47,24 @@ public final class HostResourceTable<T> {
         return value;
     }
 
+    /**
+     * Forgets the value an owned {@code handle} names and hands it back without dropping it. This
+     * is what receiving ownership of a resource does, since the value now belongs to whoever
+     * received it rather than to the handle.
+     *
+     * @throws LinkageException if the handle names nothing, which means it was dropped or never
+     *     came from this table
+     * @see <a href="https://github.com/WebAssembly/component-model/blob/706074c96bc14cfc58469e1bdc452bb4d91921c7/design/mvp/CanonicalABI.md#handle-types">CanonicalABI.md, lifting an owned handle</a>
+     */
+    public T take(ResourceValue handle) {
+        Objects.requireNonNull(handle, "handle");
+        T value = values.remove(handle.rep());
+        if (value == null) {
+            throw new LinkageException("resource " + handle.rep() + " is not in this table");
+        }
+        return value;
+    }
+
     /** Forgets the value at {@code rep}, which is what a destructor does. */
     public void drop(int rep) {
         values.remove(rep);

@@ -42,7 +42,7 @@ public class InterfaceImportsTest {
     void theGuestCallsTheImportedInterface() {
         Recorder recorder = new Recorder();
 
-        WithImports.instantiate(new ComponentStore(), component, () -> recorder).run();
+        WithImportsWorld.instantiate(new ComponentStore(), component, () -> recorder).run();
 
         assertEquals(2, recorder.entries.size());
     }
@@ -52,7 +52,7 @@ public class InterfaceImportsTest {
     void anEnumArgumentArrivesAsItsCase() {
         Recorder recorder = new Recorder();
 
-        WithImports.instantiate(new ComponentStore(), component, () -> recorder).run();
+        WithImportsWorld.instantiate(new ComponentStore(), component, () -> recorder).run();
 
         assertEquals(List.of(Level.WARN, Level.ERROR), recorder.levels);
     }
@@ -62,7 +62,7 @@ public class InterfaceImportsTest {
     void aStringArgumentArrivesBesideIt() {
         Recorder recorder = new Recorder();
 
-        WithImports.instantiate(new ComponentStore(), component, () -> recorder).run();
+        WithImportsWorld.instantiate(new ComponentStore(), component, () -> recorder).run();
 
         assertEquals(List.of("warn: starting", "error: done"), recorder.entries);
     }
@@ -79,7 +79,7 @@ public class InterfaceImportsTest {
     void nothingIsCalledBeforeTheGuestRuns() {
         Recorder recorder = new Recorder();
 
-        WithImports.instantiate(new ComponentStore(), component, () -> recorder);
+        WithImportsWorld.instantiate(new ComponentStore(), component, () -> recorder);
 
         assertTrue(recorder.entries.isEmpty());
     }

@@ -1,4 +1,4 @@
-// endive.testing.StaticFunctions
+// endive.testing.StaticFunctionsWorld
 
 package endive.testing;
 
@@ -23,7 +23,7 @@ import run.endive.cm.types.WasmComponent;
  * Bindings for the WIT world {@code example:static-functions/static-functions}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class StaticFunctions {
+public final class StaticFunctionsWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -42,7 +42,7 @@ public final class StaticFunctions {
 
     private final endive.testing.exports.example.staticfunctions.guestcounters.Guest guestCounters;
 
-    private StaticFunctions(ComponentInstance instance) {
+    private StaticFunctionsWorld(ComponentInstance instance) {
         this.instance = instance;
         this.run = instance.export("run").typed(PrimitiveHostTypeDescriptor.forClass(Long.class));
         this.guestCounters = new endive.testing.exports.example.staticfunctions.guestcounters.Guest(instance.exportedInstance("example:static-functions/guest-counters"));
@@ -51,7 +51,7 @@ public final class StaticFunctions {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static StaticFunctions instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static StaticFunctionsWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         endive.testing.example.staticfunctions.hostcounters.Host hostCounters = imports.hostCounters();
         HostInstance.Builder hostCountersBuilder = HostInstance.builder(store);
@@ -63,7 +63,7 @@ public final class StaticFunctions {
         hostCountersBuilder.addFunction("[static]counter.made", FuncType.builder().withResult(ValType.builder().withPrimValType(PrimValType.U32).build()).build(), args -> new Object[] { hostCounters.counterMade() });
         hostCountersBuilder.addFunction("[method]counter.get", FuncType.builder().addParam(LabelValType.builder().withLabel("self").withValType(hostCountersCounter.borrow()).build()).withResult(ValType.builder().withPrimValType(PrimValType.U32).build()).build(), args -> new Object[] { hostCountersHandles.getCounter((ResourceValue) args[0]).get() });
         values.put("example:static-functions/host-counters", hostCountersBuilder.build());
-        return new StaticFunctions(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new StaticFunctionsWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**
@@ -152,6 +152,13 @@ public final class Handles {
      */
     public Counter getCounter(ResourceValue handle) {
         return counterTable.get(handle);
+    }
+
+    /**
+     * The {@code counter} an owned handle stands for, whose ownership passes to the caller. It is forgotten here without being dropped.
+     */
+    public Counter takeCounter(ResourceValue handle) {
+        return counterTable.take(handle);
     }
 }
 

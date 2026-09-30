@@ -95,6 +95,14 @@ final class Names {
         return member(owner) + type(witName);
     }
 
+    /**
+     * {@code hello-world} becomes {@code HelloWorldWorld}. The suffix keeps a world clear of the
+     * {@code Imports} interface its class holds, since WASI names a world {@code imports}.
+     */
+    static String worldClass(String world) {
+        return type(world) + "World";
+    }
+
     /** The method on an interface's {@code Handles} minting an owned handle to {@code resource}. */
     static String ownHandle(String resource) {
         return "own" + type(resource);
@@ -103,6 +111,11 @@ final class Names {
     /** The method on an interface's {@code Handles} finding what a handle to it stands for. */
     static String handleGetter(String resource) {
         return "get" + type(resource);
+    }
+
+    /** The method on an interface's {@code Handles} taking ownership of what a handle stands for. */
+    static String handleTaker(String resource) {
+        return "take" + type(resource);
     }
 
     /** The method on an interface's {@code Handles} giving the resource type of {@code resource}. */

@@ -1,4 +1,4 @@
-// endive.testing.RecordTypes
+// endive.testing.RecordTypesWorld
 
 package endive.testing;
 
@@ -24,7 +24,7 @@ import run.endive.cm.types.WasmComponent;
  * Bindings for the WIT world {@code example:records/record-types}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class RecordTypes {
+public final class RecordTypesWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -43,7 +43,7 @@ public final class RecordTypes {
 
     private final endive.testing.exports.example.records.shapes.Guest shapes;
 
-    private RecordTypes(ComponentInstance instance) {
+    private RecordTypesWorld(ComponentInstance instance) {
         this.instance = instance;
         this.check = instance.export("check").typed(PrimitiveHostTypeDescriptor.forClass(Long.class));
         this.shapes = new endive.testing.exports.example.records.shapes.Guest(instance.exportedInstance("example:records/shapes"));
@@ -52,7 +52,7 @@ public final class RecordTypes {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static RecordTypes instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static RecordTypesWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         endive.testing.example.records.types.Host types = imports.types();
         HostInstance.Builder typesBuilder = HostInstance.builder(store);
@@ -63,7 +63,7 @@ public final class RecordTypes {
         typesBuilder.addType("person", typesPerson);
         typesBuilder.addFunction("resident", FuncType.builder().withResult(typesPerson).build(), args -> new Object[] { types.resident().toComponent() });
         values.put("example:records/types", typesBuilder.build());
-        return new RecordTypes(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new RecordTypesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

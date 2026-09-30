@@ -1,4 +1,4 @@
-// endive.testing.OptionTypes
+// endive.testing.OptionTypesWorld
 
 package endive.testing;
 
@@ -29,7 +29,7 @@ import run.endive.cm.types.WasmComponent;
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
 @SuppressWarnings("unchecked")
-public final class OptionTypes {
+public final class OptionTypesWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -46,7 +46,7 @@ public final class OptionTypes {
 
     private final ComponentFunction run;
 
-    private OptionTypes(ComponentInstance instance) {
+    private OptionTypesWorld(ComponentInstance instance) {
         this.instance = instance;
         this.run = instance.export("run").typed(VariantHostTypeDescriptor.instance(), VariantHostTypeDescriptor.instance());
     }
@@ -54,7 +54,7 @@ public final class OptionTypes {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static OptionTypes instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static OptionTypesWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         endive.testing.example.optiontypes.maybe.Host maybe = imports.maybe();
         HostInstance.Builder maybeBuilder = HostInstance.builder(store);
@@ -67,7 +67,7 @@ public final class OptionTypes {
         maybeBuilder.addFunction("first", FuncType.builder().addParam(LabelValType.builder().withLabel("values").withValType(maybeType4).build()).withResult(maybeType0).build(), args -> new Object[] { Optional.ofNullable(maybe.first(((List<Object>) args[0]).stream().map(element -> (Long) ((VariantValue) element).value()).collect(Collectors.toList()))).map(some -> VariantValue.of("some", some)).orElse(VariantValue.of("none", null)) });
         maybeBuilder.addFunction("nested", FuncType.builder().addParam(LabelValType.builder().withLabel("values").withValType(maybeType6).build()).withResult(maybeType0).build(), args -> new Object[] { Optional.ofNullable(maybe.nested(Optional.ofNullable(((VariantValue) args[0]).value()).map(some -> ((List<Object>) some).stream().map(element1 -> (Long) ((VariantValue) element1).value()).collect(Collectors.toList())).orElse(null))).map(some -> VariantValue.of("some", some)).orElse(VariantValue.of("none", null)) });
         values.put("example:option-types/maybe", maybeBuilder.build());
-        return new OptionTypes(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new OptionTypesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

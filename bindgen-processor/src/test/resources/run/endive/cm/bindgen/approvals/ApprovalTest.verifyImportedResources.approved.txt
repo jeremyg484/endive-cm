@@ -1,4 +1,4 @@
-// endive.testing.ImportSomeResources
+// endive.testing.ImportSomeResourcesWorld
 
 package endive.testing;
 
@@ -23,7 +23,7 @@ import run.endive.cm.types.WasmComponent;
  * Bindings for the WIT world {@code example:imported-resources/import-some-resources}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class ImportSomeResources {
+public final class ImportSomeResourcesWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -38,14 +38,14 @@ public final class ImportSomeResources {
 
     private final ComponentInstance instance;
 
-    private ImportSomeResources(ComponentInstance instance) {
+    private ImportSomeResourcesWorld(ComponentInstance instance) {
         this.instance = instance;
     }
 
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static ImportSomeResources instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static ImportSomeResourcesWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         endive.testing.example.importedresources.logging.Host logging = imports.logging();
         HostInstance.Builder loggingBuilder = HostInstance.builder(store);
@@ -65,7 +65,7 @@ public final class ImportSomeResources {
             return new Object[0];
         });
         values.put("example:imported-resources/logging", loggingBuilder.build());
-        return new ImportSomeResources(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new ImportSomeResourcesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**
@@ -122,6 +122,13 @@ public final class Handles {
      */
     public Logger getLogger(ResourceValue handle) {
         return loggerTable.get(handle);
+    }
+
+    /**
+     * The {@code logger} an owned handle stands for, whose ownership passes to the caller. It is forgotten here without being dropped.
+     */
+    public Logger takeLogger(ResourceValue handle) {
+        return loggerTable.take(handle);
     }
 }
 

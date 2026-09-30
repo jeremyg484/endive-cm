@@ -65,13 +65,13 @@ public class ResourceHandlesTest {
     /** The guest traps unless its pollable is ready, so the one above really arrived. */
     @Test
     void aPollableTheGuestDoesNotExpectTraps() {
-        ResourceHandles bindings = instantiate(new Streams(false, 3));
+        ResourceHandlesWorld bindings = instantiate(new Streams(false, 3));
 
         assertThrows(TrapException.class, bindings::run);
     }
 
-    private static ResourceHandles instantiate(Streams streams) {
-        return ResourceHandles.instantiate(new ComponentStore(), component, () -> streams);
+    private static ResourceHandlesWorld instantiate(Streams streams) {
+        return ResourceHandlesWorld.instantiate(new ComponentStore(), component, () -> streams);
     }
 
     /** The host side of {@code example:resource-handles/streams}. */

@@ -1,4 +1,4 @@
-// endive.testing.UseResources
+// endive.testing.UseResourcesWorld
 
 package endive.testing;
 
@@ -28,7 +28,7 @@ import run.endive.cm.types.WasmComponent;
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
 @SuppressWarnings("unchecked")
-public final class UseResources {
+public final class UseResourcesWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -50,7 +50,7 @@ public final class UseResources {
 
     private final ComponentFunction run;
 
-    private UseResources(ComponentInstance instance) {
+    private UseResourcesWorld(ComponentInstance instance) {
         this.instance = instance;
         this.run = instance.export("run").typed(PrimitiveHostTypeDescriptor.forClass(Long.class));
     }
@@ -58,7 +58,7 @@ public final class UseResources {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static UseResources instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static UseResourcesWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         HostInstance.Builder errorBuilder = HostInstance.builder(store);
         endive.testing.example.useresources.error.Handles errorHandles = new endive.testing.example.useresources.error.Handles(errorBuilder);
@@ -90,7 +90,7 @@ public final class UseResources {
         streamsBuilder.addFunction("last-error", FuncType.builder().withResult(streamsError.own()).build(), args -> new Object[] { errorHandles.ownError(streams.lastError()) });
         streamsBuilder.addFunction("recorded", FuncType.builder().addParam(LabelValType.builder().withLabel("e").withValType(streamsError.borrow()).build()).withResult(ValType.builder().withPrimValType(PrimValType.BOOL).build()).build(), args -> new Object[] { streams.recorded(errorHandles.getError((ResourceValue) args[0])) });
         values.put("example:use-resources/streams", streamsBuilder.build());
-        return new UseResources(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new UseResourcesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**
@@ -173,6 +173,13 @@ public final class Handles {
     public Error getError(ResourceValue handle) {
         return errorTable.get(handle);
     }
+
+    /**
+     * The {@code error} an owned handle stands for, whose ownership passes to the caller. It is forgotten here without being dropped.
+     */
+    public Error takeError(ResourceValue handle) {
+        return errorTable.take(handle);
+    }
 }
 
 // endive.testing.example.useresources.poll.Handles
@@ -221,6 +228,13 @@ public final class Handles {
      */
     public Pollable getPollable(ResourceValue handle) {
         return pollableTable.get(handle);
+    }
+
+    /**
+     * The {@code pollable} an owned handle stands for, whose ownership passes to the caller. It is forgotten here without being dropped.
+     */
+    public Pollable takePollable(ResourceValue handle) {
+        return pollableTable.take(handle);
     }
 }
 
@@ -307,6 +321,13 @@ public final class Handles {
      */
     public InputStream getInputStream(ResourceValue handle) {
         return inputStreamTable.get(handle);
+    }
+
+    /**
+     * The {@code input-stream} an owned handle stands for, whose ownership passes to the caller. It is forgotten here without being dropped.
+     */
+    public InputStream takeInputStream(ResourceValue handle) {
+        return inputStreamTable.take(handle);
     }
 }
 

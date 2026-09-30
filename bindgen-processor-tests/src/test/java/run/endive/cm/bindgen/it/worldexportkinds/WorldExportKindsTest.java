@@ -51,7 +51,7 @@ public class WorldExportKindsTest {
     @Test
     void anInlineExportedInterfaceIsCallable() {
         Log log = new Log();
-        WithExports bindings = instantiate(log);
+        WithExportsWorld bindings = instantiate(log);
 
         assertEquals("ok", bindings.environment().get("HOME"));
         assertEquals(List.of("HOME"), log.messages);
@@ -73,7 +73,7 @@ public class WorldExportKindsTest {
      */
     @Test
     void anInterfaceExportedByIdIsCallable() {
-        WithExports bindings = instantiate(new Log());
+        WithExportsWorld bindings = instantiate(new Log());
 
         assertEquals("kb", bindings.units().bytesToString(BigInteger.valueOf(1024)));
         assertEquals("5s", bindings.units().durationToString(BigInteger.valueOf(5), 500L));
@@ -82,25 +82,25 @@ public class WorldExportKindsTest {
     /** The trap above is live, so a value the guest does not expect is refused. */
     @Test
     void aValueTheGuestDoesNotExpectTraps() {
-        WithExports bindings = instantiate(new Log());
+        WithExportsWorld bindings = instantiate(new Log());
 
         assertThrows(TrapException.class, () -> bindings.units().bytesToString(BigInteger.ONE));
     }
 
     @Test
     void everyExportedInterfaceWrapperIsBuiltOnce() {
-        WithExports bindings = instantiate(new Log());
+        WithExportsWorld bindings = instantiate(new Log());
 
         assertSame(bindings.environment(), bindings.environment());
         assertSame(bindings.units(), bindings.units());
     }
 
-    private static WithExports instantiate(Log log) {
-        return WithExports.instantiate(new ComponentStore(), component, log);
+    private static WithExportsWorld instantiate(Log log) {
+        return WithExportsWorld.instantiate(new ComponentStore(), component, log);
     }
 
     /** The world's one import, recording what the guest logs. */
-    private static final class Log implements WithExports.Imports {
+    private static final class Log implements WithExportsWorld.Imports {
 
         private final List<String> messages = new ArrayList<>();
 

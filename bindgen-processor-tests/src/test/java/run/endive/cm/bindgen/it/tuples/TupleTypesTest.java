@@ -55,7 +55,7 @@ public class TupleTypesTest {
     /** The guest checks its arguments, so a tuple it does not expect traps. */
     @Test
     void aTupleTheGuestDoesNotExpectTraps() {
-        TupleTypes bindings = instantiate(new Recorder());
+        TupleTypesWorld bindings = instantiate(new Recorder());
 
         assertThrows(TrapException.class, () -> bindings.shift(Tuple2.of(1L, 2L), 5L));
     }
@@ -63,13 +63,13 @@ public class TupleTypesTest {
     /** The guest checks what the host answered, which is the other direction of the same claim. */
     @Test
     void aTupleTheHostAnswersWithWronglyTraps() {
-        TupleTypes bindings = instantiate(point -> Tuple2.of(0L, 0L));
+        TupleTypesWorld bindings = instantiate(point -> Tuple2.of(0L, 0L));
 
         assertThrows(TrapException.class, () -> bindings.shift(Tuple2.of(7L, 11L), 5L));
     }
 
-    private static TupleTypes instantiate(Host points) {
-        return TupleTypes.instantiate(new ComponentStore(), component, () -> points);
+    private static TupleTypesWorld instantiate(Host points) {
+        return TupleTypesWorld.instantiate(new ComponentStore(), component, () -> points);
     }
 
     /** The host side of {@code example:tuples/points}. */

@@ -1,4 +1,4 @@
-// endive.testing.WithExports
+// endive.testing.WithExportsWorld
 
 package endive.testing;
 
@@ -21,7 +21,7 @@ import run.endive.cm.types.WasmComponent;
  * Bindings for the WIT world {@code example:world-exports/with-exports}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class WithExports {
+public final class WithExportsWorld {
 
     private static final FuncType LOG_FUNC = FuncType.builder().addParam(LabelValType.builder().withLabel("msg").withValType(ValType.builder().withPrimValType(PrimValType.STRING).build()).build()).build();
 
@@ -41,7 +41,7 @@ public final class WithExports {
 
     private final endive.testing.exports.example.worldexports.units.Guest units;
 
-    private WithExports(ComponentInstance instance) {
+    private WithExportsWorld(ComponentInstance instance) {
         this.instance = instance;
         this.run = instance.export("run").typed(VoidHostTypeDescriptor.instance());
         this.environment = new endive.testing.exports.environment.Guest(instance.exportedInstance("environment"));
@@ -51,13 +51,13 @@ public final class WithExports {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static WithExports instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static WithExportsWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("log", HostFunction.of(store, LOG_FUNC, args -> {
             imports.log((String) args[0]);
             return new Object[0];
         }));
-        return new WithExports(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new WithExportsWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

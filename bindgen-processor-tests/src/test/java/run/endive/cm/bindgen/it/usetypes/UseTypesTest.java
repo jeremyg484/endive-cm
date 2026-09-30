@@ -75,13 +75,13 @@ public class UseTypesTest {
     void anEntryTheGuestDoesNotExpectTraps() {
         Recorder recorder = new Recorder(new Entry(Level.ERROR, 41L));
 
-        UseTypes bindings = instantiate(recorder);
+        UseTypesWorld bindings = instantiate(recorder);
 
         assertThrows(TrapException.class, bindings::run);
     }
 
-    private static UseTypes instantiate(Recorder recorder) {
-        return UseTypes.instantiate(new ComponentStore(), component, () -> recorder);
+    private static UseTypesWorld instantiate(Recorder recorder) {
+        return UseTypesWorld.instantiate(new ComponentStore(), component, () -> recorder);
     }
 
     /** The host side of {@code example:use-types/logging}. */

@@ -63,18 +63,18 @@ public class UseResourcesTest {
     /** The guest traps unless its pollable is ready, so the one above really arrived. */
     @Test
     void aPollableTheGuestDoesNotExpectTraps() {
-        UseResources bindings = instantiate(new Hosts(false, "disk full"));
+        UseResourcesWorld bindings = instantiate(new Hosts(false, "disk full"));
 
         assertThrows(TrapException.class, bindings::run);
     }
 
-    private static UseResources instantiate(Hosts hosts) {
-        return UseResources.instantiate(new ComponentStore(), component, hosts);
+    private static UseResourcesWorld instantiate(Hosts hosts) {
+        return UseResourcesWorld.instantiate(new ComponentStore(), component, hosts);
     }
 
     /** The host side of every interface the world imports. */
     private static final class Hosts
-            implements UseResources.Imports,
+            implements UseResourcesWorld.Imports,
                     run.endive.cm.bindgen.it.useresources.example.useresources.poll.Host,
                     run.endive.cm.bindgen.it.useresources.example.useresources.streams.Host {
 

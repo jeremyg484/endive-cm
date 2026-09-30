@@ -1,4 +1,4 @@
-// endive.testing.HelloWorld
+// endive.testing.HelloWorldWorld
 
 package endive.testing;
 
@@ -23,7 +23,7 @@ import run.endive.cm.types.WasmComponent;
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
 @SuppressWarnings("unchecked")
-public final class HelloWorld {
+public final class HelloWorldWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -40,7 +40,7 @@ public final class HelloWorld {
 
     private final endive.testing.exports.demo.Guest demo;
 
-    private HelloWorld(ComponentInstance instance) {
+    private HelloWorldWorld(ComponentInstance instance) {
         this.instance = instance;
         this.demo = new endive.testing.exports.demo.Guest(instance.exportedInstance("demo"));
     }
@@ -48,7 +48,7 @@ public final class HelloWorld {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static HelloWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static HelloWorldWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         endive.testing.my.project.host.Host host = imports.host();
         HostInstance.Builder hostBuilder = HostInstance.builder(store);
@@ -56,7 +56,7 @@ public final class HelloWorld {
         hostBuilder.addFunction("gen-random-integer", FuncType.builder().withResult(ValType.builder().withPrimValType(PrimValType.U32).build()).build(), args -> new Object[] { host.genRandomInteger() });
         hostBuilder.addFunction("sha256", FuncType.builder().addParam(LabelValType.builder().withLabel("bytes").withValType(hostType1).build()).withResult(ValType.builder().withPrimValType(PrimValType.STRING).build()).build(), args -> new Object[] { host.sha256((List<Short>) args[0]) });
         values.put("my:project/host", hostBuilder.build());
-        return new HelloWorld(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new HelloWorldWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

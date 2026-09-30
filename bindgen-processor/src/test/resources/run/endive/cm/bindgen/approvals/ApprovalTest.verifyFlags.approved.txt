@@ -1,4 +1,4 @@
-// endive.testing.FlagTypes
+// endive.testing.FlagTypesWorld
 
 package endive.testing;
 
@@ -20,7 +20,7 @@ import run.endive.cm.types.WasmComponent;
  * Bindings for the WIT world {@code example:flag-types/flag-types}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class FlagTypes {
+public final class FlagTypesWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -37,7 +37,7 @@ public final class FlagTypes {
 
     private final endive.testing.exports.example.flagtypes.runner.Guest runner;
 
-    private FlagTypes(ComponentInstance instance) {
+    private FlagTypesWorld(ComponentInstance instance) {
         this.instance = instance;
         this.runner = new endive.testing.exports.example.flagtypes.runner.Guest(instance.exportedInstance("example:flag-types/runner"));
     }
@@ -45,7 +45,7 @@ public final class FlagTypes {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static FlagTypes instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static FlagTypesWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         endive.testing.example.flagtypes.permissions.Host permissions = imports.permissions();
         HostInstance.Builder permissionsBuilder = HostInstance.builder(store);
@@ -53,7 +53,7 @@ public final class FlagTypes {
         permissionsBuilder.addType("permission", permissionsPermission);
         permissionsBuilder.addFunction("grant", FuncType.builder().addParam(LabelValType.builder().withLabel("requested").withValType(permissionsPermission).build()).withResult(permissionsPermission).build(), args -> new Object[] { permissions.grant(endive.testing.example.flagtypes.permissions.Permission.fromComponent(args[0])).toComponent() });
         values.put("example:flag-types/permissions", permissionsBuilder.build());
-        return new FlagTypes(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new FlagTypesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

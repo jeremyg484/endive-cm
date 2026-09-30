@@ -1,4 +1,4 @@
-// endive.testing.ExportSomeResources
+// endive.testing.ExportSomeResourcesWorld
 
 package endive.testing;
 
@@ -14,7 +14,7 @@ import run.endive.cm.types.WasmComponent;
  * Bindings for the WIT world {@code example:exported-resources/export-some-resources}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class ExportSomeResources {
+public final class ExportSomeResourcesWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -26,7 +26,7 @@ public final class ExportSomeResources {
 
     private final endive.testing.exports.example.exportedresources.logging.Guest logging;
 
-    private ExportSomeResources(ComponentInstance instance) {
+    private ExportSomeResourcesWorld(ComponentInstance instance) {
         this.instance = instance;
         this.logging = new endive.testing.exports.example.exportedresources.logging.Guest(instance.exportedInstance("example:exported-resources/logging"));
     }
@@ -34,9 +34,9 @@ public final class ExportSomeResources {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static ExportSomeResources instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static ExportSomeResourcesWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
-        return new ExportSomeResources(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new ExportSomeResourcesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

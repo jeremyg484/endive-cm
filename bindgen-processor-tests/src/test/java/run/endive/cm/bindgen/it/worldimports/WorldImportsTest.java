@@ -40,7 +40,7 @@ public class WorldImportsTest {
     void everyImportIsReachedFromTheGuest() {
         Recorder recorder = new Recorder("hello");
 
-        MyWorld.instantiate(new ComponentStore(), component, recorder).run();
+        MyWorldWorld.instantiate(new ComponentStore(), component, recorder).run();
 
         assertTrue(recorder.greeted, "expected the guest to call the imported greet");
         assertEquals(List.of("hello"), recorder.logged);
@@ -52,7 +52,7 @@ public class WorldImportsTest {
     void aValueFromOneImportReachesAnother() {
         Recorder recorder = new Recorder("a longer greeting");
 
-        MyWorld.instantiate(new ComponentStore(), component, recorder).run();
+        MyWorldWorld.instantiate(new ComponentStore(), component, recorder).run();
 
         assertEquals(List.of("a longer greeting"), recorder.logged);
     }
@@ -61,7 +61,7 @@ public class WorldImportsTest {
     void theInterfaceIsAskedForOnlyOnce() {
         Recorder recorder = new Recorder("hello");
 
-        MyWorld world = MyWorld.instantiate(new ComponentStore(), component, recorder);
+        MyWorldWorld world = MyWorldWorld.instantiate(new ComponentStore(), component, recorder);
         world.run();
         world.run();
 
@@ -74,14 +74,14 @@ public class WorldImportsTest {
     void nothingIsCalledBeforeTheGuestRuns() {
         Recorder recorder = new Recorder("hello");
 
-        MyWorld.instantiate(new ComponentStore(), component, recorder);
+        MyWorldWorld.instantiate(new ComponentStore(), component, recorder);
 
         assertFalse(recorder.greeted);
         assertEquals(0, recorder.ticks);
     }
 
     /** One object implementing both the world's imports and the interface it imports. */
-    private static final class Recorder implements MyWorld.Imports, Host {
+    private static final class Recorder implements MyWorldWorld.Imports, Host {
 
         private final String greeting;
         private final List<String> logged = new ArrayList<>();

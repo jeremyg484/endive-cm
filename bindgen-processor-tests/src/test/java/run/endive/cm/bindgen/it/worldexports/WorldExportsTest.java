@@ -61,7 +61,7 @@ public class WorldExportsTest {
 
     @Test
     void theExportedInterfaceWrapperIsBuiltOnce() {
-        HelloWorld bindings = instantiate(new MyHost());
+        HelloWorldWorld bindings = instantiate(new MyHost());
 
         assertSame(bindings.demo(), bindings.demo());
     }
@@ -75,8 +75,8 @@ public class WorldExportsTest {
         assertEquals(0, host.randomCalls);
     }
 
-    private static HelloWorld instantiate(Host host) {
-        return HelloWorld.instantiate(new ComponentStore(), component, () -> host);
+    private static HelloWorldWorld instantiate(Host host) {
+        return HelloWorldWorld.instantiate(new ComponentStore(), component, () -> host);
     }
 
     /** The host side of {@code my:project/host}. */

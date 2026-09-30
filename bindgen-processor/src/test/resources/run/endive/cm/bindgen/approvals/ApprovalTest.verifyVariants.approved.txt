@@ -1,4 +1,4 @@
-// endive.testing.VariantTypes
+// endive.testing.VariantTypesWorld
 
 package endive.testing;
 
@@ -22,7 +22,7 @@ import run.endive.cm.types.WasmComponent;
  * Bindings for the WIT world {@code example:variant-types/variant-types}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class VariantTypes {
+public final class VariantTypesWorld {
 
     /**
      * The world's imports, which the embedder implements.
@@ -39,7 +39,7 @@ public final class VariantTypes {
 
     private final endive.testing.exports.example.varianttypes.replies.Guest replies;
 
-    private VariantTypes(ComponentInstance instance) {
+    private VariantTypesWorld(ComponentInstance instance) {
         this.instance = instance;
         this.replies = new endive.testing.exports.example.varianttypes.replies.Guest(instance.exportedInstance("example:variant-types/replies"));
     }
@@ -47,7 +47,7 @@ public final class VariantTypes {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static VariantTypes instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static VariantTypesWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         endive.testing.example.varianttypes.commands.Host commands = imports.commands();
         HostInstance.Builder commandsBuilder = HostInstance.builder(store);
@@ -55,7 +55,7 @@ public final class VariantTypes {
         commandsBuilder.addType("command", commandsCommand);
         commandsBuilder.addFunction("handle", FuncType.builder().addParam(LabelValType.builder().withLabel("cmd").withValType(commandsCommand).build()).withResult(commandsCommand).build(), args -> new Object[] { commands.handle(endive.testing.example.varianttypes.commands.Command.fromComponent(args[0])).toComponent() });
         values.put("example:variant-types/commands", commandsBuilder.build());
-        return new VariantTypes(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new VariantTypesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

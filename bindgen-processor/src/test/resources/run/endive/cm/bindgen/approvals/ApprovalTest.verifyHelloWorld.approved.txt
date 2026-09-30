@@ -1,4 +1,4 @@
-// endive.testing.HelloWorld
+// endive.testing.HelloWorldWorld
 
 package endive.testing;
 
@@ -20,7 +20,7 @@ import run.endive.cm.types.WasmComponent;
  * Bindings for the WIT world {@code my:project/hello-world}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class HelloWorld {
+public final class HelloWorldWorld {
 
     private static final FuncType NAME_FUNC = FuncType.builder().withResult(ValType.builder().withPrimValType(PrimValType.STRING).build()).build();
 
@@ -36,7 +36,7 @@ public final class HelloWorld {
 
     private final ComponentFunction greet;
 
-    private HelloWorld(ComponentInstance instance) {
+    private HelloWorldWorld(ComponentInstance instance) {
         this.instance = instance;
         this.greet = instance.export("greet").typed(VoidHostTypeDescriptor.instance());
     }
@@ -44,10 +44,10 @@ public final class HelloWorld {
     /**
      * Instantiates {@code component}, satisfying its imports with {@code imports}.
      */
-    public static HelloWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
+    public static HelloWorldWorld instantiate(ComponentStore store, WasmComponent component, Imports imports) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("name", HostFunction.of(store, NAME_FUNC, args -> new Object[] { imports.name() }));
-        return new HelloWorld(ComponentLinker.builder().build().instantiate(store, component, values));
+        return new HelloWorldWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
 
     /**

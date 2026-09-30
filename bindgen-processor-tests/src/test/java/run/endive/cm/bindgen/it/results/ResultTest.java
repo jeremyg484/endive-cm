@@ -138,7 +138,7 @@ public class ResultTest {
     }
 
     private static Guest running(Host host) {
-        return ResultTypes.instantiate(new ComponentStore(), component, () -> host).running();
+        return ResultTypesWorld.instantiate(new ComponentStore(), component, () -> host).running();
     }
 
     private static Throwable rootCause(Throwable thrown) {
