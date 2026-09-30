@@ -662,9 +662,16 @@ type names is declared first, against the declaring interface's numbering. A com
 instance declaring it, so every named type an imported interface declares is also exported from its host instance
 through `HostInstance.Builder.addType`.
 
-A used resource is refused, because the using instance has to share the runtime resource type the declaring instance
-brought into existence, and nothing wires that yet. A used `result` is refused too, since its exception belongs to the
-declaring interface's package while the functions throwing it are generated elsewhere. `use` on an exported interface
+A used resource has to stay the runtime resource type the declaring instance brought into existence, because the
+importer binds it to that one with an `eq` bound and the linker compares resource types by identity. So the using
+instance declares it through `HostInstance.Builder.useResource`, handing over the declaring interface's
+`HostResource`, and exports it under the name the using interface gives it. A handle to it converts through the
+declaring interface's `Handles`, whichever interface it crosses on, so there is one table per resource however many
+interfaces use it. The declaring interface is always imported ahead of any interface using it, so its `Handles` is
+already in reach. A world using a resource is refused, because nothing on the world's side reaches a `Handles`.
+
+A used `result` is refused, since its exception belongs to the declaring interface's package while the functions
+throwing it are generated elsewhere. `use` on an exported interface
 is refused, because only the host side resolves a used type to its declaring package. A type a world declares in its
 own right has no package to be generated into, so it is refused as well.
 
@@ -678,8 +685,8 @@ The WIT under `src/test/resources/wit` in `bindgen-processor` is the bindgen! ex
 That is what the approved files are generated from, so a difference from the example is visible rather than assumed.
 
 All seven of the non-async example worlds are present. A world covering a WIT feature no example declares is written
-for the purpose and named after it, such as `record-types`, `result-types`, `use-types` or `resource-handles`, and each
-such fixture says so at the top.
+for the purpose and named after it, such as `record-types`, `result-types`, `use-types`, `use-resources` or
+`resource-handles`, and each such fixture says so at the top.
 
 The end-to-end fixtures use the same WIT, with one exception that has to be stated wherever it appears. A world that
 imports without exporting cannot be driven, since nothing enters the guest, so `with-imports`,
@@ -742,6 +749,7 @@ Generating bindings needed public API the runtime did not have. All of it is in 
 |---|---|
 | `HostInstance` | Building an instance the embedder supplies, declaring types and resources into it |
 | `HostInstance.Builder.addType` | Exporting a declared type, which a component using it aliases by name |
+| `HostInstance.Builder.useResource` | Declaring a resource another host instance declared, keeping its runtime type |
 | `HostFunction` | An import declared as a bare function, which belongs to no instance |
 | `HostResource` | A resource type the embedder implements, with its `own` and `borrow` |
 | `HostResourceTable` | Mapping a resource representation to the Java object it stands for |
@@ -773,11 +781,13 @@ way today, which means adding one is a matter of finding its rejection and repla
 - **A `result` on a function a world declares in its own right.** The exception generated for one lives in the Java
   package of the interface declaring the result, and a world declares no such package. Moving a result into an
   interface is enough, and the refusal says so.
-- **A used resource, a used `result`, and `use` on an exported interface.** A `use` of anything else resolves to the
-  interface declaring it. A used resource needs the using host instance to share the declaring instance's runtime
-  resource type, and a handle crossing inside a generated type needs the resource tables that live in `instantiate`.
-  A used `result` needs its exception reached in the declaring package. An exported interface needs the guest side to
-  resolve a used type the way the host side already does.
+- **A used `result`, `use` on an exported interface, and a resource a world uses.** A `use` of anything else resolves
+  to the interface declaring it. A used `result` needs its exception reached in the declaring package. An exported
+  interface needs the guest side to resolve a used type the way the host side already does. A world using a resource
+  needs a `Handles` in reach of the world's own functions.
+- **A used type naming a handle.** A used type is declared into the using instance along with whatever it names, but
+  an `own` or `borrow` it names is only declared for resources the using interface uses itself. One naming any other
+  resource fails as `borrow is not yet supported` or `own is not yet supported`.
 - **A type a world declares in its own right.** A world has no Java package for one to be generated into.
 - **A compound type on a world's bare function import.** `HostFunction` builds an instance with no type space,
   leaving an index nothing to resolve. Either `HostFunction` grows type declarations or such an import is built

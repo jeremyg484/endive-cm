@@ -70,7 +70,23 @@ public final class HostInstance {
                                     .build());
             ResourceTypeInstance resourceType =
                     delegate.declareHostResourceType(declaration, destructor);
-            int typeIdx = declareType(declaration, resourceType).typeIdx();
+            return declareHandles(resourceType);
+        }
+
+        /**
+         * Declares a resource type another host instance brought into existence, along with its
+         * {@code own} and {@code borrow} in this instance. The type stays the one {@code resource}
+         * names, which is what an importer's {@code eq} bound on it requires, and dropping a
+         * handle still runs the destructor it was declared with.
+         *
+         * @see <a href="https://github.com/WebAssembly/component-model/blob/706074c96bc14cfc58469e1bdc452bb4d91921c7/design/mvp/WIT.md#use-statements">WIT.md, use statements</a>
+         */
+        public HostResource useResource(HostResource resource) {
+            return declareHandles(resource.instance());
+        }
+
+        private HostResource declareHandles(ResourceTypeInstance resourceType) {
+            int typeIdx = declareType(resourceType.type(), resourceType).typeIdx();
             return new HostResource(
                     resourceType,
                     declareType(Type.of(OwnType.builder().withTypeIdx(typeIdx).build())),

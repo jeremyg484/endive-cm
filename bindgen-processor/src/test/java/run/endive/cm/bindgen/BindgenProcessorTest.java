@@ -371,9 +371,12 @@ class BindgenProcessorTest {
                                 + " endive.testing.example.chain.base.Level l);");
     }
 
-    /** A used resource has to share its runtime type with the interface declaring it. */
+    /**
+     * A used resource keeps the runtime type the declaring interface brought into existence, and
+     * converts through that interface's {@code Handles}, even under a name of the user's own.
+     */
     @Test
-    void aUsedResourceIsRefused() {
+    void aUsedResourceKeepsTheDeclaringInterfacesType() {
         Compilation compilation =
                 compile(
                         JavaFileObjects.forSourceString(
@@ -386,8 +389,8 @@ class BindgenProcessorTest {
                                         + "  resource pollable { ready: func() -> bool; }\\n"
                                         + "}\\n"
                                         + "interface streams {\\n"
-                                        + "  use poll.{pollable};\\n"
-                                        + "  subscribe: func() -> pollable;\\n"
+                                        + "  use poll.{pollable as ticket};\\n"
+                                        + "  subscribe: func() -> ticket;\\n"
                                         + "}\\n"
                                         + "world used-resource {\\n"
                                         + "  import streams;\\n"
@@ -395,11 +398,51 @@ class BindgenProcessorTest {
                                         + "}\\n\")\n"
                                         + "public class UsedResourceHost {}\n"));
 
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.example.used.streams.Host")
+                .contentsAsUtf8String()
+                .contains("endive.testing.example.used.poll.Pollable subscribe();");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.UsedResource")
+                .contentsAsUtf8String()
+                .contains(
+                        "HostResource streamsTicket ="
+                            + " streamsBuilder.useResource(pollHandles.pollableResourceType());");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.UsedResource")
+                .contentsAsUtf8String()
+                .contains("streamsBuilder.addResource(\"ticket\", streamsTicket);");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.UsedResource")
+                .contentsAsUtf8String()
+                .contains("pollHandles.ownPollable(streams.subscribe())");
+    }
+
+    /** Only an interface's wiring reaches a {@code Handles}, so a world using a resource is refused. */
+    @Test
+    void aResourceAWorldUsesIsRefused() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.WorldResourceHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"world-resource\", inline ="
+                                        + " \"package example:used;\\n"
+                                        + "interface poll {\\n"
+                                        + "  resource pollable { ready: func() -> bool; }\\n"
+                                        + "}\\n"
+                                        + "world world-resource {\\n"
+                                        + "  use poll.{pollable};\\n"
+                                        + "  export go: func();\\n"
+                                        + "}\\n\")\n"
+                                        + "public class WorldResourceHost {}\n"));
+
         assertThat(compilation).failed();
         assertThat(compilation)
                 .hadErrorContaining(
-                        "interface \"example:used/streams\" uses resource \"pollable\" from"
-                                + " \"poll\"");
+                        "world \"world-resource\" uses resource \"pollable\" from \"poll\"");
     }
 
     /** A used result generates its exception into the package of the interface declaring it. */

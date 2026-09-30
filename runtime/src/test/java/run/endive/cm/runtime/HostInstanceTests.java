@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import run.endive.cm.abi.ResourceValue;
 import run.endive.cm.types.FuncType;
 import run.endive.cm.types.LabelValType;
+import run.endive.cm.types.OwnType;
 import run.endive.cm.types.PrimValType;
 import run.endive.cm.types.RecordType;
 import run.endive.cm.types.Type;
@@ -136,6 +137,27 @@ public class HostInstanceTests {
 
         assertNotSame(first.type(), second.type());
         assertNotSame(first.own(), second.own());
+    }
+
+    /**
+     * A resource one instance uses from another stays the same type, which is what lets an
+     * importer bind it to the declaring instance's resource with an {@code eq} bound.
+     */
+    @Test
+    public void aResourceUsedFromAnotherInstanceIsTheSameType() {
+        var store = new ComponentStore();
+        var declaring = HostInstance.builder(store);
+        HostResource declared = declaring.declareResource(null);
+        var using = HostInstance.builder(store);
+
+        HostResource used = using.useResource(declared);
+        ComponentInstance host = using.addResource("conn", used).build();
+
+        int owned = ((OwnType) host.slotAt(used.own().typeIdx()).type().defValType()).typeIdx();
+
+        assertSame(declared.type(), used.type());
+        assertSame(declared.type(), host.getExport("conn"));
+        assertSame(declared.type(), host.resourceType(owned));
     }
 
     /** A resource may be exported under more than one name, naming one type both times. */

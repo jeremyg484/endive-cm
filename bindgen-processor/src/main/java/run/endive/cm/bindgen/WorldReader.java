@@ -255,7 +255,7 @@ final class WorldReader {
         if (bound != null && bound.kind() == TypeBound.Kind.EQ) {
             int index = (int) bound.typeIdx();
             if (declared.isUsed(index)) {
-                requireUsable(declared, index, "world \"" + world + "\"", name);
+                requireUsable(declared, index, "world \"" + world + "\"", name, false);
                 declared.alias(declared, index, name);
                 return;
             }
@@ -376,7 +376,7 @@ final class WorldReader {
         }
         int boundIndex = (int) bound.typeIdx();
         if (scope.isUsed(boundIndex)) {
-            requireUsable(scope, boundIndex, "interface \"" + iface + "\"", exportName);
+            requireUsable(scope, boundIndex, "interface \"" + iface + "\"", exportName, true);
             scope.alias(scope, boundIndex, exportName);
             return;
         }
@@ -388,14 +388,18 @@ final class WorldReader {
     }
 
     /**
-     * A used resource has to share its runtime type with the interface declaring it, and a used
-     * {@code result} generates its exception into the declaring interface's package. Neither is
-     * wired yet, so both are refused by name.
+     * A used {@code result} generates its exception into the declaring interface's package, which
+     * is not wired yet, so it is refused by name. A used resource converts through the declaring
+     * interface's {@code Handles}, which only an interface's wiring reaches, so a world using one is
+     * refused too.
+     *
+     * @param resources whether {@code user} may use a resource
      */
-    private static void requireUsable(WitScope scope, int index, String user, String name) {
+    private static void requireUsable(
+            WitScope scope, int index, String user, String name, boolean resources) {
         Type used = scope.at(index);
         String declaredBy = scope.declaringScope(index).owner();
-        if (used == null) {
+        if (used == null && !resources) {
             throw new BindgenException(
                     user
                             + " uses resource \""
@@ -404,7 +408,9 @@ final class WorldReader {
                             + declaredBy
                             + "\", which is not yet supported");
         }
-        if (used.defValType() != null && used.defValType().kind() == DefValType.Kind.RESULT) {
+        if (used != null
+                && used.defValType() != null
+                && used.defValType().kind() == DefValType.Kind.RESULT) {
             throw new BindgenException(
                     user
                             + " uses result type \""

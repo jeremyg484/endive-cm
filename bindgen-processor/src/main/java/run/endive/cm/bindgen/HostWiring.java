@@ -104,46 +104,46 @@ final class HostWiring {
 
     /**
      * Declares every resource the interface declares, through the interface's {@code Handles},
-     * and exports each under its WIT name.
+     * and every resource it uses, through the {@code Handles} of the interface declaring that one.
+     * Each is exported under the name the interface gives it.
      *
      * <p>A host instance is matched against the importer structurally rather than index by
      * index, so its resources are declared ahead of everything else. That way every {@code own}
      * and {@code borrow} names a resource that already exists, wherever the WIT declared it.
      */
     private void declareResources(BlockStmt body, WitInterface imported, Locals locals) {
-        if (imported.resources().isEmpty()) {
-            return;
-        }
-        String javaType = imported.scope().javaPackage() + "." + InterfaceGenerator.HANDLES;
-        String local = Names.free(locals.host + InterfaceGenerator.HANDLES, typeLocals);
-        typeLocals.add(local);
-        body.addStatement(
-                AstBuilders.declare(
-                        AstBuilders.type(javaType),
-                        local,
-                        AstBuilders.construct(AstBuilders.type(javaType), locals.builder())));
-        handles.put(imported.scope(), local);
-
-        for (WitResource resource : imported.resources()) {
-            String handle = Names.free(locals.host + Names.type(resource.name()), typeLocals);
-            typeLocals.add(handle);
-            locals.resources.put(resource.name(), handle);
+        WitScope scope = imported.scope();
+        if (!imported.resources().isEmpty()) {
+            String javaType = scope.javaPackage() + "." + InterfaceGenerator.HANDLES;
+            String local = Names.free(locals.host + InterfaceGenerator.HANDLES, typeLocals);
+            typeLocals.add(local);
             body.addStatement(
                     AstBuilders.declare(
-                            unit.use(QualifiedTypes.HOST_RESOURCE),
-                            handle,
-                            AstBuilders.call(
-                                    new NameExpr(local),
-                                    Names.resourceTypeGetter(resource.name()))));
-            body.addStatement(
-                    AstBuilders.call(
-                            locals.builder(),
-                            "addResource",
-                            AstBuilders.text(resource.name()),
-                            new NameExpr(handle)));
+                            AstBuilders.type(javaType),
+                            local,
+                            AstBuilders.construct(AstBuilders.type(javaType), locals.builder())));
+            handles.put(scope, local);
+
+            for (WitResource resource : imported.resources()) {
+                String handle =
+                        declareResource(
+                                body,
+                                locals,
+                                resource.name(),
+                                AstBuilders.call(
+                                        new NameExpr(local),
+                                        Names.resourceTypeGetter(resource.name())));
+                locals.resourceIn(scope).put(resource.typeIndex(), handle);
+                addResource(body, locals, resource.name(), handle);
+            }
         }
 
-        WitScope scope = imported.scope();
+        for (int i = 0; i < scope.size(); i++) {
+            if (scope.at(i) == null && scope.isUsed(i) && scope.nameAt(i) != null) {
+                useResource(body, imported, locals, i);
+            }
+        }
+
         for (int i = 0; i < scope.size(); i++) {
             Type slot = scope.at(i);
             DefValType defined = slot == null ? null : slot.defValType();
@@ -156,16 +156,70 @@ final class HostWiring {
     }
 
     /**
+     * A used resource keeps the runtime type the declaring interface brought into existence,
+     * which is what the importer's {@code eq} bound on it requires. The declaring interface is
+     * imported ahead of any interface using it, so its {@code Handles} is already in reach.
+     */
+    private void useResource(BlockStmt body, WitInterface imported, Locals locals, int index) {
+        WitScope scope = imported.scope();
+        String name = scope.nameAt(index);
+        WitScope declaring = scope.declaringScope(index);
+        int declaredAt = scope.declaringIndex(index);
+        String handle = locals.resourceIn(declaring).get(declaredAt);
+        if (handle == null) {
+            String declaringHandles = handles.get(declaring);
+            if (declaringHandles == null) {
+                throw new BindgenException(
+                        "interface \""
+                                + imported.name()
+                                + "\" uses resource \""
+                                + name
+                                + "\" from \""
+                                + declaring.owner()
+                                + "\", whose bindings are not built ahead of it");
+            }
+            Expression declared =
+                    AstBuilders.call(
+                            new NameExpr(declaringHandles),
+                            Names.resourceTypeGetter(declaring.nameAt(declaredAt)));
+            handle =
+                    declareResource(
+                            body,
+                            locals,
+                            name,
+                            AstBuilders.call(locals.builder(), "useResource", declared));
+            locals.resourceIn(declaring).put(declaredAt, handle);
+        }
+        addResource(body, locals, name, handle);
+    }
+
+    /** Declares the local holding a resource type, and gives back its name. */
+    private String declareResource(BlockStmt body, Locals locals, String name, Expression value) {
+        String handle = Names.free(locals.host + Names.type(name), typeLocals);
+        typeLocals.add(handle);
+        body.addStatement(
+                AstBuilders.declare(unit.use(QualifiedTypes.HOST_RESOURCE), handle, value));
+        return handle;
+    }
+
+    private void addResource(BlockStmt body, Locals locals, String name, String handle) {
+        body.addStatement(
+                AstBuilders.call(
+                        locals.builder(),
+                        "addResource",
+                        AstBuilders.text(name),
+                        new NameExpr(handle)));
+    }
+
+    /**
      * Records the {@code own} or {@code borrow} at {@code index} as the one the resource it names
-     * brought with it. One naming a resource used from elsewhere is left undeclared, so a function
-     * naming it is refused.
+     * brought with it into this instance.
      */
     private void declareHandleType(Locals locals, int index, int resource, String kind) {
         WitScope scope = locals.scope;
-        if (scope.isUsed(resource)) {
-            return;
-        }
-        String handle = locals.resources.get(scope.nameAt(resource));
+        String handle =
+                locals.resourceIn(scope.declaringScope(resource))
+                        .get(scope.declaringIndex(resource));
         if (handle != null) {
             locals.declared.put(index, AstBuilders.call(new NameExpr(handle), kind));
         }
@@ -337,8 +391,11 @@ final class HostWiring {
         private final WitScope scope;
         private final Map<Integer, Expression> declared = new LinkedHashMap<>();
 
-        /** The local holding each resource the interface declares, by its WIT name. */
-        private final Map<String, String> resources = new LinkedHashMap<>();
+        /**
+         * The local holding each resource this instance declares or uses, by the scope declaring
+         * the resource and its index there.
+         */
+        private final Map<WitScope, Map<Integer, String>> resources = new IdentityHashMap<>();
 
         /** What types used from other interfaces were declared as, by the scope declaring them. */
         private final Map<WitScope, Map<Integer, Expression>> elsewhere = new IdentityHashMap<>();
@@ -357,6 +414,11 @@ final class HostWiring {
             return declaring == scope
                     ? declared
                     : elsewhere.computeIfAbsent(declaring, s -> new LinkedHashMap<>());
+        }
+
+        /** The locals holding the resources {@code declaring} declares, keyed by its indices. */
+        Map<Integer, String> resourceIn(WitScope declaring) {
+            return resources.computeIfAbsent(declaring, s -> new LinkedHashMap<>());
         }
 
         Expression builder() {

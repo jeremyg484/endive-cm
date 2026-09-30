@@ -45,6 +45,11 @@ final class WitResource {
         return name;
     }
 
+    /** Where the resource sits in the declaring interface's type index space. */
+    int typeIndex() {
+        return typeIndex;
+    }
+
     /** {@code null} when the resource is only ever handed over rather than made by the host. */
     WitFunction constructor() {
         return constructor;

@@ -1,0 +1,40 @@
+package example:use-resources;
+
+interface error {
+    resource error {
+        to-debug-string: func() -> string;
+    }
+}
+
+interface poll {
+    resource pollable {
+        ready: func() -> bool;
+    }
+
+    /// The indices of the pollables given that are ready.
+    poll: func(in: list<borrow<pollable>>) -> list<u32>;
+}
+
+interface streams {
+    use error.{error};
+    use poll.{pollable};
+
+    resource input-stream {
+        /// A pollable that is ready once the stream has bytes to read.
+        subscribe: func() -> pollable;
+    }
+
+    open-input: func() -> input-stream;
+
+    /// The error the host last recorded.
+    last-error: func() -> error;
+
+    /// Whether the error given is the one the host last recorded.
+    recorded: func(e: borrow<error>) -> bool;
+}
+
+world use-resources {
+    import streams;
+
+    export run: func() -> u32;
+}
