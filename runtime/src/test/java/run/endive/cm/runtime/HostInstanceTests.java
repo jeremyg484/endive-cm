@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.math.BigInteger;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -122,6 +123,26 @@ public class HostInstanceTests {
         var builder = HostInstance.builder(new ComponentStore());
 
         assertThrows(IllegalArgumentException.class, () -> builder.addType("count", u32()));
+    }
+
+    /**
+     * A named primitive such as {@code type instant = u64} is declared into the index space, so it
+     * may be exported and a function naming it accepts the primitive's Java type.
+     */
+    @Test
+    public void aNamedPrimitiveMayBeExportedAndNamedByAFunction() {
+        var builder = HostInstance.builder(new ComponentStore());
+        ValType instant = builder.declareType(Type.of(PrimValType.U64));
+        builder.addType("instant", instant);
+        builder.addFunction(
+                "later",
+                func().addParam(param("at", instant)).withResult(instant).build(),
+                args -> new Object[] {((BigInteger) args[0]).add(BigInteger.ONE)});
+
+        ComponentInstance host = builder.build();
+
+        assertArrayEquals(
+                new Object[] {BigInteger.TEN}, host.export("later").apply(BigInteger.valueOf(9)));
     }
 
     /**

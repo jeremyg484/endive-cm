@@ -45,13 +45,13 @@ final class HostWiring {
                 scope -> handles.containsKey(scope) ? new NameExpr(handles.get(scope)) : null);
     }
 
-    /** The compound types an interface declares, which a host instance has to be told about. */
-    static Map<Integer, Type> compoundTypes(WitInterface iface) {
+    /** The types an interface declares, which a host instance has to be told about. */
+    static Map<Integer, Type> declaredTypes(WitInterface iface) {
         Map<Integer, Type> found = new LinkedHashMap<>();
         WitScope scope = iface.scope();
         for (int i = 0; i < scope.size(); i++) {
             Type declared = scope.at(i);
-            if (isCompound(declared)) {
+            if (isDeclared(declared)) {
                 found.put(i, declared);
             }
         }
@@ -230,12 +230,12 @@ final class HostWiring {
     }
 
     /**
-     * Declares each compound type into the instance, since a function type names one by index. A
+     * Declares each type into the instance, since a function type names one by index. A
      * named type is exported as well, since a component using it aliases it from the instance.
      */
     private void declareTypes(BlockStmt body, WitInterface imported, Locals locals) {
         WitScope scope = imported.scope();
-        for (Map.Entry<Integer, Type> entry : compoundTypes(imported).entrySet()) {
+        for (Map.Entry<Integer, Type> entry : declaredTypes(imported).entrySet()) {
             String preferred = typeName(scope, entry.getValue(), entry.getKey());
             String local =
                     declare(
@@ -288,7 +288,7 @@ final class HostWiring {
         }
         DefValType defined = scope.at(index).defValType();
         for (ValType reference : WitTypes.references(defined)) {
-            if (reference.primValType() == null && isCompound(scope.at(reference.typeIdx()))) {
+            if (reference.primValType() == null && isDeclared(scope.at(reference.typeIdx()))) {
                 declare(body, scope, reference.typeIdx(), null, locals);
             }
         }
@@ -368,10 +368,8 @@ final class HostWiring {
                         lambda));
     }
 
-    private static boolean isCompound(Type type) {
-        return type != null
-                && type.defValType() != null
-                && WitTypes.isCompound(type.defValType().kind());
+    private static boolean isDeclared(Type type) {
+        return type != null && type.defValType() != null && WitTypes.isDeclared(type.defValType());
     }
 
     /** Only the export declaring a type says what it is called, so an unnamed one gets an index. */

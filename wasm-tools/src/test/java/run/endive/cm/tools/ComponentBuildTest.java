@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
@@ -103,6 +105,28 @@ public class ComponentBuildTest {
 
         assertTrue(wit.contains("import name: func() -> string"), wit);
         assertTrue(wit.contains("export greet: func()"), wit);
+    }
+
+    /**
+     * A world importing from other packages is embedded from its package directory. An interface
+     * import binds to the interface id as the core module name.
+     */
+    @Test
+    void embedReadsAPackageDirectoryWithItsDeps() throws URISyntaxException {
+        byte[] module =
+                ("(module\n"
+                                + "  (import \"example:counter/counter\" \"next\""
+                                + " (func $next (result i32)))\n"
+                                + "  (func (export \"run\") (result i32)\n"
+                                + "    call $next))\n")
+                        .getBytes(StandardCharsets.UTF_8);
+        Path wit = Path.of(getClass().getResource("/wit-with-deps").toURI());
+
+        byte[] component = ComponentNew.create(ComponentEmbed.embed(module, wit, "app"));
+
+        String world = WitParser.parse(new ByteArrayInputStream(component));
+        assertTrue(world.contains("import example:counter/counter"), world);
+        assertTrue(world.contains("export run: func() -> u32"), world);
     }
 
     @Test

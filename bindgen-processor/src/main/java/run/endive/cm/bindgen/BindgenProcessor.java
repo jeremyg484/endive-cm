@@ -4,6 +4,13 @@ import static javax.tools.Diagnostic.Kind.ERROR;
 
 import java.io.IOException;
 import java.io.Writer;
+import java.net.URI;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystemAlreadyExistsException;
+import java.nio.file.FileSystemNotFoundException;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -15,7 +22,6 @@ import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.PackageElement;
 import javax.lang.model.element.TypeElement;
-import javax.tools.FileObject;
 import javax.tools.StandardLocation;
 import run.endive.cm.runtime.Bindgen;
 
@@ -29,6 +35,8 @@ import run.endive.cm.runtime.Bindgen;
 public final class BindgenProcessor extends AbstractProcessor {
 
     private static final String WIT_ROOT = "wit/";
+
+    private static final String DEPS = "deps";
 
     /** What has already been written, so that worlds sharing an interface share its Java type. */
     private final Map<String, String> written = new HashMap<>();
@@ -68,7 +76,7 @@ public final class BindgenProcessor extends AbstractProcessor {
     }
 
     private void generate(Element element, Bindgen bindgen) {
-        WitWorld world = WorldReader.read(readWit(bindgen), bindgen.world());
+        WitWorld world = readWorld(bindgen);
 
         String packageName = packageOf(element).getQualifiedName().toString();
         for (GeneratedUnit generated : WorldGenerator.generate(world, packageName, generatedBy())) {
@@ -114,12 +122,12 @@ public final class BindgenProcessor extends AbstractProcessor {
      * WIT comes from {@code inline} when it is given, otherwise from a resource, which is
      * {@code wit/<world>.wit} unless {@code path} says otherwise.
      */
-    private String readWit(Bindgen bindgen) {
+    private WitWorld readWorld(Bindgen bindgen) {
         if (!bindgen.inline().isEmpty()) {
             if (!bindgen.path().isEmpty()) {
                 throw new BindgenException("only one of inline and path may be given");
             }
-            return bindgen.inline();
+            return WorldReader.read(bindgen.inline(), bindgen.world());
         }
 
         String path = bindgen.path();
@@ -130,32 +138,75 @@ public final class BindgenProcessor extends AbstractProcessor {
             }
             path = WIT_ROOT + bindgen.world() + ".wit";
         }
-        return readResource(path);
+        return readResource(path, bindgen.world());
     }
 
     /**
-     * Maven copies resources into the class output before compiling, so that is where a WIT file in
-     * this project lands. The class path covers WIT arriving inside a dependency, which is how a
-     * shared world such as WASI is consumed.
+     * Maven copies resources into the class output before compiling, so that is where WIT in this
+     * project lands. The class path covers WIT arriving inside a dependency, which is how a shared
+     * world such as WASI is consumed.
+     *
+     * <p>The resource is read through the file system its URI names, which for a dependency jar is
+     * opened only for as long as reading takes. That is what reaches the rest of a package
+     * directory, which the {@code Filer} cannot list.
      */
-    private String readResource(String path) {
+    private WitWorld readResource(String path, String world) {
         for (StandardLocation location :
                 new StandardLocation[] {
                     StandardLocation.CLASS_OUTPUT, StandardLocation.CLASS_PATH
                 }) {
+            URI uri;
             try {
-                FileObject resource = filer().getResource(location, "", path);
-                return resource.getCharContent(true).toString();
+                uri = filer().getResource(location, "", path).toUri();
             } catch (IOException | IllegalArgumentException | UnsupportedOperationException e) {
-                // Not here, so try the next location.
+                continue;
+            }
+            WitWorld read = readUri(uri, world);
+            if (read != null) {
+                return read;
             }
         }
         throw new BindgenException(
-                "WIT file \""
+                "WIT \""
                         + path
                         + "\" was not found on the class output or the class path. A WIT file"
                         + " belongs in src/main/resources/"
                         + WIT_ROOT);
+    }
+
+    /** The world read from {@code uri}, or null when nothing is there. */
+    private static WitWorld readUri(URI uri, String world) {
+        if (!"jar".equals(uri.getScheme())) {
+            try {
+                return readPath(Path.of(uri), world);
+            } catch (IllegalArgumentException | FileSystemNotFoundException e) {
+                return null;
+            }
+        }
+        try (FileSystem jar = FileSystems.newFileSystem(uri, Map.of())) {
+            return readPath(jar.provider().getPath(uri), world);
+        } catch (FileSystemAlreadyExistsException e) {
+            return readPath(Path.of(uri), world);
+        } catch (IOException e) {
+            throw new BindgenException("could not open " + uri + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * A WIT file whose directory holds {@code deps} belongs to a package spread across that
+     * directory, so the directory is read in its place.
+     *
+     * @see <a href="https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md#root-package-a-directory">Root Package: A Directory</a>
+     */
+    private static WitWorld readPath(Path wit, String world) {
+        if (!Files.isRegularFile(wit)) {
+            return null;
+        }
+        Path dir = wit.getParent();
+        if (dir != null && Files.isDirectory(dir.resolve(DEPS))) {
+            return WorldReader.read(dir, world);
+        }
+        return WorldReader.read(wit, world);
     }
 
     private Filer filer() {

@@ -54,6 +54,20 @@ public final class ComponentEmbed {
      * @param world the world to embed, empty when the package declares exactly one
      */
     public static byte[] embed(byte[] module, String wit, String world) {
+        return embed(module, WitInput.of(wit.getBytes(StandardCharsets.UTF_8)), world);
+    }
+
+    /**
+     * @param module a core module, in either the binary or the text format
+     * @param wit a WIT file, or a package directory whose dependencies sit under {@code deps}
+     * @param world the world to embed, empty when the package declares exactly one
+     * @see <a href="https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md#root-package-a-directory">Root Package: A Directory</a>
+     */
+    public static byte[] embed(byte[] module, Path wit, String world) {
+        return embed(module, WitInput.of(wit), world);
+    }
+
+    private static byte[] embed(byte[] module, WitInput wit, String world) {
         try (var stdinStream = new ByteArrayInputStream(new byte[0]);
                 var stdoutStream = new ByteArrayOutputStream();
                 var stderrStream = new ByteArrayOutputStream();
@@ -65,8 +79,7 @@ public final class ComponentEmbed {
 
             Path inputDir = fs.getPath("input");
             Files.createDirectory(inputDir);
-            Path witFile = inputDir.resolve("input.wit");
-            Files.write(witFile, wit.getBytes(StandardCharsets.UTF_8));
+            Path witFile = wit.writeTo(inputDir);
             Path moduleFile = inputDir.resolve("module.wasm");
             Files.write(moduleFile, module);
             Path outputFile = inputDir.resolve("output.wasm");

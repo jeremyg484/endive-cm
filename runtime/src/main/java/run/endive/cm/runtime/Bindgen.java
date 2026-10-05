@@ -15,9 +15,13 @@ import java.lang.annotation.Target;
  * means {@code src/main/resources/wit}. Give {@link #inline} instead when the WIT is small enough
  * to sit beside the code that uses it.
  *
+ * <p>A WIT file whose directory holds a {@code deps} directory is read together with the rest of
+ * that directory, so a world may import from the packages under {@code deps}.
+ *
  * <pre>{@code
  * @Bindgen(world = "hello-world")                              // reads wit/hello-world.wit
  * @Bindgen(world = "calculator", path = "wit/calc.wit")
+ * @Bindgen(world = "host", path = "wit/host.wit")              // also reads wit/*.wit and wit/deps
  * @Bindgen(inline = "package my:project;\nworld hello-world { ... }")
  * }</pre>
  */
@@ -31,7 +35,13 @@ public @interface Bindgen {
      */
     String world() default "";
 
-    /** Resource path of the WIT file, defaulting to {@code wit/<world>.wit}. */
+    /**
+     * Resource path of the WIT file, defaulting to {@code wit/<world>.wit}. When the WIT arrives in a
+     * dependency jar, javac finds the file only if every directory on its path is named like a Java
+     * identifier.
+     *
+     * @see <a href="https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md#root-package-a-directory">Root Package: A Directory</a>
+     */
     String path() default "";
 
     /** WIT text, for a world not worth a file of its own. Not to be combined with {@link #path}. */

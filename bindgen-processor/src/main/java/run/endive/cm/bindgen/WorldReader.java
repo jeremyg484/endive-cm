@@ -1,10 +1,12 @@
 package run.endive.cm.bindgen;
 
 import java.io.ByteArrayInputStream;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import run.endive.cm.parser.ComponentParser;
 import run.endive.cm.tools.WitParser;
@@ -45,9 +47,21 @@ final class WorldReader {
      * @param world the world to read, or empty when the package declares exactly one
      */
     static WitWorld read(String wit, String world) {
+        return read(() -> WitParser.encode(wit), world);
+    }
+
+    /**
+     * @param wit a WIT file, or a package directory whose dependencies sit under {@code deps}
+     * @param world the world to read, or empty when the package declares exactly one
+     */
+    static WitWorld read(Path wit, String world) {
+        return read(() -> WitParser.encode(wit), world);
+    }
+
+    private static WitWorld read(Supplier<byte[]> encoder, String world) {
         byte[] encoded;
         try {
-            encoded = WitParser.encode(wit);
+            encoded = encoder.get();
         } catch (RuntimeException e) {
             throw new BindgenException("WIT could not be encoded: " + e.getMessage(), e);
         }

@@ -68,7 +68,7 @@ public final class WitParser {
     }
 
     public static String parse(InputStream is) {
-        return new String(run(is, Form.TEXT), StandardCharsets.UTF_8);
+        return new String(run(read(is), Form.TEXT), StandardCharsets.UTF_8);
     }
 
     /**
@@ -94,14 +94,32 @@ public final class WitParser {
     }
 
     public static byte[] encode(InputStream is) {
-        return run(is, Form.BINARY);
+        return run(read(is), Form.BINARY);
+    }
+
+    /**
+     * Encodes a WIT file, or a package directory whose dependencies sit under {@code deps}.
+     *
+     * @param wit a file or directory on any file system, such as one opened over a jar
+     * @see <a href="https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md#root-package-a-directory">Root Package: A Directory</a>
+     */
+    public static byte[] encode(Path wit) {
+        return run(WitInput.of(wit), Form.BINARY);
+    }
+
+    private static WitInput read(InputStream is) {
+        try {
+            return WitInput.of(is.readAllBytes());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /**
      * Text goes to stdout and binary goes to a file, so the requested form decides both the command
      * and where to read the result.
      */
-    private static byte[] run(InputStream is, Form form) {
+    private static byte[] run(WitInput input, Form form) {
         try (var stdinStream = new ByteArrayInputStream(new byte[0]);
                 var stdoutStream = new ByteArrayOutputStream();
                 var stderrStream = new ByteArrayOutputStream();
@@ -113,8 +131,7 @@ public final class WitParser {
 
             Path inputDir = fs.getPath("input");
             Files.createDirectory(inputDir);
-            Path inputFile = inputDir.resolve("input.wit");
-            Files.write(inputFile, is.readAllBytes());
+            Path inputFile = input.writeTo(inputDir);
             Path outputFile = inputDir.resolve("output.wasm");
 
             List<String> args = new ArrayList<>(List.of("wasm-tools", "component", "wit"));

@@ -154,9 +154,9 @@ conventional Maven project means `src/main/resources/wit/`.
 - `path` is a resource path, defaulting to `wit/<world>.wit`.
 - `inline` carries WIT text directly and is mutually exclusive with `path`.
 
-`path` names a single file rather than a directory. The `Filer` fetches a named resource and cannot list a directory,
-so taking a whole directory as one package needs a route to a real filesystem path, which multi-file package support
-will have to bring with it.
+`path` names a file rather than a directory, because javac's `Filer` refuses to hand back a directory at any location.
+A file whose directory holds `deps` is read together with the rest of that directory, which is how a world imports from
+other packages, as [Multi-file WIT packages](#multi-file-wit-packages) describes.
 
 Resources are looked up through the `Filer`, trying `CLASS_OUTPUT` and then `CLASS_PATH`. Maven's `process-resources`
 phase populates `target/classes` before `compile`, so `CLASS_OUTPUT` is what resolves during a normal build.
@@ -171,8 +171,34 @@ PACKAGE}` so that a `package-info.java` can carry the more elaborate bindings WA
 therefore has to move from test scope to compile scope. If the processor's footprint ever becomes a concern, the
 annotation can be split into its own artifact the way Endive separates `annotations` from `annotations/processor`.
 
-A WIT package spread across a directory, with `deps/` and multiple files, needs the wasm-tools wrapper to mirror a tree
-into ZeroFs rather than write the single `input.wit` it writes today.
+### Multi-file WIT packages
+
+Implemented. A world importing from another package, as `wasi:clocks` imports `wasi:io`, needs wasm-tools to read a
+package directory, because only a directory brings in the packages under its `deps`. wit-parser reads a single file
+alone.
+
+```java
+@Bindgen(world = "host", path = "wit/host.wit")
+
+// wit/host.wit
+// wit/deps/wasi_io@0.2.12.wit
+// wit/deps/wasi_clocks@0.2.12.wit
+```
+
+The `Filer` cannot name a directory, since javac's `PathFileObject` throws for one, so the annotation names a file in it.
+A named file whose directory holds `deps` stands for that whole directory, and one without `deps` is read alone as
+before. That keeps a directory of unrelated single-file packages, as the processor's own test resources are, working
+unchanged.
+
+The file is found through the `Filer` as before and then read through the file system its URI names. For a file in the
+class output that is the default file system. For one inside a dependency jar it is a zip file system the processor
+opens for as long as reading takes, which is what reaches the rest of a directory the `Filer` cannot list. javac indexes
+a jar only under directories named like Java identifiers, so every directory on the path to the named file has to be
+named that way. Anything under `deps` is read through the zip file system and is not bound by that.
+
+`WitParser.encode` and `ComponentEmbed.embed` take a `Path` naming either a file or a package directory, on any file
+system, and copy it into ZeroFs keeping its layout. The end-to-end fixtures can therefore embed a world drawing on
+`deps` the same way the processor reads one.
 
 ### A public host-linking facade in the runtime
 
@@ -242,6 +268,7 @@ Canonical ABI carries. These are the shapes the generator targets.
 | `enum` | a Java enum | `VariantValue` |
 | `option<T>` | a nullable `T` | `VariantValue` |
 | `result<T, E>` | an unchecked exception carrying the error payload | `VariantValue` |
+| `type instant = u64` | the primitive's own Java type, here `BigInteger` | the primitive |
 
 Three of those need a reason recorded.
 
@@ -669,6 +696,17 @@ the embedder's call in a `try` that catches only the generated exception and tur
 Catching every `RuntimeException` there would deliver a genuine bug in embedder code to the guest as a well formed
 error, which is why the catch is narrow.
 
+An interface may also give a primitive a name, as `wasi:clocks` does with `type instant = u64`. Java has no alias for
+a type, so a named primitive is carried as its primitive's Java type and generates no source of its own. A
+`subscribe-instant(when: instant)` binds as `Pollable subscribeInstant(BigInteger when)`. The encoding defines a named
+primitive in the type index space rather than writing it inline, so it is declared into the host instance and exported
+under its name like any other named type. A component using it from another interface, as `wasi:http` uses
+`duration`, aliases it by that name.
+
+`PrimitiveHostTypeDescriptor` had matched only a primitive written inline, so the runtime refused a host function's
+argument whose type named one by index. It now resolves the index to the primitive first, the way the other descriptors
+already resolve the kinds they bind.
+
 An interface may also `use` a type another interface declares, and so may a world. The encoding carries a `use` as
 two aliases. The world aliases the type out of the instance it imports for the declaring interface, and the using
 interface reaches that with an `alias outer`. `WorldReader` follows both, tracking the world's instance index space so
@@ -708,7 +746,7 @@ That is what the approved files are generated from, so a difference from the exa
 
 All seven of the non-async example worlds are present. A world covering a WIT feature no example declares is written
 for the purpose and named after it, such as `record-types`, `result-types`, `use-types`, `use-resources`,
-`handle-types` or `resource-handles`, and each such fixture says so at the top.
+`handle-types`, `resource-handles` or `type-aliases`, and each such fixture says so at the top.
 
 The end-to-end fixtures use the same WIT, with one exception that has to be stated wherever it appears. A world that
 imports without exporting cannot be driven, since nothing enters the guest, so `with-imports`,
@@ -816,12 +854,6 @@ A few refusals are limits of the chosen Java shapes rather than missing work, an
 rather than as a function's own result, a tuple wider than `Tuple8` or holding an element that cannot be named by its
 class, a variant case named after its variant or after a type its interface declares, and a flags type whose Java name
 would be `Flag`.
-
-### Multi-file WIT packages
-
-`WitParser.encode` writes one `input.wit` into ZeroFs, so a package spread across a directory with `deps/` cannot be
-read. `@Bindgen(path = ...)` names a single file for the same reason: the `Filer` fetches a named resource and cannot
-list a directory. Supporting a directory needs a route to a real filesystem path, and both halves change together.
 
 ### The interface sharing policy is untested
 

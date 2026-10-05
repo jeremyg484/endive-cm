@@ -1,0 +1,9 @@
+package example:poll;
+
+interface poll {
+  resource pollable {
+    ready: func() -> bool;
+  }
+
+  poll: func(in: list<borrow<pollable>>) -> list<u32>;
+}

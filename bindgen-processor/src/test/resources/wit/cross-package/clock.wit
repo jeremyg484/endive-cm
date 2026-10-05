@@ -1,0 +1,12 @@
+package example:clock;
+
+interface monotonic {
+  use example:poll/poll.{pollable};
+
+  subscribe: func(millis: u32) -> pollable;
+}
+
+world clocks {
+  import monotonic;
+  export run: func();
+}

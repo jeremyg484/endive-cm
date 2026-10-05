@@ -8,10 +8,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.testing.compile.Compilation;
 import com.google.testing.compile.JavaFileObjects;
+import java.net.URI;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import javax.tools.JavaFileObject;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Generation is checked by compiling an annotated source and comparing the result against a
@@ -525,6 +535,45 @@ class BindgenProcessorTest {
         assertThat(compilation).hadErrorContaining("declares type \"count\" in its own right");
     }
 
+    /**
+     * A named primitive is carried as its primitive's Java type, since Java has no alias for a
+     * type, so it generates no source of its own. It is still exported from the host instance,
+     * since a component using it aliases it by name.
+     */
+    @Test
+    void aNamedPrimitiveBindsAsItsPrimitive() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.NamedPrimitiveHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"clock\", inline ="
+                                        + " \"package my:project;\\n"
+                                        + "interface monotonic {\\n"
+                                        + "  type instant = u64;\\n"
+                                        + "  now: func() -> instant;\\n"
+                                        + "}\\n"
+                                        + "world clock {\\n"
+                                        + "  import monotonic;\\n"
+                                        + "  export run: func();\\n"
+                                        + "}\\n\")\n"
+                                        + "public class NamedPrimitiveHost {}\n"));
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertGenerated(
+                compilation,
+                List.of("endive.testing.ClockWorld", "endive.testing.my.project.monotonic.Host"));
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.my.project.monotonic.Host")
+                .contentsAsUtf8String()
+                .contains("BigInteger now()");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.ClockWorld")
+                .contentsAsUtf8String()
+                .contains("addType(\"instant\"");
+    }
+
     /** Every world generates a package tree mirroring the WIT ids, which is what this pins. */
     private static void assertGenerated(Compilation compilation, List<String> expected) {
         List<String> actual =
@@ -952,6 +1001,98 @@ class BindgenProcessorTest {
 
         assertThat(compilation).failed();
         assertThat(compilation).hadErrorContaining("wit/nowhere.wit");
+    }
+
+    /**
+     * A WIT file beside a {@code deps} directory is read as a package directory, so an interface
+     * may use a resource another package declares.
+     */
+    @Test
+    void aPackageDirectoryResolvesItsDeps() {
+        Compilation compilation = compile(crossPackageHost());
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.example.clock.monotonic.Host")
+                .contentsAsUtf8String()
+                .contains("Pollable subscribe(Long millis)");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.example.poll.poll.Pollable")
+                .contentsAsUtf8String()
+                .contains("Boolean ready()");
+    }
+
+    /**
+     * WIT arriving inside a dependency jar may be a package directory as well. javac finds a file in
+     * a jar only under directories named like Java identifiers, so the jarred copy is renamed.
+     */
+    @Test
+    void aPackageDirectoryInsideAJarIsRead(@TempDir Path temp) throws Exception {
+        Path source = Path.of(getClass().getResource("/wit/cross-package").toURI());
+        Path jar = temp.resolve("wit.jar");
+        try (FileSystem fs =
+                FileSystems.newFileSystem(
+                        URI.create("jar:" + jar.toUri()), Map.of("create", "true"))) {
+            Path target = fs.getPath("/wit/jarred");
+            try (Stream<Path> paths = Files.walk(source)) {
+                for (Path path : paths.collect(Collectors.toList())) {
+                    Path to = target.resolve(source.relativize(path).toString());
+                    if (Files.isDirectory(path)) {
+                        Files.createDirectories(to);
+                    } else {
+                        Files.copy(path, to);
+                    }
+                }
+            }
+        }
+
+        Compilation compilation;
+        try (URLClassLoader loader =
+                new URLClassLoader(
+                        new URL[] {jar.toUri().toURL()},
+                        BindgenProcessorTest.class.getClassLoader())) {
+            compilation =
+                    javac().withProcessors(new BindgenProcessor())
+                            .withClasspathFrom(loader)
+                            .compile(
+                                    JavaFileObjects.forSourceString(
+                                            "endive.testing.JarredHost",
+                                            "package endive.testing;\n"
+                                                    + "import run.endive.cm.runtime.Bindgen;\n"
+                                                    + "@Bindgen(world = \"clocks\", path ="
+                                                    + " \"wit/jarred/clock.wit\")\n"
+                                                    + "public class JarredHost {}\n"));
+        }
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation).generatedSourceFile("endive.testing.example.poll.poll.Pollable");
+    }
+
+    /** A WIT file with no {@code deps} beside it is read alone, as the files beside it may be. */
+    @Test
+    void aFileWithoutDepsIsReadAlone() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.AloneHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"clocks\", path ="
+                                        + " \"wit/cross-package/deps/poll/poll.wit\")\n"
+                                        + "public class AloneHost {}\n"));
+
+        assertThat(compilation).failed();
+        assertThat(compilation).hadErrorContaining("world \"clocks\" was not found");
+    }
+
+    private static JavaFileObject crossPackageHost() {
+        return JavaFileObjects.forSourceString(
+                "endive.testing.CrossPackageHost",
+                "package endive.testing;\n"
+                        + "import run.endive.cm.runtime.Bindgen;\n"
+                        + "@Bindgen(world = \"clocks\", path ="
+                        + " \"wit/cross-package/clock.wit\")\n"
+                        + "public class CrossPackageHost {}\n");
     }
 
     @Test

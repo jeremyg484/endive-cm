@@ -19,6 +19,7 @@ import run.endive.cm.types.LabelValType;
 import run.endive.cm.types.ListType;
 import run.endive.cm.types.OptionType;
 import run.endive.cm.types.OwnType;
+import run.endive.cm.types.PrimValType;
 import run.endive.cm.types.RecordType;
 import run.endive.cm.types.ResultType;
 import run.endive.cm.types.TupleType;
@@ -77,6 +78,9 @@ final class WitTypes {
         }
         int index = valType.typeIdx();
         DefValType defined = definedAt(scope, index);
+        if (defined instanceof PrimValType) {
+            return primitiveJavaType(defined.kind());
+        }
         WitScope inner = scope.declaringScope(index);
         switch (defined.kind()) {
             case LIST:
@@ -161,14 +165,19 @@ final class WitTypes {
 
     /**
      * The types a host instance has to be told about, since a function type names one by index.
+     * A named primitive such as {@code type instant = u64} is one of them, since a component using
+     * it aliases it by name.
      *
      * <p>A kind belongs here once {@link #defValType} can rebuild it, and not before. Declaring a
      * kind ahead of that refuses an interface for merely declaring the type, whether or not
      * anything uses it. An allowlist also keeps out the {@code own} and {@code borrow} a resource
      * contributes to the same space, neither of which is a type to declare.
      */
-    static boolean isCompound(DefValType.Kind kind) {
-        switch (kind) {
+    static boolean isDeclared(DefValType defined) {
+        if (defined instanceof PrimValType) {
+            return true;
+        }
+        switch (defined.kind()) {
             case LIST:
             case ENUM:
             case FLAGS:
@@ -515,8 +524,13 @@ final class WitTypes {
         return local.clone();
     }
 
-    /** Rebuilds a compound type for declaring it into a host instance. */
+    /** Rebuilds a declared type for declaring it into a host instance. */
     Expression defValType(DefValType defined, WitScope scope, Map<Integer, Expression> declared) {
+        if (defined instanceof PrimValType) {
+            return typeOf(
+                    AstBuilders.field(
+                            unit.useName(QualifiedTypes.PRIM_VAL_TYPE), defined.kind().name()));
+        }
         switch (defined.kind()) {
             case LIST:
                 ListType list = (ListType) defined;
@@ -693,13 +707,12 @@ final class WitTypes {
             return instanceOf(QualifiedTypes.VOID_DESCRIPTOR);
         }
         if (valType.primValType() != null) {
-            Type carrier = primitiveJavaType(valType.primValType().kind());
-            return AstBuilders.call(
-                    unit.useName(QualifiedTypes.PRIMITIVE_DESCRIPTOR),
-                    "forClass",
-                    AstBuilders.classLiteral(carrier));
+            return primitiveDescriptor(valType.primValType());
         }
         DefValType defined = definedAt(scope, valType.typeIdx());
+        if (defined instanceof PrimValType) {
+            return primitiveDescriptor(defined);
+        }
         switch (defined.kind()) {
             case LIST:
                 return instanceOf(QualifiedTypes.LIST_DESCRIPTOR);
@@ -816,6 +829,13 @@ final class WitTypes {
         return reference(declaring, name);
     }
 
+    private Expression primitiveDescriptor(DefValType primitive) {
+        return AstBuilders.call(
+                unit.useName(QualifiedTypes.PRIMITIVE_DESCRIPTOR),
+                "forClass",
+                AstBuilders.classLiteral(primitiveJavaType(primitive.kind())));
+    }
+
     private ClassOrInterfaceType primitiveJavaType(DefValType.Kind kind) {
         switch (kind) {
             case BOOL:
@@ -857,7 +877,7 @@ final class WitTypes {
 
     /**
      * A type a function names but that the enclosing instance never declared, which is what a kind
-     * outside {@link #isCompound} amounts to. Naming that kind is what tells a reader which WIT
+     * outside {@link #isDeclared} amounts to. Naming that kind is what tells a reader which WIT
      * feature is missing.
      */
     private static BindgenException undeclared(WitScope scope, int index) {

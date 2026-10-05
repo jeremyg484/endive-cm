@@ -1,0 +1,5 @@
+package example:counter;
+
+interface counter {
+  next: func() -> u32;
+}

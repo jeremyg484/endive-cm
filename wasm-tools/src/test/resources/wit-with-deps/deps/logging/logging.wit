@@ -1,0 +1,5 @@
+package example:logging;
+
+interface logging {
+  log: func(msg: string);
+}

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import run.endive.cm.abi.CharValue;
 import run.endive.cm.types.PrimValType;
+import run.endive.cm.types.Type;
 import run.endive.cm.types.ValType;
 
 /**
@@ -169,6 +170,23 @@ public final class PrimitiveHostTypeDescriptor extends HostTypeDescriptor {
 
     @Override
     boolean isCompatibleWith(ComponentInstance instance, ValType componentType) {
-        return compatibleComponentTypes.contains(componentType);
+        return compatibleComponentTypes.contains(resolve(instance, componentType));
+    }
+
+    /**
+     * A named primitive such as {@code type instant = u64} is defined in the type index space
+     * rather than written inline, so it is resolved to the primitive it names.
+     *
+     * @see <a href="https://github.com/WebAssembly/component-model/blob/main/design/mvp/Explainer.md#fundamental-value-types">Explainer.md, fundamental value types</a>
+     */
+    private static ValType resolve(ComponentInstance instance, ValType componentType) {
+        if (componentType.primValType() != null) {
+            return componentType;
+        }
+        Type type = instance.getType(componentType.typeIdx());
+        if (type != null && type.defValType() instanceof PrimValType) {
+            return ValType.builder().withPrimValType((PrimValType) type.defValType()).build();
+        }
+        return componentType;
     }
 }

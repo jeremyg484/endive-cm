@@ -1,0 +1,35 @@
+package example:type-aliases;
+
+interface clock {
+    type instant = u64;
+    type duration = u64;
+    type label = string;
+
+    record stamp {
+        at: instant,
+        seq: u32,
+    }
+
+    now: func() -> instant;
+
+    /// The time since the instant given.
+    elapsed: func(since: instant) -> duration;
+
+    latest: func() -> stamp;
+
+    describe: func(at: instant) -> label;
+
+    history: func() -> list<instant>;
+}
+
+interface timer {
+    use clock.{instant, duration};
+
+    deadline: func(after: duration) -> instant;
+}
+
+world type-aliases {
+    import timer;
+
+    export run: func() -> u64;
+}
