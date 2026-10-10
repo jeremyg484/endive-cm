@@ -10,9 +10,11 @@ import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.BooleanLiteralExpr;
+import com.github.javaparser.ast.expr.ConditionalExpr;
 import com.github.javaparser.ast.expr.EnclosedExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.InstanceOfExpr;
+import com.github.javaparser.ast.expr.IntegerLiteralExpr;
 import com.github.javaparser.ast.expr.LongLiteralExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.NullLiteralExpr;
@@ -914,10 +916,163 @@ final class InterfaceGenerator {
 
         type.addMember(lowerRecord(unit, types, scope, record, handles));
         type.addMember(liftRecord(unit, types, scope, record, className, handles));
-        type.addMember(recordEquals(unit, record, className));
-        type.addMember(recordHashCode(unit, record));
-        type.addMember(recordToString(record, className));
+        if (handles.isEmpty()) {
+            boolean flat = types.flatLayout(record, scope) != null;
+            type.addImplementedType(
+                    unit.use(
+                            flat ? QualifiedTypes.FLAT_RECORD_VALUE : QualifiedTypes.RECORD_VALUE));
+            type.addMember(recordField(types, scope, record, declared.name()));
+            if (flat) {
+                type.addMember(recordStore(unit, types, scope, record));
+            }
+        }
+        type.addMember(recordEquals(unit, types, scope, record, className));
+        type.addMember(recordHashCode(unit, types, scope, record));
+        type.addMember(recordToString(unit, types, scope, record, className));
         return unit;
+    }
+
+    /** {@code field}, which gives the ABI each field by position. */
+    private MethodDeclaration recordField(
+            WitTypes types, WitScope scope, RecordType record, String witName) {
+        String index = Names.free("index", members(record));
+        NodeList<SwitchEntry> entries = new NodeList<>();
+        List<LabelValType> fields = record.fields();
+        for (int i = 0; i < fields.size(); i++) {
+            LabelValType field = fields.get(i);
+            entries.add(
+                    entry(
+                            new IntegerLiteralExpr(Integer.toString(i)),
+                            new ReturnStmt(
+                                    types.toComponent(
+                                            new NameExpr(Names.member(field.label())),
+                                            field.valType(),
+                                            scope,
+                                            members(record)))));
+        }
+        Expression message =
+                new BinaryExpr(
+                        AstBuilders.text(
+                                "record " + witName + " has " + fields.size() + " fields, not "),
+                        new NameExpr(index),
+                        BinaryExpr.Operator.PLUS);
+        entries.add(
+                entry(
+                        null,
+                        new ThrowStmt(
+                                AstBuilders.construct(
+                                        AstBuilders.type("IndexOutOfBoundsException"), message))));
+        BlockStmt body = new BlockStmt();
+        body.addStatement(new SwitchStmt(new NameExpr(index), entries));
+
+        MethodDeclaration method = new MethodDeclaration();
+        method.setName("field").setPublic(true).setType(AstBuilders.type("Object")).setBody(body);
+        method.addParameter(PrimitiveType.intType(), index);
+        method.addMarkerAnnotation("Override");
+        return method;
+    }
+
+    /**
+     * {@code store}, which writes a record of numbers straight to memory at offsets fixed
+     * when the bindings are generated.
+     *
+     * @see <a href="https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md#storing">Storing</a>
+     */
+    private MethodDeclaration recordStore(
+            GeneratedUnit unit, WitTypes types, WitScope scope, RecordType record) {
+        String memory = Names.free("memory", members(record));
+        String pointer = Names.free("pointer", members(record));
+        BlockStmt body = new BlockStmt();
+        int offset = 0;
+        for (LabelValType field : record.fields()) {
+            int[] layout = types.flatLayout(field.valType(), scope);
+            offset = DefValType.alignTo(offset, layout[1]);
+            Expression at =
+                    offset == 0
+                            ? new NameExpr(pointer)
+                            : new BinaryExpr(
+                                    new NameExpr(pointer),
+                                    new IntegerLiteralExpr(Integer.toString(offset)),
+                                    BinaryExpr.Operator.PLUS);
+            Expression member = AstBuilders.thisField(Names.member(field.label()));
+            body.addStatement(
+                    flatWrite(
+                            unit,
+                            types.primitiveKind(field.valType(), scope),
+                            new NameExpr(memory),
+                            at,
+                            member));
+            offset += layout[0];
+        }
+
+        MethodDeclaration method = new MethodDeclaration();
+        method.setName("store").setPublic(true).setType(new VoidType()).setBody(body);
+        method.addParameter(unit.use(QualifiedTypes.MEMORY), memory);
+        method.addParameter(PrimitiveType.intType(), pointer);
+        method.addMarkerAnnotation("Override");
+        return method;
+    }
+
+    /**
+     * The write storing one flat field, whose Java carrier is a boxed number or a record.
+     *
+     * @param primitive the field's primitive kind, or {@code null} for a record
+     */
+    private static Expression flatWrite(
+            GeneratedUnit unit,
+            DefValType.Kind primitive,
+            Expression memory,
+            Expression at,
+            Expression value) {
+        if (primitive == null) {
+            return AstBuilders.call(value, "store", memory, at);
+        }
+        switch (primitive) {
+            case BOOL:
+                return AstBuilders.call(
+                        memory,
+                        "writeByte",
+                        at,
+                        AstBuilders.cast(
+                                PrimitiveType.byteType(),
+                                new EnclosedExpr(
+                                        new ConditionalExpr(
+                                                value,
+                                                new IntegerLiteralExpr("1"),
+                                                new IntegerLiteralExpr("0")))));
+            case S8:
+            case U8:
+                return AstBuilders.call(
+                        memory, "writeByte", at, AstBuilders.call(value, "byteValue"));
+            case S16:
+            case U16:
+                return AstBuilders.call(
+                        memory, "writeShort", at, AstBuilders.call(value, "shortValue"));
+            case S32:
+            case U32:
+                return AstBuilders.call(
+                        memory, "writeI32", at, AstBuilders.call(value, "intValue"));
+            case S64:
+            case U64:
+                return AstBuilders.call(
+                        memory, "writeLong", at, AstBuilders.call(value, "longValue"));
+            case F32:
+                return AstBuilders.call(
+                        unit.useName(QualifiedTypes.FLAT_RECORD_VALUE),
+                        "storeF32",
+                        memory,
+                        at,
+                        value);
+            case F64:
+                return AstBuilders.call(
+                        unit.useName(QualifiedTypes.FLAT_RECORD_VALUE),
+                        "storeF64",
+                        memory,
+                        at,
+                        value);
+            default:
+                throw new IllegalStateException("not a flat kind: " + primitive);
+        }
     }
 
     /** The Java names a record's own fields occupy, which its generated locals must avoid. */
@@ -1005,7 +1160,11 @@ final class InterfaceGenerator {
     }
 
     private MethodDeclaration recordEquals(
-            GeneratedUnit unit, RecordType record, String className) {
+            GeneratedUnit unit,
+            WitTypes types,
+            WitScope scope,
+            RecordType record,
+            String className) {
         Set<String> members = members(record);
         String other = Names.free("o", members);
         String that = Names.free("that", members);
@@ -1033,7 +1192,10 @@ final class InterfaceGenerator {
             String member = Names.member(field.label());
             comparisons.add(
                     AstBuilders.call(
-                            unit.useName(QualifiedTypes.OBJECTS),
+                            unit.useName(
+                                    types.isBytes(field.valType(), scope)
+                                            ? QualifiedTypes.ARRAYS
+                                            : QualifiedTypes.OBJECTS),
                             "equals",
                             new NameExpr(member),
                             AstBuilders.field(new NameExpr(that), member)));
@@ -1047,10 +1209,16 @@ final class InterfaceGenerator {
         return method;
     }
 
-    private MethodDeclaration recordHashCode(GeneratedUnit unit, RecordType record) {
+    private MethodDeclaration recordHashCode(
+            GeneratedUnit unit, WitTypes types, WitScope scope, RecordType record) {
         List<Expression> members = new ArrayList<>();
         for (LabelValType field : record.fields()) {
-            members.add(new NameExpr(Names.member(field.label())));
+            Expression member = new NameExpr(Names.member(field.label()));
+            members.add(
+                    types.isBytes(field.valType(), scope)
+                            ? AstBuilders.call(
+                                    unit.useName(QualifiedTypes.ARRAYS), "hashCode", member)
+                            : member);
         }
         BlockStmt body = new BlockStmt();
         body.addStatement(
@@ -1063,14 +1231,25 @@ final class InterfaceGenerator {
         return method;
     }
 
-    private MethodDeclaration recordToString(RecordType record, String className) {
+    private MethodDeclaration recordToString(
+            GeneratedUnit unit,
+            WitTypes types,
+            WitScope scope,
+            RecordType record,
+            String className) {
         List<Expression> parts = new ArrayList<>();
         parts.add(AstBuilders.text(className + "{"));
         String separator = "";
         for (LabelValType field : record.fields()) {
             String member = Names.member(field.label());
             parts.add(AstBuilders.text(separator + member + "="));
-            parts.add(new NameExpr(member));
+            parts.add(
+                    types.isBytes(field.valType(), scope)
+                            ? AstBuilders.call(
+                                    unit.useName(QualifiedTypes.ARRAYS),
+                                    "toString",
+                                    new NameExpr(member))
+                            : new NameExpr(member));
             separator = ", ";
         }
         parts.add(AstBuilders.text("}"));

@@ -8,11 +8,16 @@ final class QualifiedTypes {
     static final String LINKED_HASH_MAP = "java.util.LinkedHashMap";
     static final String LIST = "java.util.List";
     static final String MAP = "java.util.Map";
+    static final String ARRAYS = "java.util.Arrays";
     static final String OBJECTS = "java.util.Objects";
     static final String OPTIONAL = "java.util.Optional";
     static final String SET = "java.util.Set";
 
+    static final String BYTE_LIST = "run.endive.cm.abi.ByteList";
     static final String CHAR_VALUE = "run.endive.cm.abi.CharValue";
+    static final String FLAT_RECORD_VALUE = "run.endive.cm.abi.FlatRecordValue";
+    static final String MEMORY = "run.endive.runtime.Memory";
+    static final String RECORD_VALUE = "run.endive.cm.abi.RecordValue";
     static final String RESOURCE_VALUE = "run.endive.cm.abi.ResourceValue";
     static final String VARIANT_VALUE = "run.endive.cm.abi.VariantValue";
 

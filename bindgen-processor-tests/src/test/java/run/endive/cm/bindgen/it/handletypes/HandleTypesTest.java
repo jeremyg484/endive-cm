@@ -108,11 +108,11 @@ public class HandleTypesTest {
         }
 
         @Override
-        public List<Short> read(BigInteger len) {
+        public byte[] read(BigInteger len) {
             if (failing) {
                 throw new StreamErrorException(new StreamError.LastOperationFailed(error));
             }
-            return List.of();
+            return new byte[0];
         }
     }
 }

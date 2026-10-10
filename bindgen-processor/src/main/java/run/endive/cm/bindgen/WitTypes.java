@@ -3,7 +3,9 @@ package run.endive.cm.bindgen;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.NullLiteralExpr;
+import com.github.javaparser.ast.type.ArrayType;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
+import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.type.Type;
 import java.util.ArrayList;
 import java.util.List;
@@ -85,6 +87,9 @@ final class WitTypes {
         switch (defined.kind()) {
             case LIST:
                 ListType list = (ListType) defined;
+                if (holdsBytes(list, inner)) {
+                    return new ArrayType(PrimitiveType.byteType());
+                }
                 return AstBuilders.generic(
                         unit.use(QualifiedTypes.LIST), javaType(list.elementType(), inner));
             case OPTION:
@@ -267,10 +272,98 @@ final class WitTypes {
             throw resultOutOfPlace();
         }
         if (defined.kind() == DefValType.Kind.LIST) {
-            return needsConversion(
-                    ((ListType) defined).elementType(), scope.declaringScope(valType.typeIdx()));
+            ListType list = (ListType) defined;
+            WitScope inner = scope.declaringScope(valType.typeIdx());
+            return holdsBytes(list, inner) || needsConversion(list.elementType(), inner);
         }
         return convertsAtBoundary(defined.kind());
+    }
+
+    /**
+     * Whether {@code list} is a {@code list<u8>}, which Java carries as a {@code byte[]} so that it
+     * crosses the boundary in one copy. A named {@code u8} counts as one.
+     */
+    private boolean holdsBytes(ListType list, WitScope scope) {
+        return primitiveKind(list.elementType(), scope) == DefValType.Kind.U8;
+    }
+
+    /**
+     * The primitive {@code valType} is, whether written inline or named as in {@code type instant =
+     * u64}, or {@code null} when it is not a primitive.
+     */
+    DefValType.Kind primitiveKind(ValType valType, WitScope scope) {
+        if (valType.primValType() != null) {
+            return valType.primValType().kind();
+        }
+        DefValType defined = definedAt(scope, valType.typeIdx());
+        return defined instanceof PrimValType ? defined.kind() : null;
+    }
+
+    /**
+     * The canonical size and alignment of {@code valType} when it is a number, a {@code bool},
+     * or a record made only of those, or {@code null} when storing it needs more than fixed writes.
+     *
+     * @see <a href="https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md#alignment">Alignment</a>
+     */
+    int[] flatLayout(ValType valType, WitScope scope) {
+        DefValType.Kind primitive = primitiveKind(valType, scope);
+        if (primitive != null) {
+            int size = flatSize(primitive);
+            return size == 0 ? null : new int[] {size, size};
+        }
+        DefValType defined = definedAt(scope, valType.typeIdx());
+        if (defined.kind() != DefValType.Kind.RECORD) {
+            return null;
+        }
+        return flatLayout((RecordType) defined, scope.declaringScope(valType.typeIdx()));
+    }
+
+    /** The canonical size and alignment of {@code record}, or {@code null} when it is not flat. */
+    int[] flatLayout(RecordType record, WitScope scope) {
+        int offset = 0;
+        int alignment = 1;
+        for (LabelValType field : record.fields()) {
+            int[] layout = flatLayout(field.valType(), scope);
+            if (layout == null) {
+                return null;
+            }
+            offset = DefValType.alignTo(offset, layout[1]) + layout[0];
+            alignment = Math.max(alignment, layout[1]);
+        }
+        return new int[] {DefValType.alignTo(offset, alignment), alignment};
+    }
+
+    /** The size of a primitive stored by a fixed write, or zero for one that is not. */
+    private static int flatSize(DefValType.Kind kind) {
+        switch (kind) {
+            case BOOL:
+            case S8:
+            case U8:
+                return 1;
+            case S16:
+            case U16:
+                return 2;
+            case S32:
+            case U32:
+            case F32:
+                return 4;
+            case S64:
+            case U64:
+            case F64:
+                return 8;
+            default:
+                return 0;
+        }
+    }
+
+    /** Whether {@code valType} names a {@code list<u8>}. */
+    boolean isBytes(ValType valType, WitScope scope) {
+        if (valType == null || valType.primValType() != null) {
+            return false;
+        }
+        DefValType defined = definedAt(scope, valType.typeIdx());
+        return defined.kind() == DefValType.Kind.LIST
+                && holdsBytes((ListType) defined, scope.declaringScope(valType.typeIdx()));
     }
 
     /**
@@ -304,14 +397,20 @@ final class WitTypes {
             case OPTION:
                 return lowerOption(value, (OptionType) defined, inner, depth);
             case LIST:
-                return mapElements(
-                        value,
-                        lower(
-                                new NameExpr(elementName(depth)),
-                                ((ListType) defined).elementType(),
-                                inner,
-                                depth + 1),
-                        depth);
+                if (holdsBytes((ListType) defined, inner)) {
+                    return value;
+                }
+                NameExpr element = new NameExpr(elementName(depth));
+                Expression lowered =
+                        lower(element, ((ListType) defined).elementType(), inner, depth + 1);
+                // A list whose elements the ABI takes as they are needs no copy.
+                return lowered == element ? value : mapElements(value, lowered, depth);
+            case RECORD:
+                List<Expression> recordHandles = handlesArguments(valType, scope);
+                // A record without handles is a RecordValue, which the ABI reads by position.
+                return recordHandles.isEmpty()
+                        ? value
+                        : AstBuilders.call(value, "toComponent", recordHandles);
             case OWN:
                 return AstBuilders.call(
                         handlesOf(defined, inner),
@@ -341,6 +440,9 @@ final class WitTypes {
      * @param depth how many conversion lambdas enclose this one
      */
     private Expression lift(Expression value, ValType valType, WitScope scope, int depth) {
+        if (isBytes(valType, scope)) {
+            return AstBuilders.call(unit.useName(QualifiedTypes.BYTE_LIST), "toBytes", value);
+        }
         if (needsConversion(valType, scope)) {
             DefValType defined = definedAt(scope, valType.typeIdx());
             WitScope inner = scope.declaringScope(valType.typeIdx());
@@ -715,6 +817,9 @@ final class WitTypes {
         }
         switch (defined.kind()) {
             case LIST:
+                if (holdsBytes((ListType) defined, scope.declaringScope(valType.typeIdx()))) {
+                    return AstBuilders.call(unit.useName(QualifiedTypes.LIST_DESCRIPTOR), "bytes");
+                }
                 return instanceOf(QualifiedTypes.LIST_DESCRIPTOR);
             case ENUM:
             case VARIANT:

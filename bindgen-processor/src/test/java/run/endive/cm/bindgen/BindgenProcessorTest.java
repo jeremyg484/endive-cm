@@ -574,6 +574,44 @@ class BindgenProcessorTest {
                 .contains("addType(\"instant\"");
     }
 
+    /**
+     * A named primitive counts as the primitive it names, so a list of named bytes is still a
+     * {@code byte[]} and a record of named numbers is still stored by fixed writes.
+     */
+    @Test
+    void aNamedPrimitiveKeepsTheFastPaths() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.NamedFastPathHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"io\", inline ="
+                                        + " \"package my:project;\\n"
+                                        + "interface data {\\n"
+                                        + "  type octet = u8;\\n"
+                                        + "  type instant = u64;\\n"
+                                        + "  record stamp { at: instant, seq: u32 }\\n"
+                                        + "  read: func(len: u32) -> list<octet>;\\n"
+                                        + "  latest: func() -> stamp;\\n"
+                                        + "}\\n"
+                                        + "world io {\\n"
+                                        + "  import data;\\n"
+                                        + "  export run: func();\\n"
+                                        + "}\\n\")\n"
+                                        + "public class NamedFastPathHost {}\n"));
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.my.project.data.Host")
+                .contentsAsUtf8String()
+                .contains("byte[] read(Long len)");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.my.project.data.Stamp")
+                .contentsAsUtf8String()
+                .contains("memory.writeLong(pointer, this.at.longValue())");
+    }
+
     /** Every world generates a package tree mirroring the WIT ids, which is what this pins. */
     private static void assertGenerated(Compilation compilation, List<String> expected) {
         List<String> actual =
@@ -601,7 +639,7 @@ class BindgenProcessorTest {
                                         + "@Bindgen(world = \"list-payload\", inline ="
                                         + " \"package my:project;\\n"
                                         + "interface blobs {\\n"
-                                        + "  variant blob { empty, bytes(list<u8>) }\\n"
+                                        + "  variant blob { empty, bytes(list<u32>) }\\n"
                                         + "  take: func(b: blob);\\n"
                                         + "}\\n"
                                         + "world list-payload {\\n"

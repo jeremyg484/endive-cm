@@ -1,5 +1,6 @@
 package run.endive.cm.bindgen.it.worldexports;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
@@ -47,16 +48,16 @@ public class WorldExportsTest {
     }
 
     /**
-     * {@code list<u8>} arrives as a list of the type carrying {@code u8}, which is {@code Short}
-     * rather than {@code Byte}, since a {@code u8} does not fit a signed byte.
+     * {@code list<u8>} arrives as a {@code byte[]} copied out of memory in one read.
+     * A {@code u8} above 127 reads back as a negative {@code byte} holding the same bits.
      */
     @Test
-    void aListArgumentArrivesElementByElement() {
+    void aByteListArgumentArrivesAsAnArray() {
         MyHost host = new MyHost();
 
         instantiate(host).demo().run();
 
-        assertEquals(List.of((short) 10, (short) 20, (short) 255), host.hashed.get(0));
+        assertArrayEquals(new byte[] {10, 20, (byte) 255}, host.hashed.get(0));
     }
 
     @Test
@@ -82,7 +83,7 @@ public class WorldExportsTest {
     /** The host side of {@code my:project/host}. */
     private static final class MyHost implements Host {
 
-        private final List<List<Short>> hashed = new ArrayList<>();
+        private final List<byte[]> hashed = new ArrayList<>();
         private int randomCalls;
 
         @Override
@@ -92,8 +93,8 @@ public class WorldExportsTest {
         }
 
         @Override
-        public String sha256(List<Short> bytes) {
-            hashed.add(new ArrayList<>(bytes));
+        public String sha256(byte[] bytes) {
+            hashed.add(bytes.clone());
             return "digest";
         }
     }

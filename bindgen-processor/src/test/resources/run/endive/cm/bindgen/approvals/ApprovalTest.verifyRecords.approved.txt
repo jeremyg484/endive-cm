@@ -61,7 +61,7 @@ public final class RecordTypesWorld {
         ValType typesType2 = typesBuilder.declareType(Type.of(ListType.builder().withElementType(ValType.builder().withPrimValType(PrimValType.STRING).build()).build()));
         ValType typesPerson = typesBuilder.declareType(Type.of(RecordType.builder().addField(LabelValType.builder().withLabel("name").withValType(ValType.builder().withPrimValType(PrimValType.STRING).build()).build()).addField(LabelValType.builder().withLabel("active").withValType(ValType.builder().withPrimValType(PrimValType.BOOL).build()).build()).addField(LabelValType.builder().withLabel("id").withValType(ValType.builder().withPrimValType(PrimValType.U64).build()).build()).addField(LabelValType.builder().withLabel("initial").withValType(ValType.builder().withPrimValType(PrimValType.CHAR).build()).build()).addField(LabelValType.builder().withLabel("tags").withValType(typesType2).build()).addField(LabelValType.builder().withLabel("home").withValType(typesPoint).build()).build()));
         typesBuilder.addType("person", typesPerson);
-        typesBuilder.addFunction("resident", FuncType.builder().withResult(typesPerson).build(), args -> new Object[] { types.resident().toComponent() });
+        typesBuilder.addFunction("resident", FuncType.builder().withResult(typesPerson).build(), args -> new Object[] { types.resident() });
         values.put("example:records/types", typesBuilder.build());
         return new RecordTypesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
     }
@@ -111,13 +111,14 @@ import java.util.Map;
 import java.util.Objects;
 import javax.annotation.processing.Generated;
 import run.endive.cm.abi.CharValue;
+import run.endive.cm.abi.RecordValue;
 
 /**
  * The WIT record {@code person}, declared by {@code example:records/types}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
 @SuppressWarnings("unchecked")
-public final class Person {
+public final class Person implements RecordValue {
 
     private final String name;
 
@@ -174,7 +175,7 @@ public final class Person {
         fields.put("id", id);
         fields.put("initial", initial);
         fields.put("tags", tags);
-        fields.put("home", home.toComponent());
+        fields.put("home", home);
         return fields;
     }
 
@@ -184,6 +185,26 @@ public final class Person {
     public static Person fromComponent(Object value) {
         Map<?, ?> fields = (Map<?, ?>) value;
         return new Person((String) fields.get("name"), (Boolean) fields.get("active"), (BigInteger) fields.get("id"), (CharValue) fields.get("initial"), (List<String>) fields.get("tags"), Point.fromComponent(fields.get("home")));
+    }
+
+    @Override
+    public Object field(int index) {
+        switch(index) {
+            case 0:
+                return name;
+            case 1:
+                return active;
+            case 2:
+                return id;
+            case 3:
+                return initial;
+            case 4:
+                return tags;
+            case 5:
+                return home;
+            default:
+                throw new IndexOutOfBoundsException("record person has 6 fields, not " + index);
+        }
     }
 
     @Override
@@ -214,12 +235,14 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import javax.annotation.processing.Generated;
+import run.endive.cm.abi.FlatRecordValue;
+import run.endive.runtime.Memory;
 
 /**
  * The WIT record {@code point}, declared by {@code example:records/types}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class Point {
+public final class Point implements FlatRecordValue {
 
     private final Long x;
 
@@ -254,6 +277,24 @@ public final class Point {
     public static Point fromComponent(Object value) {
         Map<?, ?> fields = (Map<?, ?>) value;
         return new Point((Long) fields.get("x"), (Long) fields.get("y"));
+    }
+
+    @Override
+    public Object field(int index) {
+        switch(index) {
+            case 0:
+                return x;
+            case 1:
+                return y;
+            default:
+                throw new IndexOutOfBoundsException("record point has 2 fields, not " + index);
+        }
+    }
+
+    @Override
+    public void store(Memory memory, int pointer) {
+        memory.writeI32(pointer, this.x.intValue());
+        memory.writeI32(pointer + 4, this.y.intValue());
     }
 
     @Override
@@ -302,7 +343,7 @@ public final class Guest {
     }
 
     public Span widen(Span s, Long by) {
-        return Span.fromComponent(this.widen.apply(s.toComponent(), by)[0]);
+        return Span.fromComponent(this.widen.apply(s, by)[0]);
     }
 }
 
@@ -314,12 +355,14 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import javax.annotation.processing.Generated;
+import run.endive.cm.abi.FlatRecordValue;
+import run.endive.runtime.Memory;
 
 /**
  * The WIT record {@code span}, declared by {@code example:records/shapes}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class Span {
+public final class Span implements FlatRecordValue {
 
     private final Long start;
 
@@ -354,6 +397,24 @@ public final class Span {
     public static Span fromComponent(Object value) {
         Map<?, ?> fields = (Map<?, ?>) value;
         return new Span((Long) fields.get("start"), (Long) fields.get("end"));
+    }
+
+    @Override
+    public Object field(int index) {
+        switch(index) {
+            case 0:
+                return start;
+            case 1:
+                return end;
+            default:
+                throw new IndexOutOfBoundsException("record span has 2 fields, not " + index);
+        }
+    }
+
+    @Override
+    public void store(Memory memory, int pointer) {
+        memory.writeI32(pointer, this.start.intValue());
+        memory.writeI32(pointer + 4, this.end.intValue());
     }
 
     @Override

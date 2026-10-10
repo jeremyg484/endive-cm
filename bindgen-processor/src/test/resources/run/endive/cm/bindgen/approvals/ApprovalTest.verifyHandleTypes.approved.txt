@@ -260,7 +260,6 @@ public interface Host {
 package endive.testing.example.handletypes.streams;
 
 import java.math.BigInteger;
-import java.util.List;
 import javax.annotation.processing.Generated;
 
 /**
@@ -269,7 +268,7 @@ import javax.annotation.processing.Generated;
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
 public interface InputStream {
 
-    List<Short> read(BigInteger len);
+    byte[] read(BigInteger len);
 
     /**
      * Called when the guest drops an owned handle to this resource.

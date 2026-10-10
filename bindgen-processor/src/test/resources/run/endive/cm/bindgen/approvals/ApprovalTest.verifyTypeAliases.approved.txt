@@ -70,7 +70,7 @@ public final class TypeAliasesWorld {
         ValType clockType12 = clockBuilder.declareType(Type.of(ListType.builder().withElementType(clockInstant).build()));
         clockBuilder.addFunction("now", FuncType.builder().withResult(clockInstant).build(), args -> new Object[] { clock.now() });
         clockBuilder.addFunction("elapsed", FuncType.builder().addParam(LabelValType.builder().withLabel("since").withValType(clockInstant).build()).withResult(clockDuration).build(), args -> new Object[] { clock.elapsed((BigInteger) args[0]) });
-        clockBuilder.addFunction("latest", FuncType.builder().withResult(clockStamp).build(), args -> new Object[] { clock.latest().toComponent() });
+        clockBuilder.addFunction("latest", FuncType.builder().withResult(clockStamp).build(), args -> new Object[] { clock.latest() });
         clockBuilder.addFunction("describe", FuncType.builder().addParam(LabelValType.builder().withLabel("at").withValType(clockInstant).build()).withResult(clockLabel).build(), args -> new Object[] { clock.describe((BigInteger) args[0]) });
         clockBuilder.addFunction("history", FuncType.builder().withResult(clockType12).build(), args -> new Object[] { clock.history() });
         values.put("example:type-aliases/clock", clockBuilder.build());
@@ -131,12 +131,14 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import javax.annotation.processing.Generated;
+import run.endive.cm.abi.FlatRecordValue;
+import run.endive.runtime.Memory;
 
 /**
  * The WIT record {@code stamp}, declared by {@code example:type-aliases/clock}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class Stamp {
+public final class Stamp implements FlatRecordValue {
 
     private final BigInteger at;
 
@@ -171,6 +173,24 @@ public final class Stamp {
     public static Stamp fromComponent(Object value) {
         Map<?, ?> fields = (Map<?, ?>) value;
         return new Stamp((BigInteger) fields.get("at"), (Long) fields.get("seq"));
+    }
+
+    @Override
+    public Object field(int index) {
+        switch(index) {
+            case 0:
+                return at;
+            case 1:
+                return seq;
+            default:
+                throw new IndexOutOfBoundsException("record stamp has 2 fields, not " + index);
+        }
+    }
+
+    @Override
+    public void store(Memory memory, int pointer) {
+        memory.writeLong(pointer, this.at.longValue());
+        memory.writeI32(pointer + 8, this.seq.intValue());
     }
 
     @Override

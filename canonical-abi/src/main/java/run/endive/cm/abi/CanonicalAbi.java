@@ -254,11 +254,11 @@ public final class CanonicalAbi {
         return i != 0;
     }
 
-    private static float canonicalizeNan32(float f) {
+    static float canonicalizeNan32(float f) {
         return Float.isNaN(f) ? Float.intBitsToFloat(CANONICAL_FLOAT32_NAN_BITS) : f;
     }
 
-    private static double canonicalizeNan64(double f) {
+    static double canonicalizeNan64(double f) {
         return Double.isNaN(f) ? Double.longBitsToDouble(CANONICAL_FLOAT64_NAN_BITS) : f;
     }
 
@@ -302,6 +302,9 @@ public final class CanonicalAbi {
         if ((long) pointer + (long) length * elemSize > Memory.bytes(context.memory().pages())) {
             throw new TrapException(
                     "list of length " + length + " at " + pointer + " is out of bounds");
+        }
+        if (elementType.kind() == DefValType.Kind.U8) {
+            return ByteList.of(context.memory().readBytes(pointer, length));
         }
         return loadListElements(context, pointer, length, elementType);
     }
@@ -516,10 +519,14 @@ public final class CanonicalAbi {
                 return;
             case LIST:
             case SIZED_LIST:
-                storeList(context, (List<?>) value, pointer, type);
+                storeList(context, value, pointer, type);
                 return;
             case RECORD:
-                storeRecord(context, (Map<?, ?>) value, pointer, type);
+                if (value instanceof FlatRecordValue) {
+                    ((FlatRecordValue) value).store(context.memory(), pointer);
+                } else {
+                    storeRecord(context, value, pointer, type);
+                }
                 return;
             case VARIANT:
                 storeVariant(context, (VariantValue) value, pointer, type);
@@ -590,8 +597,9 @@ public final class CanonicalAbi {
     }
 
     private static void storeList(
-            LiftLowerContext context, List<?> listValue, int pointer, ResolvedType type) {
+            LiftLowerContext context, Object value, int pointer, ResolvedType type) {
         if (type.isFixedSizeList()) {
+            var listValue = asList(value);
             if (listValue.size() != type.fixedSize()) {
                 throw new IllegalArgumentException(
                         "expected "
@@ -602,19 +610,47 @@ public final class CanonicalAbi {
             storeListElements(context, listValue, pointer, type.element());
             return;
         }
-        storeUnboundedList(context, listValue, pointer, type.element());
+        storeUnboundedList(context, value, pointer, type.element());
     }
 
     private static void storeUnboundedList(
-            LiftLowerContext context, List<?> listValue, int pointer, ResolvedType elementType) {
+            LiftLowerContext context, Object listValue, int pointer, ResolvedType elementType) {
         int begin = storeListIntoRange(context, listValue, elementType);
         int ptrSize = context.ptrType().size();
         storeInt(context.memory(), begin, pointer, ptrSize);
-        storeInt(context.memory(), listValue.size(), pointer + ptrSize, ptrSize);
+        storeInt(context.memory(), listLength(listValue), pointer + ptrSize, ptrSize);
+    }
+
+    /** A list value as a {@link List}, converting a {@code list<u8>} given as {@code byte[]}. */
+    private static List<?> asList(Object value) {
+        return value instanceof byte[] ? ByteList.of((byte[]) value) : (List<?>) value;
+    }
+
+    private static int listLength(Object value) {
+        return value instanceof byte[] ? ((byte[]) value).length : ((List<?>) value).size();
+    }
+
+    /**
+     * Whether {@code value} is a {@code list<u8>} whose bytes can be copied to memory in one write.
+     */
+    private static boolean isBulkBytes(Object value, ResolvedType elementType) {
+        return elementType.kind() == DefValType.Kind.U8
+                && (value instanceof byte[] || value instanceof ByteList);
     }
 
     private static int storeListIntoRange(
-            LiftLowerContext context, List<?> listValue, ResolvedType elementType) {
+            LiftLowerContext context, Object value, ResolvedType elementType) {
+        if (isBulkBytes(value, elementType)) {
+            byte[] bytes = ByteList.toBytes(value);
+            if (bytes.length > MAX_LIST_BYTE_LENGTH) {
+                throw new TrapException(
+                        "list byte length exceeds the maximum of " + MAX_LIST_BYTE_LENGTH);
+            }
+            int ptr = allocate(context, 1, bytes.length);
+            context.memory().write(ptr, bytes);
+            return ptr;
+        }
+        List<?> listValue = (List<?>) value;
         int elemSize = elementType.elementSize(context.ptrType());
         long byteLength = (long) listValue.size() * elemSize;
         if (byteLength > MAX_LIST_BYTE_LENGTH) {
@@ -659,13 +695,23 @@ public final class CanonicalAbi {
     }
 
     private static void storeRecord(
-            LiftLowerContext context, Map<?, ?> recordValue, int pointer, ResolvedType type) {
+            LiftLowerContext context, Object recordValue, int pointer, ResolvedType type) {
         int p = pointer;
-        for (ResolvedType.Field f : type.fields()) {
+        var fields = type.fields();
+        for (int i = 0; i < fields.size(); i++) {
+            ResolvedType.Field f = fields.get(i);
             p = DefValType.alignTo(p, f.type().alignment(context.ptrType()));
-            store(context, recordValue.get(f.label()), f.type(), p);
+            store(context, fieldOf(recordValue, i, f), f.type(), p);
             p += f.type().elementSize(context.ptrType());
         }
+    }
+
+    /** A record's field, from a {@link RecordValue} by position or from a map by label. */
+    private static Object fieldOf(Object recordValue, int index, ResolvedType.Field field) {
+        if (recordValue instanceof RecordValue) {
+            return ((RecordValue) recordValue).field(index);
+        }
+        return ((Map<?, ?>) recordValue).get(field.label());
     }
 
     private static void storeVariant(
@@ -1233,7 +1279,7 @@ public final class CanonicalAbi {
                 lowerFlatList(context, value, type, out);
                 return;
             case RECORD:
-                lowerFlatRecord(context, (Map<?, ?>) value, type, out);
+                lowerFlatRecord(context, value, type, out);
                 return;
             case VARIANT:
                 lowerFlatVariant(context, (VariantValue) value, type, out);
@@ -1275,8 +1321,13 @@ public final class CanonicalAbi {
 
     private static void lowerFlatList(
             LiftLowerContext context, Object value, ResolvedType type, LongBuffer out) {
-        var list = (List<?>) value;
         var elementType = type.element();
+        if (!type.isFixedSizeList() && isBulkBytes(value, elementType)) {
+            out.add(Integer.toUnsignedLong(storeListIntoRange(context, value, elementType)));
+            out.add(Integer.toUnsignedLong(listLength(value)));
+            return;
+        }
+        var list = asList(value);
         if (type.isFixedSizeList()) {
             if (list.size() != type.fixedSize()) {
                 throw new IllegalArgumentException(
@@ -1296,9 +1347,11 @@ public final class CanonicalAbi {
     }
 
     private static void lowerFlatRecord(
-            LiftLowerContext context, Map<?, ?> mapValue, ResolvedType type, LongBuffer out) {
-        for (ResolvedType.Field f : type.fields()) {
-            lowerFlatInto(context, mapValue.get(f.label()), f.type(), out);
+            LiftLowerContext context, Object recordValue, ResolvedType type, LongBuffer out) {
+        var fields = type.fields();
+        for (int i = 0; i < fields.size(); i++) {
+            lowerFlatInto(
+                    context, fieldOf(recordValue, i, fields.get(i)), fields.get(i).type(), out);
         }
     }
 

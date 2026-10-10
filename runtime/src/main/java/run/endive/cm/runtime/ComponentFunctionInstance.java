@@ -199,6 +199,8 @@ public final class ComponentFunctionInstance implements ComponentFunction {
             return EnumHostTypeDescriptor.forClass(hostType);
         } else if (ResourceHostTypeDescriptor.supports(hostType)) {
             return ResourceHostTypeDescriptor.instance();
+        } else if (hostType == byte[].class) {
+            return ListHostTypeDescriptor.bytes();
         } else if (ListHostTypeDescriptor.supports(hostType)) {
             return ListHostTypeDescriptor.instance();
         } else if (RecordHostTypeDescriptor.supports(hostType)) {

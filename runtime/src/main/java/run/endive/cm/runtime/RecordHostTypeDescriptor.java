@@ -1,11 +1,13 @@
 package run.endive.cm.runtime;
 
 import java.util.Map;
+import run.endive.cm.abi.RecordValue;
 import run.endive.cm.types.Type;
 import run.endive.cm.types.ValType;
 
 /**
- * Binds {@link Map} to the component types the Canonical ABI carries as a label-to-value map:
+ * Binds {@link Map}, and {@link RecordValue} for a {@code record}, to the component types the
+ * Canonical ABI carries as a label-to-value map:
  * {@code record} and {@code tuple}, whose fields are numbered from zero when it despecializes, and
  * {@code flags}, whose values are booleans.
  *
@@ -52,6 +54,6 @@ public final class RecordHostTypeDescriptor extends HostTypeDescriptor {
     }
 
     static boolean supports(Class<?> hostType) {
-        return Map.class.isAssignableFrom(hostType);
+        return Map.class.isAssignableFrom(hostType) || RecordValue.class.isAssignableFrom(hostType);
     }
 }

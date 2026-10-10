@@ -12,15 +12,18 @@ import java.math.BigInteger;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import run.endive.cm.abi.ByteList;
 import run.endive.cm.abi.ResourceValue;
 import run.endive.cm.types.FuncType;
 import run.endive.cm.types.LabelValType;
+import run.endive.cm.types.ListType;
 import run.endive.cm.types.OwnType;
 import run.endive.cm.types.PrimValType;
 import run.endive.cm.types.RecordType;
 import run.endive.cm.types.Type;
 import run.endive.cm.types.ValType;
 import run.endive.tools.wasm.Wat2Wasm;
+import run.endive.wasm.WasmEngineException;
 import run.endive.wasm.WasmModule;
 
 /**
@@ -145,6 +148,49 @@ public class HostInstanceTests {
                 new Object[] {BigInteger.TEN}, host.export("later").apply(BigInteger.valueOf(9)));
     }
 
+    /** A {@code byte[]} crosses as a {@code list<u8>}, whether the element is inline or named. */
+    @Test
+    public void aByteArrayCrossesAsAListOfU8() {
+        var builder = HostInstance.builder(new ComponentStore());
+        ValType octet = builder.declareType(Type.of(PrimValType.U8));
+        ValType inline = builder.declareType(Type.of(listOf(u8())));
+        ValType named = builder.declareType(Type.of(listOf(octet)));
+        builder.addFunction(
+                "inline-length",
+                func().addParam(param("bytes", inline)).withResult(u32()).build(),
+                args -> new Object[] {(long) ByteList.toBytes(args[0]).length});
+        builder.addFunction(
+                "named-length",
+                func().addParam(param("bytes", named)).withResult(u32()).build(),
+                args -> new Object[] {(long) ByteList.toBytes(args[0]).length});
+
+        ComponentInstance host = builder.build();
+
+        assertArrayEquals(new Object[] {3L}, host.export("inline-length").apply(new byte[3]));
+        assertArrayEquals(new Object[] {2L}, host.export("named-length").apply(new byte[2]));
+    }
+
+    /** A {@code byte[]} names its element, so it is refused for a list of anything but bytes. */
+    @Test
+    public void aByteArrayIsRefusedForAListOfAnythingElse() {
+        var builder = HostInstance.builder(new ComponentStore());
+        ValType strings = builder.declareType(Type.of(listOf(string())));
+        builder.addFunction(
+                "count",
+                func().addParam(param("items", strings)).withResult(u32()).build(),
+                args -> new Object[] {0L});
+
+        ComponentFunction count = builder.build().export("count");
+
+        assertThrows(WasmEngineException.class, () -> count.apply(new byte[1]));
+        assertThrows(
+                LinkageException.class,
+                () ->
+                        count.typed(
+                                PrimitiveHostTypeDescriptor.forClass(Long.class),
+                                ListHostTypeDescriptor.bytes()));
+    }
+
     /**
      * Resource types are generative, so two declarations that read alike are still two types. The
      * spec suite leans on this to check that a handle minted from one is refused by the other.
@@ -259,6 +305,14 @@ public class HostInstanceTests {
 
     private static FuncType.Builder func() {
         return FuncType.builder();
+    }
+
+    private static ListType listOf(ValType element) {
+        return ListType.builder().withElementType(element).build();
+    }
+
+    private static ValType u8() {
+        return ValType.builder().withPrimValType(PrimValType.U8).build();
     }
 
     private static ValType u32() {

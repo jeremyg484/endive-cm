@@ -79,7 +79,7 @@ public final class UseTypesWorld {
             logging.log(endive.testing.example.usetypes.types.Level.fromComponent(args[0]), (String) args[1]);
             return new Object[0];
         });
-        loggingBuilder.addFunction("latest", FuncType.builder().withResult(loggingEntry).build(), args -> new Object[] { logging.latest().toComponent() });
+        loggingBuilder.addFunction("latest", FuncType.builder().withResult(loggingEntry).build(), args -> new Object[] { logging.latest() });
         loggingBuilder.addFunction("worst", FuncType.builder().addParam(LabelValType.builder().withLabel("levels").withValType(loggingLabels).build()).withResult(loggingType8).build(), args -> new Object[] { Optional.ofNullable(logging.worst(((List<Object>) args[0]).stream().map(element -> endive.testing.example.usetypes.types.Level.fromComponent(element)).collect(Collectors.toList()))).map(some -> VariantValue.of("some", some.toComponent())).orElse(VariantValue.of("none", null)) });
         values.put("example:use-types/logging", loggingBuilder.build());
         return new UseTypesWorld(ComponentLinker.builder().build().instantiate(store, component, values));
@@ -125,12 +125,13 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import javax.annotation.processing.Generated;
+import run.endive.cm.abi.RecordValue;
 
 /**
  * The WIT record {@code entry}, declared by {@code example:use-types/types}.
  */
 @Generated("run.endive.cm.bindgen.BindgenProcessor")
-public final class Entry {
+public final class Entry implements RecordValue {
 
     private final Level level;
 
@@ -165,6 +166,18 @@ public final class Entry {
     public static Entry fromComponent(Object value) {
         Map<?, ?> fields = (Map<?, ?>) value;
         return new Entry(Level.fromComponent(fields.get("level")), (Long) fields.get("code"));
+    }
+
+    @Override
+    public Object field(int index) {
+        switch(index) {
+            case 0:
+                return level.toComponent();
+            case 1:
+                return code;
+            default:
+                throw new IndexOutOfBoundsException("record entry has 2 fields, not " + index);
+        }
     }
 
     @Override
