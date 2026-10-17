@@ -1,7 +1,10 @@
 package run.endive.cm.wasi.p2;
 
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -10,6 +13,8 @@ import run.endive.cm.types.WasmComponent;
 import run.endive.cm.wasi.p2.bindings.ImportsWorld;
 import run.endive.cm.wasi.p2.clocks.monotonicclock.HostMonotonicClock;
 import run.endive.cm.wasi.p2.clocks.wallclock.HostWallClock;
+import run.endive.cm.wasi.p2.filesystem.preopens.HostPreopens;
+import run.endive.cm.wasi.p2.filesystem.types.HostTypes;
 import run.endive.cm.wasi.p2.io.poll.HostPoll;
 
 /**
@@ -31,6 +36,8 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
     private final HostPoll poll;
     private final HostMonotonicClock monotonicClock;
     private final HostWallClock wallClock;
+    private final HostTypes types;
+    private final HostPreopens preopens;
 
     private WasiPreview2(Builder builder) {
         this.ownsScheduler = builder.scheduler == null;
@@ -41,6 +48,8 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
                 builder.clock == null
                         ? new HostWallClock()
                         : new HostWallClock(builder.clock, builder.clockResolution);
+        this.types = new HostTypes();
+        this.preopens = new HostPreopens(builder.directories, poll);
     }
 
     public static Builder builder() {
@@ -65,6 +74,16 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
     @Override
     public HostWallClock wallClock() {
         return wallClock;
+    }
+
+    @Override
+    public HostTypes types() {
+        return types;
+    }
+
+    @Override
+    public HostPreopens preopens() {
+        return preopens;
     }
 
     /** Shuts down the scheduler, unless the builder was given an external one to use. */
@@ -93,6 +112,7 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
         private ScheduledExecutorService scheduler;
         private Clock clock;
         private Duration clockResolution;
+        private final Map<String, Path> directories = new LinkedHashMap<>();
 
         private Builder() {}
 
@@ -116,6 +136,17 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
         public Builder withWallClock(Clock clock, Duration resolution) {
             this.clock = Objects.requireNonNull(clock, "clock");
             this.clockResolution = Objects.requireNonNull(resolution, "resolution");
+            return this;
+        }
+
+        /**
+         * Grants the guest {@code host} as a preopened directory named {@code guest}. Any
+         * {@link java.nio.file.FileSystem} works, so an in-memory one makes a sandbox that touches
+         * no host files.
+         */
+        public Builder withDirectory(String guest, Path host) {
+            directories.put(
+                    Objects.requireNonNull(guest, "guest"), Objects.requireNonNull(host, "host"));
             return this;
         }
 
