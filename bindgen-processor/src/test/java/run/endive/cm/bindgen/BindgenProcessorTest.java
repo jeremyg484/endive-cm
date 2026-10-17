@@ -975,9 +975,13 @@ class BindgenProcessorTest {
         assertThat(compilation).hadErrorContaining("a tuple of 9 elements is not yet supported");
     }
 
-    /** An element is named by its class when a tuple is lifted, so a list has no way through. */
+    /**
+     * A tuple whose elements convert at the boundary converts each one on its own, in both
+     * directions, as {@code wasi:filesystem}'s {@code read} needs for {@code tuple<list<u8>,
+     * bool>}.
+     */
     @Test
-    void aTupleElementThatCannotBeNamedByItsClassIsReported() {
+    void aTupleConvertsEachElementThatNeedsIt() {
         Compilation compilation =
                 compile(
                         JavaFileObjects.forSourceString(
@@ -987,17 +991,34 @@ class BindgenProcessorTest {
                                         + "@Bindgen(world = \"nested\", inline ="
                                         + " \"package t:n;\\n"
                                         + "interface points {\\n"
-                                        + "  nested: func() -> tuple<string, list<u8>>;\\n"
+                                        + "  enum level { low, high }\\n"
+                                        + "  swap: func(pair: tuple<level, list<u8>>)"
+                                        + " -> tuple<list<u8>, level>;\\n"
                                         + "}\\n"
                                         + "world nested {\\n"
                                         + "  import points;\\n"
-                                        + "  export go: func();\\n"
+                                        + "  export read: func() -> tuple<list<u8>, bool>;\\n"
                                         + "}\\n\")\n"
                                         + "public class NestedTupleHost {}\n"));
 
-        assertThat(compilation).failed();
+        assertThat(compilation).succeededWithoutWarnings();
         assertThat(compilation)
-                .hadErrorContaining("a tuple element of kind list is not yet supported");
+                .generatedSourceFile("endive.testing.NestedWorld")
+                .contentsAsUtf8String()
+                .contains(
+                        "Tuple2.fromComponent(args[0], element ->"
+                                + " endive.testing.t.n.points.Level.fromComponent(element),"
+                                + " element -> ByteList.toBytes(element))");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.NestedWorld")
+                .contentsAsUtf8String()
+                .contains(".toComponent(element -> element, element -> element.toComponent())");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.NestedWorld")
+                .contentsAsUtf8String()
+                .contains(
+                        "Tuple2.fromComponent(this.read.apply()[0], element ->"
+                                + " ByteList.toBytes(element), element -> (Boolean) element)");
     }
 
     /**

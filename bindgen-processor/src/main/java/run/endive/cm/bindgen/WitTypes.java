@@ -102,7 +102,7 @@ final class WitTypes {
             case TUPLE:
                 List<Type> elements = new ArrayList<>();
                 for (ValType element : ((TupleType) defined).elementTypes()) {
-                    elements.add(elementJavaType(element, inner));
+                    elements.add(javaType(element, inner));
                 }
                 return AstBuilders.generic(
                         unit.use(tupleClass(elements.size())), elements.toArray(new Type[0]));
@@ -411,6 +411,8 @@ final class WitTypes {
                 return recordHandles.isEmpty()
                         ? value
                         : AstBuilders.call(value, "toComponent", recordHandles);
+            case TUPLE:
+                return lowerTuple(value, (TupleType) defined, inner, depth);
             case OWN:
                 return AstBuilders.call(
                         handlesOf(defined, inner),
@@ -448,7 +450,7 @@ final class WitTypes {
             WitScope inner = scope.declaringScope(valType.typeIdx());
             switch (defined.kind()) {
                 case TUPLE:
-                    return tupleFromComponent(value, (TupleType) defined, inner);
+                    return liftTuple(value, (TupleType) defined, inner, depth);
                 case OPTION:
                     return liftOption(value, (OptionType) defined, inner, depth);
                 case LIST:
@@ -482,30 +484,47 @@ final class WitTypes {
 
     /**
      * A tuple is anonymous, so there is no generated class to call. Each element is named by its
-     * class instead, which is what gives the conversion the tuple type a caller expects.
+     * class when every element can be, which needs no unchecked cast. Otherwise each element is
+     * lifted by a conversion of its own.
      */
-    private Expression tupleFromComponent(Expression value, TupleType tuple, WitScope scope) {
+    private Expression liftTuple(Expression value, TupleType tuple, WitScope scope, int depth) {
         List<ValType> elements = tuple.elementTypes();
         List<Expression> arguments = new ArrayList<>();
         arguments.add(value);
-        for (ValType element : elements) {
-            arguments.add(AstBuilders.classLiteral(elementJavaType(element, scope)));
+        if (elements.stream().allMatch(element -> namedByClass(element, scope))) {
+            for (ValType element : elements) {
+                arguments.add(AstBuilders.classLiteral(javaType(element, scope)));
+            }
+        } else {
+            for (ValType element : elements) {
+                Expression lifted =
+                        lift(new NameExpr(elementName(depth)), element, scope, depth + 1);
+                arguments.add(AstBuilders.lambda(elementName(depth), lifted));
+            }
         }
         return AstBuilders.call(
                 unit.useName(tupleClass(elements.size())), "fromComponent", arguments);
     }
 
+    /** Whether a tuple element lifts by a checked cast to its class alone. */
+    private boolean namedByClass(ValType element, WitScope scope) {
+        return !needsConversion(element, scope) && !isGeneric(javaType(element, scope));
+    }
+
     /**
-     * The Java type of a tuple element, which a conversion names by its class, so an element that
-     * converts on its own or that carries a type argument has no way through.
+     * A tuple as the map the ABI carries. Each element is lowered by a conversion of its own once
+     * any element needs one.
      */
-    private Type elementJavaType(ValType element, WitScope scope) {
-        Type carrier = javaType(element, scope);
-        if (isGeneric(carrier) || needsConversion(element, scope)) {
-            throw unsupported(
-                    "a tuple element of kind " + definedAt(scope, element.typeIdx()).kind().name());
+    private Expression lowerTuple(Expression value, TupleType tuple, WitScope scope, int depth) {
+        List<Expression> converters = new ArrayList<>();
+        boolean converts = false;
+        for (ValType element : tuple.elementTypes()) {
+            NameExpr bound = new NameExpr(elementName(depth));
+            Expression lowered = lower(bound, element, scope, depth + 1);
+            converts |= lowered != bound;
+            converters.add(AstBuilders.lambda(elementName(depth), lowered));
         }
-        return carrier;
+        return AstBuilders.call(value, "toComponent", converts ? converters : List.of());
     }
 
     /** The runtime class carrying a tuple of {@code size} elements. */

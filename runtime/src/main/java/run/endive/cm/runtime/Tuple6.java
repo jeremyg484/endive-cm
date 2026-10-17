@@ -3,6 +3,7 @@ package run.endive.cm.runtime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 /**
  * A WIT {@code tuple} of six elements, which are reached by position.
@@ -46,14 +47,26 @@ public final class Tuple6<A, B, C, D, E, F> {
             Class<D> c3,
             Class<E> c4,
             Class<F> c5) {
+        return fromComponent(value, c0::cast, c1::cast, c2::cast, c3::cast, c4::cast, c5::cast);
+    }
+
+    /** The tuple a lifted value carries, each element converted by the function at its position. */
+    public static <A, B, C, D, E, F> Tuple6<A, B, C, D, E, F> fromComponent(
+            Object value,
+            Function<Object, ? extends A> c0,
+            Function<Object, ? extends B> c1,
+            Function<Object, ? extends C> c2,
+            Function<Object, ? extends D> c3,
+            Function<Object, ? extends E> c4,
+            Function<Object, ? extends F> c5) {
         Map<?, ?> fields = (Map<?, ?>) value;
         return of(
-                c0.cast(fields.get("0")),
-                c1.cast(fields.get("1")),
-                c2.cast(fields.get("2")),
-                c3.cast(fields.get("3")),
-                c4.cast(fields.get("4")),
-                c5.cast(fields.get("5")));
+                c0.apply(fields.get("0")),
+                c1.apply(fields.get("1")),
+                c2.apply(fields.get("2")),
+                c3.apply(fields.get("3")),
+                c4.apply(fields.get("4")),
+                c5.apply(fields.get("5")));
     }
 
     public A f0() {
@@ -82,13 +95,30 @@ public final class Tuple6<A, B, C, D, E, F> {
 
     /** This tuple as the ABI carries it, which is a map labelled by element position. */
     public Map<String, Object> toComponent() {
+        return toComponent(
+                Function.identity(),
+                Function.identity(),
+                Function.identity(),
+                Function.identity(),
+                Function.identity(),
+                Function.identity());
+    }
+
+    /** This tuple as the ABI carries it, each element converted by the function at its position. */
+    public Map<String, Object> toComponent(
+            Function<? super A, ?> c0,
+            Function<? super B, ?> c1,
+            Function<? super C, ?> c2,
+            Function<? super D, ?> c3,
+            Function<? super E, ?> c4,
+            Function<? super F, ?> c5) {
         Map<String, Object> fields = new LinkedHashMap<>();
-        fields.put("0", f0);
-        fields.put("1", f1);
-        fields.put("2", f2);
-        fields.put("3", f3);
-        fields.put("4", f4);
-        fields.put("5", f5);
+        fields.put("0", c0.apply(f0));
+        fields.put("1", c1.apply(f1));
+        fields.put("2", c2.apply(f2));
+        fields.put("3", c3.apply(f3));
+        fields.put("4", c4.apply(f4));
+        fields.put("5", c5.apply(f5));
         return fields;
     }
 

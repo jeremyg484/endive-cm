@@ -661,9 +661,13 @@ A `tuple` is structural rather than nominal, so it has no WIT name and generates
 one of the runtime's `Tuple2` through `Tuple8` classes and converts at the boundary, because the ABI despecializes a
 tuple to a record whose fields are labelled by position and carries it as a `java.util.Map`. Lifting one names each
 element by its class, as `Tuple2.fromComponent(value, String.class, Long.class)`, which is what gives the conversion
-the tuple type a caller expects without an unchecked cast. An element the conversion cannot name that way is refused,
-which covers an element that converts on its own such as an `enum`, and one carrying a type argument such as a `list`.
-A tuple wider than the runtime carries is refused too.
+the tuple type a caller expects without an unchecked cast. An element that converts on its own, such as an `enum` or a
+`list<u8>`, or one carrying a type argument, such as a `list<string>`, cannot be named that way. Once any element is
+one of those, every element converts through a lambda of its own instead, as `Tuple2.fromComponent(value, element ->
+ByteList.toBytes(element), element -> (Boolean) element)`. Lowering does the same through `toComponent`, taking a
+lambda per element only when one of them converts. Each lambda is the same recursive conversion a list element or an
+option payload gets, so a tuple holds anything those can. `wasi:filesystem`'s `read` returns `tuple<list<u8>, bool>`
+and is what needed it. A tuple wider than the runtime carries is refused.
 
 A `variant` becomes an abstract base class with one nested final class per case, as
 [The Java shape of each WIT type](#the-java-shape-of-each-wit-type) settled. A case carrying a payload holds it in a
@@ -851,8 +855,7 @@ way today, which means adding one is a matter of finding its rejection and repla
 
 A few refusals are limits of the chosen Java shapes rather than missing work, and
 [What Is Built](#what-is-built) gives the reason for each. They are `option<option<T>>`, a `result` reached as a value
-rather than as a function's own result, a tuple wider than `Tuple8` or holding an element that cannot be named by its
-class, a variant case named after its variant or after a type its interface declares, and a flags type whose Java name
+rather than as a function's own result, a tuple wider than `Tuple8`, a variant case named after its variant or after a type its interface declares, and a flags type whose Java name
 would be `Flag`.
 
 ### The interface sharing policy is untested

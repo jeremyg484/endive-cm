@@ -4,10 +4,15 @@ interface points {
     /// A tuple arrives as a parameter and is handed back as a result, so both
     /// directions of the host side are covered by one function.
     describe: func(point: tuple<string, u32>) -> tuple<u32, u32>;
+
+    /// The same, for a tuple whose elements convert at the boundary on their
+    /// own, which is the shape wasi:filesystem's read returns.
+    reverse: func(chunk: tuple<list<u8>, bool>) -> tuple<list<u8>, bool>;
 }
 
 world tuple-types {
     import points;
 
     export shift: func(point: tuple<u32, u32>, by: u32) -> tuple<string, u32>;
+    export check-reverse: func();
 }

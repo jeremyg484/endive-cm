@@ -6,11 +6,17 @@
 ;;
 ;; shift traps unless it is given (7, 11) and 5, and again unless the host
 ;; answers (14, 22), so a test passes only on values that actually crossed.
+;;
+;; check-reverse hands the host ([1, 2, 255], true) and traps unless it answers
+;; ([255, 2, 1], false). The answer lands at 300 as a pointer, a length and a
+;; bool.
 (module
   (import "example:tuples/points" "describe" (func $describe (param i32 i32 i32 i32)))
+  (import "example:tuples/points" "reverse" (func $reverse (param i32 i32 i32 i32)))
   (memory (export "memory") 1)
   (data (i32.const 100) "origin")
   (data (i32.const 120) "shifted")
+  (data (i32.const 140) "\01\02\ff")
   (global $heap (mut i32) (i32.const 1024))
 
   (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32)
@@ -75,4 +81,48 @@
     i32.const 216
     i32.const 18
     i32.store offset=8
-    i32.const 216))
+    i32.const 216)
+
+  (func (export "check-reverse") (local $p i32)
+    i32.const 140
+    i32.const 3
+    i32.const 1
+    i32.const 300
+    call $reverse
+
+    i32.const 300
+    i32.load offset=4
+    i32.const 3
+    i32.ne
+    if
+      unreachable
+    end
+    i32.const 300
+    i32.load
+    local.set $p
+    local.get $p
+    i32.load8_u
+    i32.const 255
+    i32.ne
+    if
+      unreachable
+    end
+    local.get $p
+    i32.load8_u offset=1
+    i32.const 2
+    i32.ne
+    if
+      unreachable
+    end
+    local.get $p
+    i32.load8_u offset=2
+    i32.const 1
+    i32.ne
+    if
+      unreachable
+    end
+    i32.const 300
+    i32.load8_u offset=8
+    if
+      unreachable
+    end))

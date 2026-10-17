@@ -3,6 +3,7 @@ package run.endive.cm.runtime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 /**
  * A WIT {@code tuple} of four elements, which are reached by position.
@@ -35,12 +36,22 @@ public final class Tuple4<A, B, C, D> {
     /** The tuple a lifted value carries, each element cast to the class it was declared with. */
     public static <A, B, C, D> Tuple4<A, B, C, D> fromComponent(
             Object value, Class<A> c0, Class<B> c1, Class<C> c2, Class<D> c3) {
+        return fromComponent(value, c0::cast, c1::cast, c2::cast, c3::cast);
+    }
+
+    /** The tuple a lifted value carries, each element converted by the function at its position. */
+    public static <A, B, C, D> Tuple4<A, B, C, D> fromComponent(
+            Object value,
+            Function<Object, ? extends A> c0,
+            Function<Object, ? extends B> c1,
+            Function<Object, ? extends C> c2,
+            Function<Object, ? extends D> c3) {
         Map<?, ?> fields = (Map<?, ?>) value;
         return of(
-                c0.cast(fields.get("0")),
-                c1.cast(fields.get("1")),
-                c2.cast(fields.get("2")),
-                c3.cast(fields.get("3")));
+                c0.apply(fields.get("0")),
+                c1.apply(fields.get("1")),
+                c2.apply(fields.get("2")),
+                c3.apply(fields.get("3")));
     }
 
     public A f0() {
@@ -61,11 +72,21 @@ public final class Tuple4<A, B, C, D> {
 
     /** This tuple as the ABI carries it, which is a map labelled by element position. */
     public Map<String, Object> toComponent() {
+        return toComponent(
+                Function.identity(), Function.identity(), Function.identity(), Function.identity());
+    }
+
+    /** This tuple as the ABI carries it, each element converted by the function at its position. */
+    public Map<String, Object> toComponent(
+            Function<? super A, ?> c0,
+            Function<? super B, ?> c1,
+            Function<? super C, ?> c2,
+            Function<? super D, ?> c3) {
         Map<String, Object> fields = new LinkedHashMap<>();
-        fields.put("0", f0);
-        fields.put("1", f1);
-        fields.put("2", f2);
-        fields.put("3", f3);
+        fields.put("0", c0.apply(f0));
+        fields.put("1", c1.apply(f1));
+        fields.put("2", c2.apply(f2));
+        fields.put("3", c3.apply(f3));
         return fields;
     }
 
