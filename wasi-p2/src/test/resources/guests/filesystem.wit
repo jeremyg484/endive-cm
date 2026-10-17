@@ -1,0 +1,11 @@
+package endive:wasi-test;
+
+world filesystem {
+  include endive:wasi/imports@0.2.12;
+
+  export read-file: func();
+  export write-file: func();
+  export read-stream: func();
+  export open-error: func(path: string) -> u8;
+  export list-directory: func() -> u32;
+}
