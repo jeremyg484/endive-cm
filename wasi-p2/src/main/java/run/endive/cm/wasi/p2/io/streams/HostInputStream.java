@@ -1,8 +1,7 @@
 package run.endive.cm.wasi.p2.io.streams;
 
-import io.netty.util.concurrent.EventExecutor;
-import io.netty.util.concurrent.Future;
 import java.math.BigInteger;
+import java.util.concurrent.CompletableFuture;
 import run.endive.cm.wasi.p2.bindings.wasi.io.poll.Pollable;
 import run.endive.cm.wasi.p2.bindings.wasi.io.streams.InputStream;
 import run.endive.cm.wasi.p2.io.Blocking;
@@ -20,11 +19,9 @@ public abstract class HostInputStream implements InputStream {
     /** The most one read hands back, whatever the guest asks for. */
     static final int MAX_READ = 64 * 1024;
 
-    private final EventExecutor eventLoopExecutor;
     private final HostPoll poll;
 
-    protected HostInputStream(EventExecutor eventLoopExecutor, HostPoll poll) {
-        this.eventLoopExecutor = eventLoopExecutor;
+    protected HostInputStream(HostPoll poll) {
         this.poll = poll;
     }
 
@@ -38,7 +35,7 @@ public abstract class HostInputStream implements InputStream {
     protected abstract byte[] readAvailable(int max);
 
     /** A future that is complete when a read would either return bytes or fail. */
-    public abstract Future<?> readiness();
+    public abstract CompletableFuture<?> readiness();
 
     @Override
     public byte[] read(BigInteger len) {
@@ -53,7 +50,7 @@ public abstract class HostInputStream implements InputStream {
             if (bytes.length > 0 || max == 0) {
                 return bytes;
             }
-            Blocking.await(eventLoopExecutor, readiness());
+            Blocking.await(readiness());
         }
     }
 

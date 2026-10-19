@@ -61,13 +61,6 @@
   <dependencyManagement>
     <dependencies>
       <dependency>
-        <groupId>io.netty</groupId>
-        <artifactId>netty-bom</artifactId>
-        <version>${netty.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
-      </dependency>
-      <dependency>
         <groupId>com.fasterxml.jackson.core</groupId>
         <artifactId>jackson-databind</artifactId>
         <version>${jackson.version}</version>
@@ -186,6 +179,12 @@
         <groupId>com.google.testing.compile</groupId>
         <artifactId>compile-testing</artifactId>
         <version>${google-compile-testing.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.netty</groupId>
+        <artifactId>netty-common</artifactId>
+        <version>${netty.version}</version>
         <scope>test</scope>
       </dependency>
       <dependency>
@@ -339,6 +338,16 @@
           </plugin>
         </plugins>
       </build>
+    </profile>
+
+    <profile>
+      <id>loom-tests</id>
+      <activation>
+        <jdk>[21,)</jdk>
+      </activation>
+      <modules>
+        <module>wasi-p2-loom-tests</module>
+      </modules>
     </profile>
 
     <profile>

@@ -4,10 +4,14 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.DirectoryStream;
+import java.nio.file.FileSystemAlreadyExistsException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import run.endive.cm.parser.ComponentParser;
 import run.endive.cm.parser.ComponentValidationException;
 import run.endive.cm.tools.ComponentEmbed;
@@ -68,9 +72,18 @@ public final class Guests {
         }
     }
 
-    private static Path hostWit() {
+    /** The host's WIT directory, which is inside a jar when another module runs these guests. */
+    private static Path hostWit() throws IOException {
         try {
-            return Path.of(Guests.class.getResource(HOST_WIT).toURI()).getParent();
+            URI uri = Guests.class.getResource(HOST_WIT).toURI();
+            if ("jar".equals(uri.getScheme())) {
+                try {
+                    FileSystems.newFileSystem(uri, Map.of());
+                } catch (FileSystemAlreadyExistsException e) {
+                    // Already open for an earlier guest.
+                }
+            }
+            return Path.of(uri).getParent();
         } catch (URISyntaxException e) {
             throw new IllegalStateException(e);
         }

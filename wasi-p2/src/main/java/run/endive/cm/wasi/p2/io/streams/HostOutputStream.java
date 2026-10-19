@@ -1,9 +1,8 @@
 package run.endive.cm.wasi.p2.io.streams;
 
-import io.netty.util.concurrent.EventExecutor;
-import io.netty.util.concurrent.Future;
 import java.math.BigInteger;
 import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
 import run.endive.cm.wasi.p2.bindings.wasi.io.poll.Pollable;
 import run.endive.cm.wasi.p2.bindings.wasi.io.streams.InputStream;
 import run.endive.cm.wasi.p2.bindings.wasi.io.streams.OutputStream;
@@ -26,12 +25,10 @@ public abstract class HostOutputStream implements OutputStream {
     /** The most a blocking write may carry, which the interface fixes. */
     static final int MAX_BLOCKING_WRITE = 4096;
 
-    private final EventExecutor eventLoopExecutor;
     private final HostPoll poll;
     private long permit;
 
-    protected HostOutputStream(EventExecutor eventLoopExecutor, HostPoll poll) {
-        this.eventLoopExecutor = eventLoopExecutor;
+    protected HostOutputStream(HostPoll poll) {
         this.poll = poll;
     }
 
@@ -61,7 +58,7 @@ public abstract class HostOutputStream implements OutputStream {
     protected abstract void startFlush();
 
     /** A future that is complete while {@link #writeCapacity} would be positive or fail. */
-    public abstract Future<?> readiness();
+    public abstract CompletableFuture<?> readiness();
 
     @Override
     public BigInteger checkWrite() {
@@ -155,7 +152,7 @@ public abstract class HostOutputStream implements OutputStream {
     /** Waits until the sink takes at least one byte, and gives back the permit. */
     private long awaitPermit() {
         while (checkPermit() == 0) {
-            Blocking.await(eventLoopExecutor, readiness());
+            Blocking.await(readiness());
         }
         return permit;
     }

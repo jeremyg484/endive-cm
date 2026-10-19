@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>run.endive.cm</groupId>
+    <artifactId>endive-cm</artifactId>
+    <version>999-SNAPSHOT</version>
+  </parent>
+  <artifactId>wasi-p2-loom-tests</artifactId>
+  <packaging>jar</packaging>
+
+  <name>Endive CM - WASI p2 Virtual Thread Tests</name>
+  <description>WASI p2 host tests that run guests on virtual threads, built only on Java 21 and later.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-api</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
+      <artifactId>parser</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
+      <artifactId>wasi-p2</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
+      <artifactId>wasi-p2</artifactId>
+      <version>${project.version}</version>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>run.endive.cm</groupId>
+      <artifactId>wasm-tools</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <release>21</release>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>

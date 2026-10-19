@@ -1,16 +1,17 @@
 package run.endive.cm.wasi.p2.clocks.monotonicclock;
 
-import io.netty.util.concurrent.EventExecutor;
-import io.netty.util.concurrent.Ticker;
 import java.math.BigInteger;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import run.endive.cm.wasi.p2.bindings.wasi.clocks.monotonicclock.Host;
 import run.endive.cm.wasi.p2.bindings.wasi.io.poll.Pollable;
 import run.endive.cm.wasi.p2.io.poll.HostPoll;
 
 /**
- * The host side of {@code wasi:clocks/monotonic-clock}, which reads the ticker of the event loop
- * that also schedules its subscriptions, so an instant and a deadline are measured alike.
+ * The host side of {@code wasi:clocks/monotonic-clock}, which reads {@link System#nanoTime()}, the
+ * same time source a {@link ScheduledExecutorService} measures its delays with.
  *
  * <p>Instants count nanoseconds from the moment this host was created, which keeps them far from
  * overflowing a {@code u64}.
@@ -22,25 +23,23 @@ public class HostMonotonicClock implements Host {
     private static final BigInteger RESOLUTION = BigInteger.ONE;
     private static final BigInteger MAX_DELAY = BigInteger.valueOf(Long.MAX_VALUE);
 
-    private final EventExecutor eventLoopExecutor;
+    private final ScheduledExecutorService scheduler;
     private final HostPoll poll;
-    private final Ticker ticker;
     private final long origin;
 
     /**
-     * @param eventLoopExecutor the event loop scheduling subscriptions, whose ticker this reads
+     * @param scheduler the executor that completes subscriptions once they elapse
      * @param poll the host whose pollables a subscription returns
      */
-    public HostMonotonicClock(EventExecutor eventLoopExecutor, HostPoll poll) {
-        this.eventLoopExecutor = eventLoopExecutor;
+    public HostMonotonicClock(ScheduledExecutorService scheduler, HostPoll poll) {
+        this.scheduler = scheduler;
         this.poll = poll;
-        this.ticker = eventLoopExecutor.ticker();
-        this.origin = ticker.nanoTime();
+        this.origin = System.nanoTime();
     }
 
     @Override
     public BigInteger now() {
-        return BigInteger.valueOf(ticker.nanoTime() - origin);
+        return BigInteger.valueOf(System.nanoTime() - origin);
     }
 
     @Override
@@ -59,13 +58,21 @@ public class HostMonotonicClock implements Host {
         return after(when);
     }
 
-    /** A delay too long for the scheduler is clamped, since it would never elapse anyway. */
+    /**
+     * A delay too long for the scheduler is clamped, since it would never elapse anyway. Dropping
+     * the pollable removes its timer from the scheduler.
+     */
     private Pollable after(BigInteger delay) {
         if (delay.signum() <= 0) {
-            return poll.ownedPollable(eventLoopExecutor.newSucceededFuture(null));
+            return poll.ownedPollable(CompletableFuture.completedFuture(null));
         }
-        return poll.ownedPollable(
-                eventLoopExecutor.schedule(
-                        () -> {}, delay.min(MAX_DELAY).longValueExact(), TimeUnit.NANOSECONDS));
+        CompletableFuture<Void> elapsed = new CompletableFuture<>();
+        ScheduledFuture<?> timer =
+                scheduler.schedule(
+                        () -> elapsed.complete(null),
+                        delay.min(MAX_DELAY).longValueExact(),
+                        TimeUnit.NANOSECONDS);
+        elapsed.whenComplete((ignored, cause) -> timer.cancel(false));
+        return poll.ownedPollable(elapsed);
     }
 }

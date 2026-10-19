@@ -1,17 +1,13 @@
 package run.endive.cm.wasi.p2.io;
 
-import io.netty.util.concurrent.EventExecutor;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.GenericFutureListener;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import run.endive.runtime.WasmInterruptedException;
-import run.endive.wasm.WasmEngineException;
 
 /**
- * Guards the host operations that wait on the calling thread. The event loop completes what they
- * wait for, so waiting on it would never end, and every such operation is refused there whether or
- * not it would actually wait.
+ * Waits on the calling thread for the futures that host operations depend on.
  *
  * <p>Waiting parks the thread without holding a monitor, so a virtual thread running a guest gives
  * up its carrier while it waits.
@@ -25,49 +21,35 @@ public final class Blocking {
 
     private Blocking() {}
 
-    /** Refuses to continue on {@code eventLoopExecutor}'s own thread. */
-    public static void check(EventExecutor eventLoopExecutor) {
-        if (eventLoopExecutor.inEventLoop()) {
-            throw new WasmEngineException(
-                    "Blocking host operations cannot be executed from within the EventLoop");
+    /**
+     * Waits for {@code future} to complete, whether it succeeds or fails.
+     *
+     * @throws WasmInterruptedException when the waiting thread is interrupted
+     */
+    public static void await(CompletableFuture<?> future) {
+        awaitAny(List.of(future));
+    }
+
+    /**
+     * Waits for at least one of {@code futures} to complete, whether it succeeds or fails.
+     *
+     * @throws IllegalArgumentException when {@code futures} is empty, since the wait would never end
+     * @throws WasmInterruptedException when the waiting thread is interrupted
+     */
+    public static void awaitAny(List<? extends CompletableFuture<?>> futures) {
+        if (futures.isEmpty()) {
+            throw new IllegalArgumentException("Nothing to wait for");
         }
-    }
-
-    /**
-     * Waits for {@code future} to complete, refusing to on {@code eventLoopExecutor}'s thread.
-     *
-     * @throws WasmInterruptedException when the waiting thread is interrupted
-     */
-    public static void await(EventExecutor eventLoopExecutor, Future<?> future) {
-        awaitAny(eventLoopExecutor, List.of(future));
-    }
-
-    /**
-     * Waits for at least one of {@code futures} to complete, refusing to on {@code
-     * eventLoopExecutor}'s thread.
-     *
-     * @throws WasmInterruptedException when the waiting thread is interrupted
-     */
-    public static void awaitAny(
-            EventExecutor eventLoopExecutor, List<? extends Future<?>> futures) {
-        check(eventLoopExecutor);
-        if (futures.stream().anyMatch(Future::isDone)) {
+        if (futures.stream().anyMatch(CompletableFuture::isDone)) {
             return;
         }
-        CountDownLatch anyDone = new CountDownLatch(1);
-        GenericFutureListener<Future<Object>> listener = done -> anyDone.countDown();
-        for (Future<?> future : futures) {
-            future.addListener(listener);
-        }
         try {
-            anyDone.await();
+            CompletableFuture.anyOf(futures.toArray(new CompletableFuture<?>[0])).get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new WasmInterruptedException("Thread interrupted");
-        } finally {
-            for (Future<?> future : futures) {
-                future.removeListener(listener);
-            }
+        } catch (ExecutionException | CancellationException e) {
+            // A future that failed has completed too.
         }
     }
 }

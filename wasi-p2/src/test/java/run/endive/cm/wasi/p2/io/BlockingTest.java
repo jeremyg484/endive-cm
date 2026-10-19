@@ -5,11 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.netty.util.concurrent.DefaultEventExecutor;
-import io.netty.util.concurrent.EventExecutor;
-import io.netty.util.concurrent.Promise;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -17,39 +16,38 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import run.endive.runtime.WasmInterruptedException;
-import run.endive.wasm.WasmEngineException;
 
 class BlockingTest {
 
-    private EventExecutor executor;
+    private ScheduledExecutorService scheduler;
 
     @BeforeEach
-    void startExecutor() {
-        executor = new DefaultEventExecutor();
+    void startScheduler() {
+        scheduler = Executors.newSingleThreadScheduledExecutor();
     }
 
     @AfterEach
-    void stopExecutor() {
-        executor.shutdownGracefully(0, 1, TimeUnit.SECONDS).syncUninterruptibly();
+    void stopScheduler() {
+        scheduler.shutdownNow();
     }
 
     @Test
     void awaitReturnsOnceTheFutureCompletes() {
-        Promise<Void> later = executor.newPromise();
-        executor.schedule(() -> later.setSuccess(null), 20, TimeUnit.MILLISECONDS);
+        CompletableFuture<Void> later = new CompletableFuture<>();
+        scheduler.schedule(() -> later.complete(null), 20, TimeUnit.MILLISECONDS);
 
-        Blocking.await(executor, later);
+        Blocking.await(later);
 
         assertTrue(later.isDone());
     }
 
     @Test
     void awaitAnyReturnsOnceOneFutureCompletes() {
-        Promise<Void> never = executor.newPromise();
-        Promise<Void> later = executor.newPromise();
-        executor.schedule(() -> later.setSuccess(null), 20, TimeUnit.MILLISECONDS);
+        CompletableFuture<Void> never = new CompletableFuture<>();
+        CompletableFuture<Void> later = new CompletableFuture<>();
+        scheduler.schedule(() -> later.complete(null), 20, TimeUnit.MILLISECONDS);
 
-        Blocking.awaitAny(executor, List.of(never, later));
+        Blocking.awaitAny(List.of(never, later));
 
         assertTrue(later.isDone());
         assertFalse(never.isDone());
@@ -58,39 +56,43 @@ class BlockingTest {
     /** A failed future has completed too, so it ends the wait. */
     @Test
     void aFailedFutureEndsTheWait() {
-        Promise<Void> later = executor.newPromise();
-        executor.schedule(
-                () -> later.setFailure(new IllegalStateException("failed")),
+        CompletableFuture<Void> later = new CompletableFuture<>();
+        scheduler.schedule(
+                () -> later.completeExceptionally(new IllegalStateException("failed")),
                 20,
                 TimeUnit.MILLISECONDS);
 
-        Blocking.await(executor, later);
+        Blocking.await(later);
 
         assertTrue(later.isDone());
     }
 
     @Test
-    void waitingOnTheEventLoopIsRefused() {
-        Promise<Void> done = executor.<Void>newPromise().setSuccess(null);
+    void aCancelledFutureEndsTheWait() {
+        CompletableFuture<Void> later = new CompletableFuture<>();
+        scheduler.schedule(() -> later.cancel(false), 20, TimeUnit.MILLISECONDS);
 
-        ExecutionException e =
-                assertThrows(
-                        ExecutionException.class,
-                        () -> executor.submit(() -> Blocking.await(executor, done)).get());
-        assertInstanceOf(WasmEngineException.class, e.getCause());
+        Blocking.await(later);
+
+        assertTrue(later.isCancelled());
+    }
+
+    @Test
+    void waitingForNothingIsRefused() {
+        assertThrows(IllegalArgumentException.class, () -> Blocking.awaitAny(List.of()));
     }
 
     /** An interrupt cancels the guest, ending the wait and leaving the thread interrupted. */
     @Test
     void anInterruptEndsTheWaitAndStaysSet() throws InterruptedException {
-        Promise<Void> never = executor.newPromise();
+        CompletableFuture<Void> never = new CompletableFuture<>();
         AtomicReference<RuntimeException> thrown = new AtomicReference<>();
         AtomicBoolean interruptedAfter = new AtomicBoolean();
         Thread waiter =
                 new Thread(
                         () -> {
                             try {
-                                Blocking.await(executor, never);
+                                Blocking.await(never);
                             } catch (RuntimeException e) {
                                 thrown.set(e);
                             }
@@ -110,10 +112,10 @@ class BlockingTest {
     /** A thread interrupted before it would wait is cancelled without waiting at all. */
     @Test
     void anInterruptedThreadDoesNotWait() {
-        Promise<Void> never = executor.newPromise();
+        CompletableFuture<Void> never = new CompletableFuture<>();
         Thread.currentThread().interrupt();
         try {
-            assertThrows(WasmInterruptedException.class, () -> Blocking.await(executor, never));
+            assertThrows(WasmInterruptedException.class, () -> Blocking.await(never));
             assertTrue(Thread.currentThread().isInterrupted());
         } finally {
             Thread.interrupted();

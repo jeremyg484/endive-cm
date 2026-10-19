@@ -1,10 +1,10 @@
 package run.endive.cm.wasi.p2;
 
-import io.netty.util.concurrent.DefaultEventExecutor;
-import io.netty.util.concurrent.EventExecutor;
 import java.time.Clock;
 import java.time.Duration;
-import java.util.concurrent.TimeUnit;
+import java.util.Objects;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import run.endive.cm.runtime.ComponentStore;
 import run.endive.cm.types.WasmComponent;
 import run.endive.cm.wasi.p2.bindings.ImportsWorld;
@@ -15,8 +15,8 @@ import run.endive.cm.wasi.p2.io.poll.HostPoll;
 /**
  * The WASI preview 2 interfaces this host implements, ready to satisfy a component's imports.
  *
- * <p>Blocking calls such as {@code poll} wait on the thread the guest runs on, while the event
- * loop completes what they wait for. A guest must therefore never run on that event loop.
+ * <p>Blocking calls such as {@code poll} wait on the thread the guest runs on, which may be a
+ * virtual thread.
  *
  * <pre>{@code
  * try (var wasi = WasiPreview2.builder().build()) {
@@ -26,18 +26,17 @@ import run.endive.cm.wasi.p2.io.poll.HostPoll;
  */
 public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
 
-    private final EventExecutor eventLoopExecutor;
-    private final boolean ownsEventLoop;
+    private final ScheduledExecutorService scheduler;
+    private final boolean ownsScheduler;
     private final HostPoll poll;
     private final HostMonotonicClock monotonicClock;
     private final HostWallClock wallClock;
 
     private WasiPreview2(Builder builder) {
-        this.ownsEventLoop = builder.eventLoopExecutor == null;
-        this.eventLoopExecutor =
-                ownsEventLoop ? new DefaultEventExecutor() : builder.eventLoopExecutor;
-        this.poll = new HostPoll(eventLoopExecutor);
-        this.monotonicClock = new HostMonotonicClock(eventLoopExecutor, poll);
+        this.ownsScheduler = builder.scheduler == null;
+        this.scheduler = ownsScheduler ? defaultScheduler() : builder.scheduler;
+        this.poll = new HostPoll();
+        this.monotonicClock = new HostMonotonicClock(scheduler, poll);
         this.wallClock =
                 builder.clock == null
                         ? new HostWallClock()
@@ -68,29 +67,44 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
         return wallClock;
     }
 
-    /** Shuts down the event loop, unless the builder was given an external one to use. */
+    /** Shuts down the scheduler, unless the builder was given an external one to use. */
     @Override
     public void close() {
-        if (ownsEventLoop) {
-            eventLoopExecutor.shutdownGracefully(0, 1, TimeUnit.SECONDS).syncUninterruptibly();
+        if (ownsScheduler) {
+            scheduler.shutdownNow();
         }
+    }
+
+    private static ScheduledExecutorService defaultScheduler() {
+        ScheduledThreadPoolExecutor scheduler =
+                new ScheduledThreadPoolExecutor(
+                        1,
+                        task -> {
+                            Thread thread = new Thread(task, "endive-wasi-p2-scheduler");
+                            thread.setDaemon(true);
+                            return thread;
+                        });
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
     }
 
     public static final class Builder {
 
-        private EventExecutor eventLoopExecutor;
+        private ScheduledExecutorService scheduler;
         private Clock clock;
         private Duration clockResolution;
 
         private Builder() {}
 
         /**
-         * The event loop where non-blocking IO and other general events run. By default, one
-         * is created and then shut down on {@link #close()}. When set by the embedder, it is
-         * their responsibility to shut it down cleanly.
+         * The executor that runs timers, such as those behind {@code wasi:clocks} subscriptions.
+         * Any {@link ScheduledExecutorService} works, including an event loop the embedder already
+         * runs. A guest must never run on its threads, since a blocked guest would hold up the
+         * timers it waits for. By default, one is created and then shut down on {@link #close()}.
+         * When set by the embedder, it is their responsibility to shut it down.
          */
-        public Builder withEventLoopExecutor(EventExecutor eventLoopExecutor) {
-            this.eventLoopExecutor = eventLoopExecutor;
+        public Builder withScheduler(ScheduledExecutorService scheduler) {
+            this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
             return this;
         }
 
@@ -100,8 +114,8 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
          * @param resolution the time one tick of {@code clock} stands for
          */
         public Builder withWallClock(Clock clock, Duration resolution) {
-            this.clock = clock;
-            this.clockResolution = resolution;
+            this.clock = Objects.requireNonNull(clock, "clock");
+            this.clockResolution = Objects.requireNonNull(resolution, "resolution");
             return this;
         }
 

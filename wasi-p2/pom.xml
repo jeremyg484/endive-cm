@@ -14,10 +14,6 @@
 
   <dependencies>
     <dependency>
-      <groupId>io.netty</groupId>
-      <artifactId>netty-common</artifactId>
-    </dependency>
-    <dependency>
       <groupId>run.endive.cm</groupId>
       <artifactId>runtime</artifactId>
     </dependency>
@@ -28,6 +24,11 @@
       <groupId>run.endive.cm</groupId>
       <artifactId>bindgen-processor</artifactId>
       <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.netty</groupId>
+      <artifactId>netty-common</artifactId>
+      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
@@ -60,6 +61,17 @@
             </path>
           </annotationProcessorPaths>
         </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>test-jar</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

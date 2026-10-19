@@ -8,8 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.netty.util.concurrent.DefaultEventExecutor;
-import io.netty.util.concurrent.EventExecutor;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigInteger;
@@ -19,7 +17,8 @@ import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -30,29 +29,28 @@ import run.endive.cm.wasi.p2.bindings.wasi.io.poll.Pollable;
 import run.endive.cm.wasi.p2.bindings.wasi.io.streams.StreamError;
 import run.endive.cm.wasi.p2.bindings.wasi.io.streams.StreamErrorException;
 import run.endive.cm.wasi.p2.io.poll.HostPoll;
-import run.endive.wasm.WasmEngineException;
 
 class BufferedHostInputStreamTest {
 
     private static final int RACE_ROUNDS = 100_000;
 
-    private EventExecutor executor;
+    private ScheduledExecutorService scheduler;
     private HostPoll poll;
 
     @BeforeEach
-    void startExecutor() {
-        executor = new DefaultEventExecutor();
-        poll = new HostPoll(executor);
+    void startScheduler() {
+        scheduler = Executors.newSingleThreadScheduledExecutor();
+        poll = new HostPoll();
     }
 
     @AfterEach
-    void stopExecutor() {
-        executor.shutdownGracefully(0, 1, TimeUnit.SECONDS).syncUninterruptibly();
+    void stopScheduler() {
+        scheduler.shutdownNow();
     }
 
     @Test
     void readReturnsWhatIsBufferedUpToLen() {
-        var stream = new BufferedHostInputStream(executor, poll);
+        var stream = new BufferedHostInputStream(poll);
         stream.offer(bytes("hel"));
         stream.offer(bytes("lo"));
 
@@ -62,7 +60,7 @@ class BufferedHostInputStreamTest {
 
     @Test
     void readReturnsNothingWhenNothingIsBuffered() {
-        var stream = new BufferedHostInputStream(executor, poll);
+        var stream = new BufferedHostInputStream(poll);
 
         assertArrayEquals(new byte[0], stream.read(len(10)));
     }
@@ -70,7 +68,7 @@ class BufferedHostInputStreamTest {
     /** What was buffered before closing is still read, and only then is the stream closed. */
     @Test
     void closingTakesEffectOnceTheBufferIsRead() {
-        var stream = new BufferedHostInputStream(executor, poll);
+        var stream = new BufferedHostInputStream(poll);
         stream.offer(bytes("bye"));
         stream.close();
 
@@ -80,7 +78,7 @@ class BufferedHostInputStreamTest {
 
     @Test
     void readingNothingSucceedsWhileOpenAndFailsOnceClosed() {
-        var stream = new BufferedHostInputStream(executor, poll);
+        var stream = new BufferedHostInputStream(poll);
 
         assertArrayEquals(new byte[0], stream.read(BigInteger.ZERO));
         stream.close();
@@ -90,8 +88,7 @@ class BufferedHostInputStreamTest {
     /** A failure is reported once, and the stream is closed from then on. */
     @Test
     void aFailureIsReportedOnceAndThenTheStreamIsClosed() {
-        var stream = new BufferedHostInputStream(executor, poll);
-        stream.offer(bytes("lost"));
+        var stream = new BufferedHostInputStream(poll);
         stream.fail(new IOException("reset"));
 
         StreamErrorException e =
@@ -102,9 +99,24 @@ class BufferedHostInputStreamTest {
         assertClosed(() -> stream.read(len(10)));
     }
 
+    /** Bytes the source produced before failing still reach the guest, ahead of the failure. */
+    @Test
+    void whatWasBufferedIsReadBeforeTheFailure() {
+        var stream = new BufferedHostInputStream(poll);
+        Pollable pollable = stream.subscribe();
+        stream.offer(bytes("kept"));
+        stream.fail(new IOException("reset"));
+
+        assertArrayEquals(bytes("kept"), stream.read(len(10)));
+        assertTrue(pollable.ready());
+        StreamErrorException e =
+                assertThrows(StreamErrorException.class, () -> stream.read(len(10)));
+        assertInstanceOf(StreamError.LastOperationFailed.class, e.error());
+    }
+
     @Test
     void aLargeLenIsClampedRatherThanRefused() {
-        var stream = new BufferedHostInputStream(executor, poll);
+        var stream = new BufferedHostInputStream(poll);
         stream.offer(bytes("x"));
 
         assertArrayEquals(
@@ -113,34 +125,23 @@ class BufferedHostInputStreamTest {
 
     @Test
     void blockingReadWaitsForBytes() {
-        var stream = new BufferedHostInputStream(executor, poll);
-        executor.schedule(() -> stream.offer(bytes("late")), 20, TimeUnit.MILLISECONDS);
+        var stream = new BufferedHostInputStream(poll);
+        scheduler.schedule(() -> stream.offer(bytes("late")), 20, TimeUnit.MILLISECONDS);
 
         assertArrayEquals(bytes("late"), stream.blockingRead(len(10)));
     }
 
     @Test
     void blockingReadWaitsForTheStreamToClose() {
-        var stream = new BufferedHostInputStream(executor, poll);
-        executor.schedule(stream::close, 20, TimeUnit.MILLISECONDS);
+        var stream = new BufferedHostInputStream(poll);
+        scheduler.schedule(stream::close, 20, TimeUnit.MILLISECONDS);
 
         assertClosed(() -> stream.blockingRead(len(10)));
     }
 
     @Test
-    void blockingReadOnTheEventLoopIsRefused() {
-        var stream = new BufferedHostInputStream(executor, poll);
-
-        ExecutionException e =
-                assertThrows(
-                        ExecutionException.class,
-                        () -> executor.submit(() -> stream.blockingRead(len(1))).get());
-        assertInstanceOf(WasmEngineException.class, e.getCause());
-    }
-
-    @Test
     void skipDiscardsAndCounts() {
-        var stream = new BufferedHostInputStream(executor, poll);
+        var stream = new BufferedHostInputStream(poll);
         stream.offer(bytes("abcdef"));
 
         assertEquals(len(4), stream.skip(len(4)));
@@ -149,8 +150,8 @@ class BufferedHostInputStreamTest {
 
     @Test
     void blockingSkipWaitsForBytes() {
-        var stream = new BufferedHostInputStream(executor, poll);
-        executor.schedule(() -> stream.offer(bytes("abc")), 20, TimeUnit.MILLISECONDS);
+        var stream = new BufferedHostInputStream(poll);
+        scheduler.schedule(() -> stream.offer(bytes("abc")), 20, TimeUnit.MILLISECONDS);
 
         assertEquals(len(3), stream.blockingSkip(len(10)));
     }
@@ -158,7 +159,7 @@ class BufferedHostInputStreamTest {
     /** A subscription follows the stream, ready while there is something to read or it ended. */
     @Test
     void aSubscriptionIsReadyWhileThereIsSomethingToRead() {
-        var stream = new BufferedHostInputStream(executor, poll);
+        var stream = new BufferedHostInputStream(poll);
         Pollable pollable = stream.subscribe();
 
         assertFalse(pollable.ready());
@@ -174,7 +175,7 @@ class BufferedHostInputStreamTest {
     @Test
     void theSourcePausesWhenFullAndResumesOnceReadBelowHalf() {
         AtomicInteger demand = new AtomicInteger();
-        var stream = new BufferedHostInputStream(executor, poll, 8, demand::incrementAndGet);
+        var stream = new BufferedHostInputStream(poll, 8, demand::incrementAndGet);
 
         assertTrue(stream.offer(new byte[6]));
         assertFalse(stream.offer(new byte[2]));
@@ -182,6 +183,29 @@ class BufferedHostInputStreamTest {
         assertEquals(0, demand.get());
         stream.read(len(2));
         assertEquals(1, demand.get());
+    }
+
+    /** Dropping discards what was unread and resumes a paused source, which then sees it should stop. */
+    @Test
+    void droppingDiscardsTheBufferAndStopsTheSource() {
+        AtomicInteger demand = new AtomicInteger();
+        var stream = new BufferedHostInputStream(poll, 4, demand::incrementAndGet);
+        assertFalse(stream.offer(new byte[4]));
+
+        stream.drop();
+
+        assertEquals(1, demand.get());
+        assertTrue(stream.isClosed());
+        assertFalse(stream.offer(new byte[1]));
+    }
+
+    @Test
+    void aStreamIsClosedOnceTheSourceEndsIt() {
+        var stream = new BufferedHostInputStream(poll);
+
+        assertFalse(stream.isClosed());
+        stream.close();
+        assertTrue(stream.isClosed());
     }
 
     /**
@@ -193,7 +217,7 @@ class BufferedHostInputStreamTest {
         byte[] expected = new byte[200_000];
         new Random(1).nextBytes(expected);
         Semaphore demand = new Semaphore(0);
-        var stream = new BufferedHostInputStream(executor, poll, 64, demand::release);
+        var stream = new BufferedHostInputStream(poll, 64, demand::release);
         Thread source = new Thread(() -> produce(stream, expected, demand));
         ByteArrayOutputStream received = new ByteArrayOutputStream();
 
@@ -220,7 +244,7 @@ class BufferedHostInputStreamTest {
      */
     @Test
     void aGuestBlockingOnAnEmptyStreamSeesTheNextOffer() {
-        var stream = new BufferedHostInputStream(executor, poll);
+        var stream = new BufferedHostInputStream(poll);
         CyclicBarrier start = new CyclicBarrier(2);
         Thread source =
                 new Thread(

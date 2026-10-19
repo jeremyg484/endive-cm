@@ -4,11 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.netty.util.concurrent.DefaultEventExecutor;
-import io.netty.util.concurrent.EventExecutor;
 import java.math.BigInteger;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,20 +18,21 @@ class HostMonotonicClockTest {
     private static final BigInteger MILLISECOND = BigInteger.valueOf(1_000_000);
     private static final BigInteger MAX_U64 = BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE);
 
-    private EventExecutor executor;
+    private ScheduledThreadPoolExecutor scheduler;
     private HostPoll poll;
     private HostMonotonicClock clock;
 
     @BeforeEach
-    void startExecutor() {
-        executor = new DefaultEventExecutor();
-        poll = new HostPoll(executor);
-        clock = new HostMonotonicClock(executor, poll);
+    void startScheduler() {
+        scheduler = new ScheduledThreadPoolExecutor(1);
+        scheduler.setRemoveOnCancelPolicy(true);
+        poll = new HostPoll();
+        clock = new HostMonotonicClock(scheduler, poll);
     }
 
     @AfterEach
-    void stopExecutor() {
-        executor.shutdownGracefully(0, 1, TimeUnit.SECONDS).syncUninterruptibly();
+    void stopScheduler() {
+        scheduler.shutdownNow();
     }
 
     @Test
@@ -104,5 +103,16 @@ class HostMonotonicClockTest {
 
         assertFalse(pollable.ready());
         pollable.drop();
+    }
+
+    @Test
+    void droppingASubscriptionRemovesItsTimer() {
+        Pollable pollable =
+                clock.subscribeDuration(MILLISECOND.multiply(BigInteger.valueOf(10_000)));
+        assertEquals(1, scheduler.getQueue().size());
+
+        pollable.drop();
+
+        assertEquals(0, scheduler.getQueue().size());
     }
 }
