@@ -161,6 +161,9 @@ public final class HostDirectory extends HostDescriptor {
             throw ErrorCodes.error(ErrorCode.INVALID);
         }
         Path target = resolve(pathFlags, path);
+        if (path.endsWith("/") && !Files.exists(target, NOFOLLOW)) {
+            throw ErrorCodes.error(create ? ErrorCode.IS_DIRECTORY : ErrorCode.NO_ENTRY);
+        }
         if (create && exclusive && Files.exists(target, NOFOLLOW)) {
             throw ErrorCodes.error(ErrorCode.EXIST);
         }

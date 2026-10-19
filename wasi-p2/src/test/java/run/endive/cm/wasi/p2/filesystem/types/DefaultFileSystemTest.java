@@ -108,6 +108,36 @@ class DefaultFileSystemTest {
         assertFalse(Files.exists(root.resolve("h")));
     }
 
+    /** As in POSIX, a component the rest of the path goes through has to be a directory. */
+    @Test
+    void aPathThroughAFileIsNotADirectory() throws IOException {
+        Files.write(root.resolve("plain"), "x".getBytes(UTF_8));
+
+        assertFails(
+                ErrorCode.NOT_DIRECTORY, () -> sandbox.openAt(NOFOLLOW, "plain/", EXISTING, READ));
+        assertFails(ErrorCode.NOT_DIRECTORY, () -> sandbox.statAt(NOFOLLOW, "plain/.."));
+        assertFails(
+                ErrorCode.NOT_DIRECTORY,
+                () ->
+                        sandbox.openAt(
+                                NOFOLLOW, "plain/x", OpenFlags.of(OpenFlags.Flag.CREATE), READ));
+        assertFails(ErrorCode.NOT_DIRECTORY, () -> sandbox.createDirectoryAt("plain/x"));
+        assertFails(ErrorCode.NO_ENTRY, () -> sandbox.statAt(NOFOLLOW, "missing/.."));
+    }
+
+    @Test
+    void aTrailingSlashNamesADirectory() {
+        sandbox.createDirectoryAt("made/");
+
+        assertTrue(Files.isDirectory(root.resolve("made")));
+        assertFails(
+                ErrorCode.IS_DIRECTORY,
+                () ->
+                        sandbox.openAt(
+                                NOFOLLOW, "new/", OpenFlags.of(OpenFlags.Flag.CREATE), READ_WRITE));
+        assertFalse(Files.exists(root.resolve("new")));
+    }
+
     private static void assertFails(ErrorCode expected, Executable operation) {
         ErrorCodeException e = assertThrows(ErrorCodeException.class, operation);
         assertEquals(expected, e.error());

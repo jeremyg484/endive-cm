@@ -5,7 +5,9 @@ import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -68,10 +70,16 @@ final class PathResolver {
     /**
      * The host path {@code path} names within {@code directory}.
      *
+     * <p>A component followed by more of the path must name a directory, as in POSIX, so {@code
+     * file/..} fails rather than naming the directory holding {@code file}. A trailing slash
+     * requires the final component to be a directory if it exists, and follows a symbolic link
+     * there.
+     *
      * @param followFinal whether a symbolic link in the final component is followed
      * @throws ErrorCodeException {@code not-permitted} for a path that is absolute or reaches
      *     outside {@code directory}, {@code loop} for too many symbolic links, {@code no-entry}
-     *     for an empty path, and {@code invalid} for a component the host cannot represent
+     *     for an empty path or a missing directory on the way, {@code not-directory} for anything
+     *     else on the way, and {@code invalid} for a component the host cannot represent
      */
     static Path resolve(Path directory, String path, boolean followFinal) {
         if (path.isEmpty()) {
@@ -98,7 +106,9 @@ final class PathResolver {
             }
             Path candidate =
                     join(directory, resolved).resolve(component(directory.getFileSystem(), name));
-            if (Files.isSymbolicLink(candidate) && (followFinal || !pending.isEmpty())) {
+            BasicFileAttributes attributes = attributes(candidate);
+            boolean link = attributes != null && attributes.isSymbolicLink();
+            if (link && (followFinal || !pending.isEmpty())) {
                 if (++expansions > MAX_SYMLINK_EXPANSIONS) {
                     throw ErrorCodes.error(ErrorCode.LOOP);
                 }
@@ -108,9 +118,39 @@ final class PathResolver {
                 }
                 continue;
             }
+            if (!pending.isEmpty()) {
+                requireDirectory(attributes, pending);
+            }
             resolved.add(name);
         }
         return join(directory, resolved);
+    }
+
+    /**
+     * Refuses a component that the rest of the path goes through, unless it is a directory. Only
+     * a final component followed by nothing but slashes may be missing, so it can be created.
+     */
+    private static void requireDirectory(BasicFileAttributes attributes, Deque<String> pending) {
+        if (attributes == null) {
+            if (pending.stream().allMatch(String::isEmpty)) {
+                return;
+            }
+            throw ErrorCodes.error(ErrorCode.NO_ENTRY);
+        }
+        if (!attributes.isDirectory()) {
+            throw ErrorCodes.error(ErrorCode.NOT_DIRECTORY);
+        }
+    }
+
+    /** The attributes of {@code path} itself, or {@code null} when nothing is there. */
+    private static BasicFileAttributes attributes(Path path) {
+        try {
+            return Files.readAttributes(path, BasicFileAttributes.class, NOFOLLOW);
+        } catch (NoSuchFileException e) {
+            return null;
+        } catch (IOException e) {
+            throw ErrorCodes.failed(e);
+        }
     }
 
     /**
