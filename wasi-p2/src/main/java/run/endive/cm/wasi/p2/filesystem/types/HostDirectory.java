@@ -1,6 +1,5 @@
 package run.endive.cm.wasi.p2.filesystem.types;
 
-import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -64,34 +63,40 @@ public final class HostDirectory extends HostDescriptor {
     /** The entries as they stand now, since a guest may read them long after asking. */
     @Override
     public DirectoryEntryStream readDirectory() {
+        Path directory = path();
         List<DirectoryEntry> entries = new ArrayList<>();
-        try (DirectoryStream<Path> listed = Files.newDirectoryStream(path())) {
-            for (Path entry : listed) {
-                DescriptorType type;
-                try {
-                    type = Metadata.type(entry);
-                } catch (ErrorCodeException e) {
-                    if (e.error() == ErrorCode.NO_ENTRY) {
-                        continue;
+        ErrorCodes.run(
+                () -> {
+                    try (DirectoryStream<Path> listed = Files.newDirectoryStream(directory)) {
+                        for (Path entry : listed) {
+                            DescriptorType type = typeOrNull(entry);
+                            if (type != null) {
+                                entries.add(
+                                        new DirectoryEntry(type, entry.getFileName().toString()));
+                            }
+                        }
                     }
-                    throw e;
-                }
-                entries.add(new DirectoryEntry(type, entry.getFileName().toString()));
-            }
-        } catch (IOException e) {
-            throw ErrorCodes.failed(e);
-        }
+                });
         return new HostDirectoryEntryStream(entries);
+    }
+
+    /** The type of an entry, or {@code null} when it was removed after it was listed. */
+    private static DescriptorType typeOrNull(Path entry) {
+        try {
+            return Metadata.type(entry);
+        } catch (ErrorCodeException e) {
+            if (e.error() == ErrorCode.NO_ENTRY) {
+                return null;
+            }
+            throw e;
+        }
     }
 
     @Override
     public void createDirectoryAt(String path) {
         requireMutate();
-        try {
-            Files.createDirectory(resolve(false, path));
-        } catch (IOException e) {
-            throw ErrorCodes.failed(e);
-        }
+        Path target = resolve(false, path);
+        ErrorCodes.run(() -> Files.createDirectory(target));
     }
 
     @Override
@@ -131,11 +136,7 @@ public final class HostDirectory extends HostDescriptor {
         if (Files.isSymbolicLink(existing)) {
             throw ErrorCodes.error(ErrorCode.UNSUPPORTED);
         }
-        try {
-            Files.createLink(link, existing);
-        } catch (IOException | UnsupportedOperationException e) {
-            throw ErrorCodes.failed(e);
-        }
+        ErrorCodes.run(() -> Files.createLink(link, existing));
     }
 
     /**
@@ -193,11 +194,8 @@ public final class HostDirectory extends HostDescriptor {
 
     @Override
     public String readlinkAt(String path) {
-        try {
-            return PathResolver.guestPath(Files.readSymbolicLink(resolve(false, path)));
-        } catch (IOException | UnsupportedOperationException e) {
-            throw ErrorCodes.failed(e);
-        }
+        Path link = resolve(false, path);
+        return PathResolver.guestPath(ErrorCodes.call(() -> Files.readSymbolicLink(link)));
     }
 
     @Override
@@ -249,11 +247,7 @@ public final class HostDirectory extends HostDescriptor {
         if (fromDirectory && to.startsWith(from)) {
             throw ErrorCodes.error(ErrorCode.INVALID);
         }
-        try {
-            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            throw ErrorCodes.failed(e);
-        }
+        ErrorCodes.run(() -> Files.move(from, to, StandardCopyOption.REPLACE_EXISTING));
     }
 
     /**
@@ -266,11 +260,8 @@ public final class HostDirectory extends HostDescriptor {
     public void symlinkAt(String oldPath, String newPath) {
         requireMutate();
         Path target = PathResolver.relative(path().getFileSystem(), oldPath);
-        try {
-            Files.createSymbolicLink(resolve(false, newPath), target);
-        } catch (IOException | UnsupportedOperationException e) {
-            throw ErrorCodes.failed(e);
-        }
+        Path link = resolve(false, newPath);
+        ErrorCodes.run(() -> Files.createSymbolicLink(link, target));
     }
 
     @Override
@@ -320,10 +311,6 @@ public final class HostDirectory extends HostDescriptor {
     }
 
     private static void delete(Path path) {
-        try {
-            Files.delete(path);
-        } catch (IOException e) {
-            throw ErrorCodes.failed(e);
-        }
+        ErrorCodes.run(() -> Files.delete(path));
     }
 }

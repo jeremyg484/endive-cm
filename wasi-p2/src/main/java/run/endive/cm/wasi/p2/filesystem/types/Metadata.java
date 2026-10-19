@@ -95,13 +95,12 @@ final class Metadata {
      * @see <a href="https://github.com/WebAssembly/WASI/blob/v0.2.12/proposals/filesystem/wit/types.wit">wasi:filesystem/types, set-times</a>
      */
     static void setTimes(Path path, NewTimestamp dataAccess, NewTimestamp dataModification) {
-        BasicFileAttributeView view =
-                Files.getFileAttributeView(path, BasicFileAttributeView.class, NOFOLLOW);
-        try {
-            view.setTimes(fileTime(dataModification), fileTime(dataAccess), null);
-        } catch (IOException e) {
-            throw ErrorCodes.failed(e);
-        }
+        FileTime modified = fileTime(dataModification);
+        FileTime accessed = fileTime(dataAccess);
+        ErrorCodes.run(
+                () ->
+                        Files.getFileAttributeView(path, BasicFileAttributeView.class, NOFOLLOW)
+                                .setTimes(modified, accessed, null));
     }
 
     /**
@@ -145,11 +144,8 @@ final class Metadata {
     }
 
     private static BasicFileAttributes attributes(Path path) {
-        try {
-            return Files.readAttributes(path, BasicFileAttributes.class, NOFOLLOW);
-        } catch (IOException e) {
-            throw ErrorCodes.failed(e);
-        }
+        return ErrorCodes.call(
+                () -> Files.readAttributes(path, BasicFileAttributes.class, NOFOLLOW));
     }
 
     /** The hard links to {@code path}, which is one where the host does not count them. */

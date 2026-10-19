@@ -138,6 +138,11 @@ class DefaultFileSystemTest {
         assertFalse(Files.exists(root.resolve("new")));
     }
 
+    @Test
+    void aNameTooLongForTheHostSaysSo() {
+        assertFails(ErrorCode.NAME_TOO_LONG, () -> sandbox.createDirectoryAt("n".repeat(300)));
+    }
+
     private static void assertFails(ErrorCode expected, Executable operation) {
         ErrorCodeException e = assertThrows(ErrorCodeException.class, operation);
         assertEquals(expected, e.error());
