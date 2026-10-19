@@ -46,9 +46,14 @@ public final class HostFile extends HostDescriptor {
     private boolean dropped;
 
     private HostFile(
-            Path root, Path path, DescriptorFlags flags, HostPoll poll, FileChannel channel) {
-        super(root, path, flags, poll);
-        this.shared = new SharedChannel(channel);
+            Path root,
+            Path path,
+            DescriptorFlags flags,
+            HostPoll poll,
+            OpenFiles files,
+            FileChannel channel) {
+        super(root, path, flags, poll, files);
+        this.shared = new SharedChannel(channel, files);
         this.channel = channel;
     }
 
@@ -66,12 +71,14 @@ public final class HostFile extends HostDescriptor {
             boolean create,
             boolean exclusive,
             boolean truncate) {
-        return open(path.getParent(), path, flags, poll, create, exclusive, truncate);
+        return open(
+                path.getParent(), path, flags, poll, new OpenFiles(), create, exclusive, truncate);
     }
 
     /**
      * Opens the file {@code path} names below the preopened directory {@code root}.
      *
+     * @param files where the open file is tracked
      * @param create whether a missing file is created
      * @param exclusive whether an existing file fails with {@code exist} instead
      * @param truncate whether an existing file is emptied
@@ -81,6 +88,7 @@ public final class HostFile extends HostDescriptor {
             Path path,
             DescriptorFlags flags,
             HostPoll poll,
+            OpenFiles files,
             boolean create,
             boolean exclusive,
             boolean truncate) {
@@ -103,7 +111,7 @@ public final class HostFile extends HostDescriptor {
             options.add(StandardOpenOption.TRUNCATE_EXISTING);
         }
         try {
-            return new HostFile(root, path, flags, poll, FileChannel.open(path, options));
+            return new HostFile(root, path, flags, poll, files, FileChannel.open(path, options));
         } catch (IOException | UnsupportedOperationException e) {
             throw ErrorCodes.failed(e);
         }

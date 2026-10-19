@@ -37,6 +37,7 @@ public abstract class HostDescriptor implements Descriptor {
     private final Path path;
     private final DescriptorFlags flags;
     private final HostPoll poll;
+    private final OpenFiles files;
     private final Object fileKey;
 
     /**
@@ -44,12 +45,15 @@ public abstract class HostDescriptor implements Descriptor {
      * @param path the host object this descriptor names
      * @param flags the access the guest is granted to it
      * @param poll the poll the streams this opens subscribe through
+     * @param files where the files opened through this descriptor are tracked
      */
-    protected HostDescriptor(Path root, Path path, DescriptorFlags flags, HostPoll poll) {
+    protected HostDescriptor(
+            Path root, Path path, DescriptorFlags flags, HostPoll poll, OpenFiles files) {
         this.root = Objects.requireNonNull(root, "root");
         this.path = Objects.requireNonNull(path, "path");
         this.flags = Objects.requireNonNull(flags, "flags");
         this.poll = Objects.requireNonNull(poll, "poll");
+        this.files = Objects.requireNonNull(files, "files");
         this.fileKey = Metadata.fileKey(path);
     }
 
@@ -59,6 +63,10 @@ public abstract class HostDescriptor implements Descriptor {
 
     Path root() {
         return root;
+    }
+
+    OpenFiles files() {
+        return files;
     }
 
     /** What identifies the object on its file system, or {@code null} where the host has none. */

@@ -15,6 +15,7 @@ import run.endive.cm.wasi.p2.clocks.monotonicclock.HostMonotonicClock;
 import run.endive.cm.wasi.p2.clocks.wallclock.HostWallClock;
 import run.endive.cm.wasi.p2.filesystem.preopens.HostPreopens;
 import run.endive.cm.wasi.p2.filesystem.types.HostTypes;
+import run.endive.cm.wasi.p2.filesystem.types.OpenFiles;
 import run.endive.cm.wasi.p2.io.poll.HostPoll;
 
 /**
@@ -37,6 +38,7 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
     private final HostMonotonicClock monotonicClock;
     private final HostWallClock wallClock;
     private final HostTypes types;
+    private final OpenFiles files = new OpenFiles();
     private final HostPreopens preopens;
 
     private WasiPreview2(Builder builder) {
@@ -49,7 +51,7 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
                         ? new HostWallClock()
                         : new HostWallClock(builder.clock, builder.clockResolution);
         this.types = new HostTypes();
-        this.preopens = new HostPreopens(builder.directories, poll);
+        this.preopens = new HostPreopens(builder.directories, poll, files);
     }
 
     public static Builder builder() {
@@ -86,9 +88,13 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
         return preopens;
     }
 
-    /** Shuts down the scheduler, unless the builder was given an external one to use. */
+    /**
+     * Closes every file a guest left open, and shuts down the scheduler unless the builder was
+     * given an external one to use.
+     */
     @Override
     public void close() {
+        files.close();
         if (ownsScheduler) {
             scheduler.shutdownNow();
         }

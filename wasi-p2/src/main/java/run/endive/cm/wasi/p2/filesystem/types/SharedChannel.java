@@ -13,11 +13,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class SharedChannel {
 
     private final FileChannel channel;
+    private final OpenFiles files;
     private final AtomicInteger holders = new AtomicInteger(1);
 
-    /** A channel held by its first holder. */
-    SharedChannel(FileChannel channel) {
+    /** A channel held by its first holder, which {@code files} closes if nothing else does. */
+    SharedChannel(FileChannel channel, OpenFiles files) {
         this.channel = channel;
+        this.files = files;
+        files.add(this);
     }
 
     FileChannel channel() {
@@ -33,6 +36,7 @@ final class SharedChannel {
     /** Lets go of the channel, closing it when no holder is left. */
     void release() {
         if (holders.decrementAndGet() == 0) {
+            files.remove(this);
             try {
                 channel.close();
             } catch (IOException e) {

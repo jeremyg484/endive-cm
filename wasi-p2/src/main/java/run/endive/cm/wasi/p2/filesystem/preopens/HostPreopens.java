@@ -9,6 +9,7 @@ import run.endive.cm.wasi.p2.bindings.wasi.filesystem.preopens.Host;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.Descriptor;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.DescriptorFlags;
 import run.endive.cm.wasi.p2.filesystem.types.HostDirectory;
+import run.endive.cm.wasi.p2.filesystem.types.OpenFiles;
 import run.endive.cm.wasi.p2.io.poll.HostPoll;
 
 /**
@@ -28,6 +29,17 @@ public class HostPreopens implements Host {
      * @param poll the poll file streams subscribe through
      */
     public HostPreopens(Map<String, Path> directories, HostPoll poll) {
+        this(directories, poll, new OpenFiles());
+    }
+
+    /**
+     * Each directory is granted with read and directory mutation access.
+     *
+     * @param directories each host directory, keyed by the name the guest sees it under
+     * @param poll the poll file streams subscribe through
+     * @param files where the files opened through the directories are tracked
+     */
+    public HostPreopens(Map<String, Path> directories, HostPoll poll, OpenFiles files) {
         DescriptorFlags flags =
                 DescriptorFlags.of(
                         DescriptorFlags.Flag.READ, DescriptorFlags.Flag.MUTATE_DIRECTORY);
@@ -35,7 +47,7 @@ public class HostPreopens implements Host {
         for (Map.Entry<String, Path> directory : directories.entrySet()) {
             granted.add(
                     Tuple2.of(
-                            new HostDirectory(directory.getValue(), flags, poll),
+                            new HostDirectory(directory.getValue(), flags, poll, files),
                             directory.getKey()));
         }
         this.directories = List.copyOf(granted);

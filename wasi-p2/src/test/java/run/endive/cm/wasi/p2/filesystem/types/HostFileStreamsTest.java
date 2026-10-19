@@ -217,7 +217,8 @@ class HostFileStreamsTest {
     void aFailedReadCarriesItsErrorCode() throws IOException {
         FileChannel channel = FileChannel.open(path);
         channel.close();
-        HostFileInputStream stream = new HostFileInputStream(poll, new SharedChannel(channel), 0);
+        HostFileInputStream stream =
+                new HostFileInputStream(poll, new SharedChannel(channel, new OpenFiles()), 0);
 
         StreamErrorException failure =
                 assertThrows(StreamErrorException.class, () -> stream.read(len(1)));
@@ -232,7 +233,8 @@ class HostFileStreamsTest {
     void aFailedWriteCarriesItsErrorCode() throws IOException {
         FileChannel channel = FileChannel.open(path);
         channel.close();
-        HostFileOutputStream stream = HostFileOutputStream.at(poll, new SharedChannel(channel), 0);
+        HostFileOutputStream stream =
+                HostFileOutputStream.at(poll, new SharedChannel(channel, new OpenFiles()), 0);
 
         stream.checkWrite();
         StreamErrorException failure =

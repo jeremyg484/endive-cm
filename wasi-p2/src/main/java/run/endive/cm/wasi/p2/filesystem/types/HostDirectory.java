@@ -42,11 +42,24 @@ public final class HostDirectory extends HostDescriptor {
      * @param poll the poll the streams of files opened through it subscribe through
      */
     public HostDirectory(Path path, DescriptorFlags flags, HostPoll poll) {
-        this(path, path, flags, poll);
+        this(path, flags, poll, new OpenFiles());
     }
 
-    private HostDirectory(Path root, Path path, DescriptorFlags flags, HostPoll poll) {
-        super(root, path, flags, poll);
+    /**
+     * A preopened directory whose open files {@code files} tracks.
+     *
+     * @param path the host directory this descriptor names
+     * @param flags the access the guest is granted to it
+     * @param poll the poll the streams of files opened through it subscribe through
+     * @param files where the files opened through it are tracked
+     */
+    public HostDirectory(Path path, DescriptorFlags flags, HostPoll poll, OpenFiles files) {
+        this(path, path, flags, poll, files);
+    }
+
+    private HostDirectory(
+            Path root, Path path, DescriptorFlags flags, HostPoll poll, OpenFiles files) {
+        super(root, path, flags, poll, files);
     }
 
     @Override
@@ -140,8 +153,10 @@ public final class HostDirectory extends HostDescriptor {
     }
 
     /**
-     * Opens a directory as another {@code HostDirectory} and anything else as a {@link HostFile}.
-     * A symbolic link left unfollowed fails with {@code loop}, as {@code O_NOFOLLOW} does.
+     * Opens a directory as another {@code HostDirectory} and a regular file as a {@link HostFile}.
+     * A symbolic link left unfollowed fails with {@code loop}, as {@code O_NOFOLLOW} does. Anything
+     * else, such as a named pipe or a device, fails with {@code unsupported}, since a file is read
+     * and written at an offset and opening a pipe would block the guest.
      *
      * @see <a href="https://github.com/WebAssembly/WASI/blob/v0.2.12/proposals/filesystem/wit/types.wit">wasi:filesystem/types, open-at</a>
      */
@@ -175,13 +190,17 @@ public final class HostDirectory extends HostDescriptor {
             if (flags.has(DescriptorFlags.Flag.WRITE) || create || truncate) {
                 throw ErrorCodes.error(ErrorCode.IS_DIRECTORY);
             }
-            return new HostDirectory(root(), target, flags, poll());
+            return new HostDirectory(root(), target, flags, poll(), files());
         }
         if (directoryOnly) {
             throw ErrorCodes.error(
                     Files.exists(target, NOFOLLOW) ? ErrorCode.NOT_DIRECTORY : ErrorCode.NO_ENTRY);
         }
-        return HostFile.open(root(), target, fileFlags(flags), poll(), create, exclusive, truncate);
+        if (Files.exists(target, NOFOLLOW) && !Files.isRegularFile(target, NOFOLLOW)) {
+            throw ErrorCodes.error(ErrorCode.UNSUPPORTED);
+        }
+        return HostFile.open(
+                root(), target, fileFlags(flags), poll(), files(), create, exclusive, truncate);
     }
 
     /** What a guest asked for, apart from {@code mutate-directory}, which only a directory has. */

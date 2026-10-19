@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.math.BigInteger;
@@ -12,8 +13,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.io.TempDir;
+import run.endive.cm.wasi.p2.WasiPreview2;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.Descriptor;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.DescriptorFlags;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.ErrorCode;
@@ -141,6 +145,29 @@ class DefaultFileSystemTest {
     @Test
     void aNameTooLongForTheHostSaysSo() {
         assertFails(ErrorCode.NAME_TOO_LONG, () -> sandbox.createDirectoryAt("n".repeat(300)));
+    }
+
+    /** Closing the host closes what a guest left open, which a later use then finds. */
+    @Test
+    void closingTheHostClosesTheFilesAGuestKept() {
+        Descriptor file;
+        try (var wasi = WasiPreview2.builder().withDirectory("data", root).build()) {
+            Descriptor data = wasi.preopens().getDirectories().get(0).f0();
+            file = data.openAt(NOFOLLOW, "kept", OpenFlags.of(OpenFlags.Flag.CREATE), READ_WRITE);
+        }
+
+        assertFails(ErrorCode.BAD_DESCRIPTOR, () -> file.read(BigInteger.ONE, BigInteger.ZERO));
+    }
+
+    /** A named pipe is read and written without offsets, and opening one would block. */
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void aNamedPipeIsUnsupported() throws IOException, InterruptedException {
+        Path fifo = root.resolve("fifo");
+        Process mkfifo = new ProcessBuilder("mkfifo", fifo.toString()).start();
+        assumeTrue(mkfifo.waitFor() == 0, "mkfifo is available");
+
+        assertFails(ErrorCode.UNSUPPORTED, () -> sandbox.openAt(NOFOLLOW, "fifo", EXISTING, READ));
     }
 
     private static void assertFails(ErrorCode expected, Executable operation) {
