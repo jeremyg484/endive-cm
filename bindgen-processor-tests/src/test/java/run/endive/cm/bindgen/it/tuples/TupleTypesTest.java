@@ -82,7 +82,7 @@ public class TupleTypesTest {
         assertEquals(true, recorder.chunks.get(0).f1());
     }
 
-    /** The guest checks the converted tuple the host answers with. */
+    /** The guest checks the converted tuple in the host's answer. */
     @Test
     void aConvertedTupleTheHostAnswersWithWronglyTraps() {
         TupleTypesWorld bindings =

@@ -1,11 +1,14 @@
 package run.endive.cm.wasi.p2;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import run.endive.cm.runtime.ComponentStore;
@@ -51,7 +54,7 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
                         ? new HostWallClock()
                         : new HostWallClock(builder.clock, builder.clockResolution);
         this.types = new HostTypes();
-        this.preopens = new HostPreopens(builder.directories, poll, files);
+        this.preopens = new HostPreopens(builder.directories, builder.readOnly, poll, files);
     }
 
     public static Builder builder() {
@@ -119,6 +122,7 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
         private Clock clock;
         private Duration clockResolution;
         private final Map<String, Path> directories = new LinkedHashMap<>();
+        private final Set<String> readOnly = new HashSet<>();
 
         private Builder() {}
 
@@ -153,10 +157,38 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
          * <p>The guest cannot reach outside {@code host} by itself. Java checks a path and then
          * acts on it in separate steps, though, so nothing else may change {@code host} while an
          * untrusted guest uses it.
+         *
+         * @throws IllegalArgumentException when {@code host} is not a directory, or {@code guest}
+         *     already names one
          */
         public Builder withDirectory(String guest, Path host) {
-            directories.put(
-                    Objects.requireNonNull(guest, "guest"), Objects.requireNonNull(host, "host"));
+            return grant(guest, host, false);
+        }
+
+        /**
+         * Grants the guest {@code host} as a preopened directory named {@code guest}, which it
+         * may read but not change in any way.
+         *
+         * @throws IllegalArgumentException when {@code host} is not a directory, or {@code guest}
+         *     already names one
+         */
+        public Builder withReadOnlyDirectory(String guest, Path host) {
+            return grant(guest, host, true);
+        }
+
+        private Builder grant(String guest, Path host, boolean readable) {
+            Objects.requireNonNull(guest, "guest");
+            Objects.requireNonNull(host, "host");
+            if (!Files.isDirectory(host)) {
+                throw new IllegalArgumentException(host + " is not a directory");
+            }
+            if (directories.containsKey(guest)) {
+                throw new IllegalArgumentException("a directory is already granted as " + guest);
+            }
+            directories.put(guest, host);
+            if (readable) {
+                readOnly.add(guest);
+            }
             return this;
         }
 

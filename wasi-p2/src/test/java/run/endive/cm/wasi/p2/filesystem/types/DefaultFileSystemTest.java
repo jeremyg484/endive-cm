@@ -147,6 +147,37 @@ class DefaultFileSystemTest {
         assertFails(ErrorCode.NAME_TOO_LONG, () -> sandbox.createDirectoryAt("n".repeat(300)));
     }
 
+    /** Nothing in a read-only directory changes, through it or through what is opened below it. */
+    @Test
+    void aReadOnlyDirectoryRefusesEveryChange() throws IOException {
+        Files.createDirectory(root.resolve("sub"));
+        Files.write(root.resolve("sub/file"), "x".getBytes(UTF_8));
+        try (var wasi = WasiPreview2.builder().withReadOnlyDirectory("data", root).build()) {
+            Descriptor data = wasi.preopens().getDirectories().get(0).f0();
+            Descriptor sub = data.openAt(NOFOLLOW, "sub", EXISTING, READ);
+
+            assertFalse(data.getFlags().has(DescriptorFlags.Flag.MUTATE_DIRECTORY));
+            assertFails(ErrorCode.READ_ONLY, () -> data.createDirectoryAt("made"));
+            assertFails(ErrorCode.READ_ONLY, () -> sub.unlinkFileAt("file"));
+            assertFails(
+                    ErrorCode.READ_ONLY, () -> sub.openAt(NOFOLLOW, "file", EXISTING, READ_WRITE));
+            assertFails(ErrorCode.READ_ONLY, () -> data.openAt(NOFOLLOW, "sub", EXISTING, MUTATE));
+        }
+        assertTrue(Files.exists(root.resolve("sub/file")));
+    }
+
+    @Test
+    void aDirectoryIsGrantedOnceUnderEachName() throws IOException {
+        Path file = Files.write(root.resolve("plain"), "x".getBytes(UTF_8));
+        WasiPreview2.Builder builder = WasiPreview2.builder().withDirectory("data", root);
+
+        assertThrows(IllegalArgumentException.class, () -> builder.withDirectory("data", temp));
+        assertThrows(IllegalArgumentException.class, () -> builder.withDirectory("other", file));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> builder.withReadOnlyDirectory("missing", root.resolve("missing")));
+    }
+
     /** Closing the host closes what a guest left open, which a later use then finds. */
     @Test
     void closingTheHostClosesTheFilesAGuestKept() {

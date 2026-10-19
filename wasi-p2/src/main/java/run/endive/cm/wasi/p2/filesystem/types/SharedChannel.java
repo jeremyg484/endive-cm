@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * An open file shared by a descriptor and the streams opened from it, closed once every one of
- * them has let go. A stream outlives the descriptor it was opened from.
+ * them has let go. A stream may outlive the descriptor that opened it.
  *
  * @see <a href="https://github.com/WebAssembly/WASI/blob/v0.2.12/proposals/filesystem/wit/types.wit">wasi:filesystem/types</a>
  */
