@@ -16,7 +16,7 @@ public class HostInsecure implements Host {
 
     private final Random random;
 
-    /** Draws from the {@link ThreadLocalRandom} of whichever thread the guest runs on. */
+    /** Draws from the {@link ThreadLocalRandom} of the thread running the guest. */
     public HostInsecure() {
         this.random = null;
     }
@@ -25,7 +25,7 @@ public class HostInsecure implements Host {
         this.random = Objects.requireNonNull(random, "random");
     }
 
-    /** Traps when the host cannot hold {@code len} bytes. */
+    /** Traps when the canonical ABI could not return {@code len} bytes. */
     @Override
     public byte[] getInsecureRandomBytes(BigInteger len) {
         return RandomValues.bytes(random(), len);
@@ -36,6 +36,7 @@ public class HostInsecure implements Host {
         return RandomValues.u64(random());
     }
 
+    /** A {@link ThreadLocalRandom} is only seeded for the thread that asks for it. */
     private Random random() {
         return random == null ? ThreadLocalRandom.current() : random;
     }

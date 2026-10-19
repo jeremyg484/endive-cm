@@ -2,9 +2,9 @@ package run.endive.cm.wasi.p2.random.insecureseed;
 
 import java.math.BigInteger;
 import java.util.concurrent.ThreadLocalRandom;
+import run.endive.cm.abi.CanonicalAbi;
 import run.endive.cm.runtime.Tuple2;
 import run.endive.cm.wasi.p2.bindings.wasi.random.insecureseed.Host;
-import run.endive.cm.wasi.p2.random.RandomValues;
 
 /**
  * The host side of {@code wasi:random/insecure-seed}, which returns the same seed every time.
@@ -22,7 +22,10 @@ public class HostInsecureSeed implements Host {
 
     /** The seed whose halves hold the bits of {@code first} and {@code second}. */
     public HostInsecureSeed(long first, long second) {
-        this.seed = Tuple2.of(RandomValues.unsigned(first), RandomValues.unsigned(second));
+        this.seed =
+                Tuple2.of(
+                        CanonicalAbi.toUnsignedBigInteger(first),
+                        CanonicalAbi.toUnsignedBigInteger(second));
     }
 
     @Override

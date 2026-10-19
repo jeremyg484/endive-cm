@@ -1,10 +1,4 @@
-;; Implements endive:wasi-test/random, whose exports each return what one
-;; wasi:random function gave the guest.
-;;
-;; A list or a tuple of two u64 values flattens to more than one value, so the
-;; import is handed a return area and the export returns a pointer to one. The
-;; same area serves both. A list is a pointer and a length, which the host
-;; allocates through cabi_realloc.
+;; Each export returns what one wasi:random function gave the guest.
 (module
   (import "wasi:random/random@0.2.12" "get-random-bytes"
     (func $get-random-bytes (param i64 i32)))

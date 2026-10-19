@@ -5,13 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.math.BigInteger;
 import java.nio.file.Path;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.util.Random;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import run.endive.cm.abi.ByteList;
+import run.endive.cm.abi.CanonicalAbi;
 import run.endive.cm.runtime.ComponentFunction;
 import run.endive.cm.runtime.ComponentStore;
 import run.endive.cm.runtime.Tuple2;
@@ -35,14 +34,14 @@ class RandomGuestTest {
     }
 
     @Test
-    void aGuestReceivesSecureRandomBytes() throws NoSuchAlgorithmException {
-        SecureRandom expected = seeded();
+    void aGuestReceivesRandomBytes() {
+        Random expected = new Random(SEED);
         byte[] first = new byte[16];
         expected.nextBytes(first);
         byte[] second = new byte[3];
         expected.nextBytes(second);
 
-        try (var wasi = WasiPreview2.builder().withSecureRandom(seeded()).build()) {
+        try (var wasi = WasiPreview2.builder().withRandom(new Random(SEED)).build()) {
             ComponentFunction randomBytes = export(wasi, "random-bytes");
 
             assertArrayEquals(first, bytes(randomBytes.apply(BigInteger.valueOf(16))));
@@ -52,10 +51,10 @@ class RandomGuestTest {
     }
 
     @Test
-    void aGuestReceivesASecureRandomU64() throws NoSuchAlgorithmException {
-        BigInteger expected = RandomValues.unsigned(seeded().nextLong());
+    void aGuestReceivesARandomU64() {
+        BigInteger expected = CanonicalAbi.toUnsignedBigInteger(new Random(SEED).nextLong());
 
-        try (var wasi = WasiPreview2.builder().withSecureRandom(seeded()).build()) {
+        try (var wasi = WasiPreview2.builder().withRandom(new Random(SEED)).build()) {
             assertEquals(expected, export(wasi, "random-u64").apply()[0]);
         }
     }
@@ -74,7 +73,7 @@ class RandomGuestTest {
     /** A u64 above the range of a {@code long} crosses intact. */
     @Test
     void aGuestReceivesAnInsecureRandomU64() {
-        BigInteger expected = RandomValues.unsigned(new Random(SEED).nextLong());
+        BigInteger expected = CanonicalAbi.toUnsignedBigInteger(new Random(SEED).nextLong());
 
         try (var wasi = WasiPreview2.builder().withInsecureRandom(new Random(SEED)).build()) {
             assertEquals(expected, export(wasi, "insecure-u64").apply()[0]);
@@ -106,12 +105,5 @@ class RandomGuestTest {
 
     private static Tuple2<BigInteger, BigInteger> seed(Object[] result) {
         return Tuple2.fromComponent(result[0], BigInteger.class, BigInteger.class);
-    }
-
-    /** A generator seeded before its first use, which makes its output repeatable. */
-    private static SecureRandom seeded() throws NoSuchAlgorithmException {
-        SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
-        random.setSeed(SEED);
-        return random;
     }
 }

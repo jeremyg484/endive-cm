@@ -1,6 +1,5 @@
 package run.endive.cm.wasi.p2;
 
-import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
@@ -49,10 +48,7 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
                 builder.clock == null
                         ? new HostWallClock()
                         : new HostWallClock(builder.clock, builder.clockResolution);
-        this.random =
-                builder.secureRandom == null
-                        ? new HostRandom()
-                        : new HostRandom(builder.secureRandom);
+        this.random = builder.random == null ? new HostRandom() : new HostRandom(builder.random);
         this.insecure =
                 builder.insecureRandom == null
                         ? new HostInsecure()
@@ -126,7 +122,7 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
         private ScheduledExecutorService scheduler;
         private Clock clock;
         private Duration clockResolution;
-        private SecureRandom secureRandom;
+        private Random random;
         private Random insecureRandom;
         private HostInsecureSeed insecureSeed;
 
@@ -156,17 +152,19 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
         }
 
         /**
-         * The generator {@code wasi:random/random} draws from, which defaults to the platform's
-         * default {@link SecureRandom}. It must never block and must always return fresh data.
+         * The generator {@code wasi:random/random} draws from, which defaults to the {@link
+         * java.util.concurrent.ThreadLocalRandom} of the thread running the guest, as in Endive's
+         * WASI preview 1. Pass a {@link java.security.SecureRandom} for cryptographic strength. A
+         * seeded generator makes every value predictable, so it only suits tests.
          */
-        public Builder withSecureRandom(SecureRandom random) {
-            this.secureRandom = Objects.requireNonNull(random, "random");
+        public Builder withRandom(Random random) {
+            this.random = Objects.requireNonNull(random, "random");
             return this;
         }
 
         /**
          * The generator {@code wasi:random/insecure} draws from, which defaults to the {@link
-         * java.util.concurrent.ThreadLocalRandom} of whichever thread the guest runs on.
+         * java.util.concurrent.ThreadLocalRandom} of the thread running the guest.
          */
         public Builder withInsecureRandom(Random random) {
             this.insecureRandom = Objects.requireNonNull(random, "random");
