@@ -2,7 +2,6 @@ package run.endive.cm.wasi.p2.filesystem.types;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.concurrent.CompletableFuture;
 import run.endive.cm.wasi.p2.io.poll.HostPoll;
 import run.endive.cm.wasi.p2.io.streams.HostOutputStream;
@@ -61,13 +60,9 @@ final class HostFileOutputStream extends HostOutputStream {
     @Override
     protected void writeBytes(byte[] contents) {
         checkOpen();
-        FileChannel channel = file.channel();
         try {
-            long at = append ? channel.size() : position;
-            ByteBuffer remaining = ByteBuffer.wrap(contents);
-            while (remaining.hasRemaining()) {
-                channel.write(remaining, at + remaining.position());
-            }
+            long at = append ? file.channel().size() : position;
+            file.writeFully(ByteBuffer.wrap(contents), at);
             position = at + contents.length;
         } catch (IOException e) {
             closed = true;

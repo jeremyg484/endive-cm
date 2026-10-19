@@ -16,6 +16,7 @@ import java.security.SecureRandom;
 import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Map;
 import run.endive.cm.wasi.p2.bindings.wasi.clocks.wallclock.Datetime;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.DescriptorStat;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.DescriptorType;
@@ -46,13 +47,16 @@ final class Metadata {
     /** The attributes of {@code path}. */
     static DescriptorStat stat(Path path) {
         BasicFileAttributes attributes = attributes(path);
+        Map<String, Object> unix = unixAttributes(path);
+        Object links = unix.get("nlink");
+        Object changed = unix.get("ctime");
         return new DescriptorStat(
                 type(attributes),
-                BigInteger.valueOf(linkCount(path)),
+                BigInteger.valueOf(links instanceof Number ? ((Number) links).longValue() : 1),
                 BigInteger.valueOf(attributes.size()),
                 datetime(attributes.lastAccessTime()),
                 datetime(attributes.lastModifiedTime()),
-                datetime(statusChangeTime(path)));
+                datetime(changed instanceof FileTime ? (FileTime) changed : null));
     }
 
     /**
@@ -148,23 +152,15 @@ final class Metadata {
                 () -> Files.readAttributes(path, BasicFileAttributes.class, NOFOLLOW));
     }
 
-    /** The hard links to {@code path}, which is one where the host does not count them. */
-    private static long linkCount(Path path) {
-        Object count = unixAttribute(path, "unix:nlink");
-        return count instanceof Number ? ((Number) count).longValue() : 1;
-    }
-
-    private static FileTime statusChangeTime(Path path) {
-        Object changed = unixAttribute(path, "unix:ctime");
-        return changed instanceof FileTime ? (FileTime) changed : null;
-    }
-
-    /** A {@code unix} view attribute, or {@code null} where the host has no such view. */
-    private static Object unixAttribute(Path path, String attribute) {
+    /**
+     * The hard link count and status change time of {@code path}, which are empty where the host
+     * has no {@code unix} view. A missing link count stands for one link.
+     */
+    private static Map<String, Object> unixAttributes(Path path) {
         try {
-            return Files.getAttribute(path, attribute, NOFOLLOW);
+            return Files.readAttributes(path, "unix:nlink,ctime", NOFOLLOW);
         } catch (UnsupportedOperationException | IllegalArgumentException e) {
-            return null;
+            return Map.of();
         } catch (IOException e) {
             throw ErrorCodes.failed(e);
         }

@@ -1,6 +1,7 @@
 package run.endive.cm.wasi.p2.filesystem.types;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -25,6 +26,13 @@ final class SharedChannel {
 
     FileChannel channel() {
         return channel;
+    }
+
+    /** Writes all of {@code contents} from {@code position}, which a channel may take in parts. */
+    void writeFully(ByteBuffer contents, long position) throws IOException {
+        while (contents.hasRemaining()) {
+            channel.write(contents, position + contents.position());
+        }
     }
 
     /** Adds a holder, which has to {@link #release} it once. */

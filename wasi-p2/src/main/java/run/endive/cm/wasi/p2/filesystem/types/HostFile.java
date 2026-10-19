@@ -42,7 +42,6 @@ public final class HostFile extends HostDescriptor {
     static final int MAX_READ = 1 << 20;
 
     private final SharedChannel shared;
-    private final FileChannel channel;
     private boolean dropped;
 
     private HostFile(
@@ -54,7 +53,6 @@ public final class HostFile extends HostDescriptor {
             FileChannel channel) {
         super(root, path, flags, poll, files);
         this.shared = new SharedChannel(channel, files);
-        this.channel = channel;
     }
 
     /**
@@ -132,7 +130,7 @@ public final class HostFile extends HostDescriptor {
     public Tuple2<byte[], Boolean> read(BigInteger length, BigInteger offset) {
         require(DescriptorFlags.Flag.READ);
         try {
-            long size = channel.size();
+            long size = shared.channel().size();
             long position = clamp(offset);
             if (position >= size) {
                 return Tuple2.of(new byte[0], true);
@@ -140,7 +138,7 @@ public final class HostFile extends HostDescriptor {
             int count = (int) Math.min(Math.min(clamp(length), size - position), MAX_READ);
             ByteBuffer buffer = ByteBuffer.allocate(count);
             while (buffer.hasRemaining()) {
-                if (channel.read(buffer, position + buffer.position()) < 0) {
+                if (shared.channel().read(buffer, position + buffer.position()) < 0) {
                     break;
                 }
             }
@@ -165,7 +163,7 @@ public final class HostFile extends HostDescriptor {
         require(DescriptorFlags.Flag.WRITE);
         long position = position(offset);
         try {
-            writeFully(ByteBuffer.wrap(buffer), position);
+            shared.writeFully(ByteBuffer.wrap(buffer), position);
         } catch (IOException e) {
             throw ErrorCodes.failed(e);
         }
@@ -180,11 +178,11 @@ public final class HostFile extends HostDescriptor {
         require(DescriptorFlags.Flag.WRITE);
         long target = position(size);
         try {
-            long current = channel.size();
+            long current = shared.channel().size();
             if (target < current) {
-                channel.truncate(target);
+                shared.channel().truncate(target);
             } else if (target > current) {
-                writeFully(ByteBuffer.allocate(1), target - 1);
+                shared.writeFully(ByteBuffer.allocate(1), target - 1);
             }
         } catch (IOException e) {
             throw ErrorCodes.failed(e);
@@ -297,16 +295,9 @@ public final class HostFile extends HostDescriptor {
 
     private long size() {
         try {
-            return channel.size();
+            return shared.channel().size();
         } catch (IOException e) {
             throw ErrorCodes.failed(e);
-        }
-    }
-
-    /** Writes all of {@code contents} from {@code position}, which a channel may take in parts. */
-    private void writeFully(ByteBuffer contents, long position) throws IOException {
-        while (contents.hasRemaining()) {
-            channel.write(contents, position + contents.position());
         }
     }
 
@@ -315,7 +306,7 @@ public final class HostFile extends HostDescriptor {
             return;
         }
         try {
-            channel.force(metadata);
+            shared.channel().force(metadata);
         } catch (IOException e) {
             throw ErrorCodes.failed(e);
         }
