@@ -30,10 +30,10 @@ import run.endive.wasm.types.ValType;
 public final class CanonicalAbi {
 
     /**
-     * List size is capped so that {@code 2 * length} can never overflow the {@code i32} realloc
-     * arguments used to allocate them.
+     * The most bytes a list may span. It is capped so that {@code 2 * length} can never overflow
+     * the {@code i32} realloc arguments used to allocate it.
      */
-    private static final int MAX_LIST_BYTE_LENGTH = (1 << 28) - 1;
+    public static final int MAX_LIST_BYTE_LENGTH = (1 << 28) - 1;
 
     /** Same overflow-avoidance reasoning as {@link #MAX_LIST_BYTE_LENGTH}, for strings. */
     private static final int MAX_STRING_BYTE_LENGTH = (1 << 28) - 1;
@@ -1069,7 +1069,8 @@ public final class CanonicalAbi {
         return (i & signBit) != 0 ? i - (1L << typeWidth) : i;
     }
 
-    private static BigInteger toUnsignedBigInteger(long bits) {
+    /** The {@code u64} whose bits {@code bits} holds. */
+    public static BigInteger toUnsignedBigInteger(long bits) {
         return bits >= 0
                 ? BigInteger.valueOf(bits)
                 : BigInteger.valueOf(bits & Long.MAX_VALUE).setBit(Long.SIZE - 1);

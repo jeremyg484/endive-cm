@@ -1,0 +1,11 @@
+package endive:wasi-test;
+
+world random {
+  include endive:wasi/imports@0.2.12;
+
+  export random-bytes: func(len: u64) -> list<u8>;
+  export random-u64: func() -> u64;
+  export insecure-bytes: func(len: u64) -> list<u8>;
+  export insecure-u64: func() -> u64;
+  export insecure-seed: func() -> tuple<u64, u64>;
+}

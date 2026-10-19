@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -20,6 +21,9 @@ import run.endive.cm.wasi.p2.filesystem.preopens.HostPreopens;
 import run.endive.cm.wasi.p2.filesystem.types.HostTypes;
 import run.endive.cm.wasi.p2.filesystem.types.OpenFiles;
 import run.endive.cm.wasi.p2.io.poll.HostPoll;
+import run.endive.cm.wasi.p2.random.insecure.HostInsecure;
+import run.endive.cm.wasi.p2.random.insecureseed.HostInsecureSeed;
+import run.endive.cm.wasi.p2.random.random.HostRandom;
 
 /**
  * The WASI preview 2 interfaces this host implements, ready to satisfy a component's imports.
@@ -43,6 +47,9 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
     private final HostTypes types;
     private final OpenFiles files = new OpenFiles();
     private final HostPreopens preopens;
+    private final HostRandom random;
+    private final HostInsecure insecure;
+    private final HostInsecureSeed insecureSeed;
 
     private WasiPreview2(Builder builder) {
         this.ownsScheduler = builder.scheduler == null;
@@ -55,6 +62,13 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
                         : new HostWallClock(builder.clock, builder.clockResolution);
         this.types = new HostTypes();
         this.preopens = new HostPreopens(builder.directories, builder.readOnly, poll, files);
+        this.random = builder.random == null ? new HostRandom() : new HostRandom(builder.random);
+        this.insecure =
+                builder.insecureRandom == null
+                        ? new HostInsecure()
+                        : new HostInsecure(builder.insecureRandom);
+        this.insecureSeed =
+                builder.insecureSeed == null ? new HostInsecureSeed() : builder.insecureSeed;
     }
 
     public static Builder builder() {
@@ -91,6 +105,21 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
         return preopens;
     }
 
+    @Override
+    public HostRandom random() {
+        return random;
+    }
+
+    @Override
+    public HostInsecure insecure() {
+        return insecure;
+    }
+
+    @Override
+    public HostInsecureSeed insecureSeed() {
+        return insecureSeed;
+    }
+
     /**
      * Closes every file a guest left open, and shuts down the scheduler unless the builder was
      * given an external one to use.
@@ -123,6 +152,9 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
         private Duration clockResolution;
         private final Map<String, Path> directories = new LinkedHashMap<>();
         private final Set<String> readOnly = new HashSet<>();
+        private Random random;
+        private Random insecureRandom;
+        private HostInsecureSeed insecureSeed;
 
         private Builder() {}
 
@@ -189,6 +221,35 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
             if (readable) {
                 readOnly.add(guest);
             }
+            return this;
+        }
+
+        /**
+         * The generator {@code wasi:random/random} draws from, which defaults to the {@link
+         * java.util.concurrent.ThreadLocalRandom} of the thread running the guest, as in Endive's
+         * WASI preview 1. Pass a {@link java.security.SecureRandom} for cryptographic strength. A
+         * seeded generator makes every value predictable, so it only suits tests.
+         */
+        public Builder withRandom(Random random) {
+            this.random = Objects.requireNonNull(random, "random");
+            return this;
+        }
+
+        /**
+         * The generator {@code wasi:random/insecure} draws from, which defaults to the {@link
+         * java.util.concurrent.ThreadLocalRandom} of the thread running the guest.
+         */
+        public Builder withInsecureRandom(Random random) {
+            this.insecureRandom = Objects.requireNonNull(random, "random");
+            return this;
+        }
+
+        /**
+         * The seed {@code wasi:random/insecure-seed} returns, whose halves hold the bits of {@code
+         * first} and {@code second}. By default, one is drawn when the host is built.
+         */
+        public Builder withInsecureSeed(long first, long second) {
+            this.insecureSeed = new HostInsecureSeed(first, second);
             return this;
         }
 
