@@ -1,8 +1,6 @@
 package run.endive.cm.wasi.p2.filesystem.types;
 
-import java.io.IOException;
 import java.math.BigInteger;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 import run.endive.cm.runtime.Tuple2;
@@ -28,32 +26,58 @@ import run.endive.cm.wasi.p2.io.poll.HostPoll;
  * <p>A {@link HostDirectory} refuses what only a file supports with {@code bad-descriptor}, and a
  * {@link HostFile} refuses what only a directory supports with {@code not-directory}.
  *
+ * <p>Java holds no handle to a directory, so a descriptor keeps where it was opened below its
+ * preopened directory and checks that location again on every use.
+ *
  * @see <a href="https://github.com/WebAssembly/WASI/blob/v0.2.12/proposals/filesystem/wit/types.wit">wasi:filesystem/types</a>
  */
 public abstract class HostDescriptor implements Descriptor {
 
+    private final Path root;
     private final Path path;
     private final DescriptorFlags flags;
     private final HostPoll poll;
+    private final Object fileKey;
 
     /**
+     * @param root the preopened directory {@code path} was reached from
      * @param path the host object this descriptor names
      * @param flags the access the guest is granted to it
      * @param poll the poll the streams this opens subscribe through
      */
-    protected HostDescriptor(Path path, DescriptorFlags flags, HostPoll poll) {
+    protected HostDescriptor(Path root, Path path, DescriptorFlags flags, HostPoll poll) {
+        this.root = Objects.requireNonNull(root, "root");
         this.path = Objects.requireNonNull(path, "path");
         this.flags = Objects.requireNonNull(flags, "flags");
         this.poll = Objects.requireNonNull(poll, "poll");
+        this.fileKey = Metadata.fileKey(path);
     }
 
     HostPoll poll() {
         return poll;
     }
 
-    /** The host object this descriptor names. */
+    Path root() {
+        return root;
+    }
+
+    /** What identifies the object on its file system, or {@code null} where the host has none. */
+    Object fileKey() {
+        return fileKey;
+    }
+
+    /** The object as it was opened, by its file key or else by the path it was opened at. */
+    Object identity() {
+        return fileKey == null ? path : fileKey;
+    }
+
+    /**
+     * The host object this descriptor names, once its location is checked again.
+     *
+     * @throws ErrorCodeException {@code no-entry} once something else has taken its place
+     */
     public Path path() {
-        return path;
+        return PathResolver.descend(root, path);
     }
 
     @Override
@@ -63,24 +87,21 @@ public abstract class HostDescriptor implements Descriptor {
 
     @Override
     public DescriptorStat stat() {
-        return Metadata.stat(path);
+        return Metadata.stat(path());
     }
 
     @Override
     public MetadataHashValue metadataHash() {
-        return Metadata.hash(path);
+        return Metadata.hash(path());
     }
 
+    /** Compares the objects as they were opened, so renaming either does not change the answer. */
     @Override
     public Boolean isSameObject(Descriptor other) {
         if (!(other instanceof HostDescriptor)) {
             return false;
         }
-        try {
-            return Files.isSameFile(path, ((HostDescriptor) other).path);
-        } catch (IOException e) {
-            throw ErrorCodes.failed(e);
-        }
+        return identity().equals(((HostDescriptor) other).identity());
     }
 
     /** Succeeds with no effect, as syncing a descriptor not open for writing does. */

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -21,6 +22,11 @@ import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.ErrorCodeException;
  * the host file system. The resolved path therefore holds no symbolic link below the base
  * directory, except a final one left unfollowed.
  *
+ * <p>The host operation that follows a resolution is a separate step, which Java offers no way
+ * to bind to the directories checked here. Something else that swaps a component for a symbolic
+ * link in between can therefore lead that operation outside. A preopened directory must only
+ * change through its guest, or live on a file system nothing else can reach.
+ *
  * @see <a href="https://github.com/WebAssembly/wasi-filesystem/blob/main/path-resolution.md">WASI filesystem path resolution</a>
  */
 final class PathResolver {
@@ -28,7 +34,36 @@ final class PathResolver {
     /** The symbolic link expansions one resolution may take, which is what Linux allows. */
     static final int MAX_SYMLINK_EXPANSIONS = 40;
 
+    private static final LinkOption NOFOLLOW = LinkOption.NOFOLLOW_LINKS;
+
     private PathResolver() {}
+
+    /**
+     * {@code path}, where a descriptor was opened below {@code root}, once each component between
+     * them is checked to still be a directory and the last one not to be a symbolic link.
+     *
+     * @throws ErrorCodeException {@code no-entry} once something else has taken the place of a
+     *     component, such as a symbolic link that would lead outside
+     */
+    static Path descend(Path root, Path path) {
+        Path relative = root.relativize(path);
+        if (relative.toString().isEmpty()) {
+            return path;
+        }
+        Path current = root;
+        int count = relative.getNameCount();
+        for (int i = 0; i < count; i++) {
+            current = current.resolve(relative.getName(i));
+            boolean moved =
+                    i == count - 1
+                            ? Files.isSymbolicLink(current)
+                            : !Files.isDirectory(current, NOFOLLOW);
+            if (moved) {
+                throw ErrorCodes.error(ErrorCode.NO_ENTRY);
+            }
+        }
+        return path;
+    }
 
     /**
      * The host path {@code path} names within {@code directory}.

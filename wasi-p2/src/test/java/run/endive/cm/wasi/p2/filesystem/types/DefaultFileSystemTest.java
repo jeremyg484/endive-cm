@@ -1,0 +1,115 @@
+package run.endive.cm.wasi.p2.filesystem.types;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.math.BigInteger;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.api.io.TempDir;
+import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.Descriptor;
+import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.DescriptorFlags;
+import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.ErrorCode;
+import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.ErrorCodeException;
+import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.OpenFlags;
+import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.PathFlags;
+import run.endive.cm.wasi.p2.io.poll.HostPoll;
+
+/**
+ * A sandbox on the host's own file system, whose errors and links behave as the in-memory one
+ * cannot show. {@code secret} sits beside the sandbox, outside it.
+ */
+class DefaultFileSystemTest {
+
+    private static final PathFlags NOFOLLOW = PathFlags.of();
+    private static final OpenFlags EXISTING = OpenFlags.of();
+    private static final DescriptorFlags READ = DescriptorFlags.of(DescriptorFlags.Flag.READ);
+    private static final DescriptorFlags READ_WRITE =
+            DescriptorFlags.of(DescriptorFlags.Flag.READ, DescriptorFlags.Flag.WRITE);
+    private static final DescriptorFlags MUTATE =
+            DescriptorFlags.of(DescriptorFlags.Flag.READ, DescriptorFlags.Flag.MUTATE_DIRECTORY);
+
+    @TempDir Path temp;
+    private Path root;
+    private HostDirectory sandbox;
+
+    @BeforeEach
+    void createSandbox() throws IOException {
+        root = Files.createDirectory(temp.resolve("sandbox"));
+        Path secret = Files.createDirectory(temp.resolve("secret"));
+        Files.write(secret.resolve("passwd"), "TOPSECRET".getBytes(UTF_8));
+        sandbox = new HostDirectory(root, MUTATE, new HostPoll());
+    }
+
+    /** An open directory swapped for a link to the outside no longer leads anywhere. */
+    @Test
+    void aDirectoryReplacedByAnEscapingLinkIsNotFollowed() {
+        sandbox.createDirectoryAt("d");
+        Descriptor d = sandbox.openAt(NOFOLLOW, "d", EXISTING, READ);
+        sandbox.removeDirectoryAt("d");
+        sandbox.symlinkAt("../secret", "d");
+
+        assertFails(ErrorCode.NO_ENTRY, () -> d.openAt(NOFOLLOW, "passwd", EXISTING, READ));
+        assertFails(ErrorCode.NO_ENTRY, d::readDirectory);
+        assertFails(ErrorCode.NO_ENTRY, d::stat);
+    }
+
+    /** An open file keeps describing itself after it is renamed. */
+    @Test
+    void anOpenFileIsDescribedAfterItIsRenamed() {
+        Descriptor file =
+                sandbox.openAt(NOFOLLOW, "a.txt", OpenFlags.of(OpenFlags.Flag.CREATE), READ_WRITE);
+        file.write("hello".getBytes(UTF_8), BigInteger.ZERO);
+
+        sandbox.renameAt("a.txt", sandbox, "b.txt");
+
+        assertEquals(BigInteger.valueOf(5), file.stat().size());
+        file.metadataHash();
+    }
+
+    /** A new file under the old name is not mistaken for the one still open. */
+    @Test
+    void aFileReplacedUnderItsNameIsNotTheOpenOne() throws IOException {
+        Descriptor file =
+                sandbox.openAt(NOFOLLOW, "a.txt", OpenFlags.of(OpenFlags.Flag.CREATE), READ_WRITE);
+        file.write("hello".getBytes(UTF_8), BigInteger.ZERO);
+        sandbox.unlinkFileAt("a.txt");
+        Files.write(root.resolve("a.txt"), "a much longer replacement".getBytes(UTF_8));
+
+        assertEquals(BigInteger.valueOf(5), file.stat().size());
+        assertEquals(BigInteger.ZERO, file.stat().linkCount());
+        assertFalse(file.isSameObject(sandbox.openAt(NOFOLLOW, "a.txt", EXISTING, READ)));
+    }
+
+    @Test
+    void descriptorsForOneFileStayTheSameObjectAfterARename() {
+        sandbox.openAt(NOFOLLOW, "e", OpenFlags.of(OpenFlags.Flag.CREATE), READ_WRITE);
+        Descriptor first = sandbox.openAt(NOFOLLOW, "e", EXISTING, READ);
+        Descriptor second = sandbox.openAt(NOFOLLOW, "e", EXISTING, READ);
+
+        sandbox.renameAt("e", sandbox, "f");
+
+        assertTrue(first.isSameObject(second));
+    }
+
+    /** Some hosts link what a symbolic link points to, so linking the link itself is refused. */
+    @Test
+    void linkingASymbolicLinkIsUnsupported() {
+        sandbox.symlinkAt("../secret/passwd", "s");
+
+        assertFails(ErrorCode.UNSUPPORTED, () -> sandbox.linkAt(NOFOLLOW, "s", sandbox, "h"));
+        assertFalse(Files.exists(root.resolve("h")));
+    }
+
+    private static void assertFails(ErrorCode expected, Executable operation) {
+        ErrorCodeException e = assertThrows(ErrorCodeException.class, operation);
+        assertEquals(expected, e.error());
+    }
+}

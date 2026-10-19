@@ -36,12 +36,18 @@ public final class HostDirectory extends HostDescriptor {
     private static final LinkOption NOFOLLOW = LinkOption.NOFOLLOW_LINKS;
 
     /**
+     * A preopened directory, the bound no path resolved through it or its descendants leaves.
+     *
      * @param path the host directory this descriptor names
      * @param flags the access the guest is granted to it
      * @param poll the poll the streams of files opened through it subscribe through
      */
     public HostDirectory(Path path, DescriptorFlags flags, HostPoll poll) {
-        super(path, flags, poll);
+        this(path, path, flags, poll);
+    }
+
+    private HostDirectory(Path root, Path path, DescriptorFlags flags, HostPoll poll) {
+        super(root, path, flags, poll);
     }
 
     @Override
@@ -121,6 +127,10 @@ public final class HostDirectory extends HostDescriptor {
         if (Files.isDirectory(existing, NOFOLLOW)) {
             throw ErrorCodes.error(ErrorCode.NOT_PERMITTED);
         }
+        // Some hosts link what a symbolic link points to, which could be outside.
+        if (Files.isSymbolicLink(existing)) {
+            throw ErrorCodes.error(ErrorCode.UNSUPPORTED);
+        }
         try {
             Files.createLink(link, existing);
         } catch (IOException | UnsupportedOperationException e) {
@@ -161,13 +171,13 @@ public final class HostDirectory extends HostDescriptor {
             if (flags.has(DescriptorFlags.Flag.WRITE) || create || truncate) {
                 throw ErrorCodes.error(ErrorCode.IS_DIRECTORY);
             }
-            return new HostDirectory(target, flags, poll());
+            return new HostDirectory(root(), target, flags, poll());
         }
         if (directoryOnly) {
             throw ErrorCodes.error(
                     Files.exists(target, NOFOLLOW) ? ErrorCode.NOT_DIRECTORY : ErrorCode.NO_ENTRY);
         }
-        return HostFile.open(target, fileFlags(flags), poll(), create, exclusive, truncate);
+        return HostFile.open(root(), target, fileFlags(flags), poll(), create, exclusive, truncate);
     }
 
     /** What a guest asked for, apart from {@code mutate-directory}, which only a directory has. */

@@ -143,6 +143,10 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
          * Grants the guest {@code host} as a preopened directory named {@code guest}. Any
          * {@link java.nio.file.FileSystem} works, so an in-memory one makes a sandbox that touches
          * no host files.
+         *
+         * <p>The guest cannot reach outside {@code host} by itself. Java checks a path and then
+         * acts on it in separate steps, though, so nothing else may change {@code host} while an
+         * untrusted guest uses it.
          */
         public Builder withDirectory(String guest, Path host) {
             directories.put(

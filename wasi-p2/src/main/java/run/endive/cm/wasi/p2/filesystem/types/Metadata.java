@@ -55,6 +55,24 @@ final class Metadata {
                 datetime(statusChangeTime(path)));
     }
 
+    /**
+     * The type and size of an open file that no longer has the name it was opened under, which is
+     * all the host can still tell about it.
+     */
+    static DescriptorStat detached(DescriptorType type, long size) {
+        return new DescriptorStat(
+                type, BigInteger.ZERO, BigInteger.valueOf(size), null, null, null);
+    }
+
+    /** What identifies the object {@code path} names, or {@code null} where the host has none. */
+    static Object fileKey(Path path) {
+        try {
+            return Files.readAttributes(path, BasicFileAttributes.class, NOFOLLOW).fileKey();
+        } catch (IOException | UnsupportedOperationException e) {
+            return null;
+        }
+    }
+
     /** The type of the object {@code path} names. */
     static DescriptorType type(Path path) {
         return type(attributes(path));
@@ -93,6 +111,18 @@ final class Metadata {
      */
     static MetadataHashValue hash(Path path) {
         BasicFileAttributes attributes = attributes(path);
+        Object fileKey = attributes.fileKey();
+        return hash(
+                fileKey == null ? path.toAbsolutePath() : fileKey,
+                attributes.size(),
+                attributes.lastModifiedTime());
+    }
+
+    /**
+     * A hash of an object's identity, size and last modification, which is {@code null} when it
+     * is not known.
+     */
+    static MetadataHashValue hash(Object identity, long size, FileTime modifiedTime) {
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
@@ -100,14 +130,11 @@ final class Metadata {
             throw new IllegalStateException("every Java platform provides SHA-256", e);
         }
         digest.update(SECRET);
-        Object fileKey = attributes.fileKey();
-        digest.update(
-                String.valueOf(fileKey == null ? path.toAbsolutePath() : fileKey)
-                        .getBytes(StandardCharsets.UTF_8));
-        Instant modified = attributes.lastModifiedTime().toInstant();
+        digest.update(String.valueOf(identity).getBytes(StandardCharsets.UTF_8));
+        Instant modified = modifiedTime == null ? Instant.EPOCH : modifiedTime.toInstant();
         digest.update(
                 ByteBuffer.allocate(Long.BYTES * 3)
-                        .putLong(attributes.size())
+                        .putLong(size)
                         .putLong(modified.getEpochSecond())
                         .putLong(modified.getNano())
                         .array());

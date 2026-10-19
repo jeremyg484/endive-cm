@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
@@ -14,8 +15,11 @@ import java.util.Set;
 import run.endive.cm.runtime.Tuple2;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.Advice;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.DescriptorFlags;
+import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.DescriptorStat;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.DescriptorType;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.ErrorCode;
+import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.ErrorCodeException;
+import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.MetadataHashValue;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.NewTimestamp;
 import run.endive.cm.wasi.p2.bindings.wasi.io.streams.InputStream;
 import run.endive.cm.wasi.p2.bindings.wasi.io.streams.OutputStream;
@@ -26,6 +30,9 @@ import run.endive.cm.wasi.p2.io.poll.HostPoll;
  *
  * <p>Reading needs {@code read} and anything changing the file needs {@code write}. Either fails
  * with {@code bad-descriptor} without the flag it needs.
+ *
+ * <p>Reads and writes go through the open file. Once it no longer has the name it was opened
+ * under, its metadata can only be described in part, and its times can no longer be set.
  *
  * @see <a href="https://github.com/WebAssembly/WASI/blob/v0.2.12/proposals/filesystem/wit/types.wit">wasi:filesystem/types</a>
  */
@@ -38,8 +45,9 @@ public final class HostFile extends HostDescriptor {
     private final FileChannel channel;
     private boolean dropped;
 
-    private HostFile(Path path, DescriptorFlags flags, HostPoll poll, FileChannel channel) {
-        super(path, flags, poll);
+    private HostFile(
+            Path root, Path path, DescriptorFlags flags, HostPoll poll, FileChannel channel) {
+        super(root, path, flags, poll);
         this.shared = new SharedChannel(channel);
         this.channel = channel;
     }
@@ -52,6 +60,24 @@ public final class HostFile extends HostDescriptor {
      * @param truncate whether an existing file is emptied
      */
     static HostFile open(
+            Path path,
+            DescriptorFlags flags,
+            HostPoll poll,
+            boolean create,
+            boolean exclusive,
+            boolean truncate) {
+        return open(path.getParent(), path, flags, poll, create, exclusive, truncate);
+    }
+
+    /**
+     * Opens the file {@code path} names below the preopened directory {@code root}.
+     *
+     * @param create whether a missing file is created
+     * @param exclusive whether an existing file fails with {@code exist} instead
+     * @param truncate whether an existing file is emptied
+     */
+    static HostFile open(
+            Path root,
             Path path,
             DescriptorFlags flags,
             HostPoll poll,
@@ -77,7 +103,7 @@ public final class HostFile extends HostDescriptor {
             options.add(StandardOpenOption.TRUNCATE_EXISTING);
         }
         try {
-            return new HostFile(path, flags, poll, FileChannel.open(path, options));
+            return new HostFile(root, path, flags, poll, FileChannel.open(path, options));
         } catch (IOException | UnsupportedOperationException e) {
             throw ErrorCodes.failed(e);
         }
@@ -158,9 +184,34 @@ public final class HostFile extends HostDescriptor {
     }
 
     @Override
+    public DescriptorStat stat() {
+        Path current = currentPath();
+        return current == null
+                ? Metadata.detached(DescriptorType.REGULAR_FILE, size())
+                : Metadata.stat(current);
+    }
+
+    @Override
+    public MetadataHashValue metadataHash() {
+        Path current = currentPath();
+        if (current != null) {
+            return Metadata.hash(current);
+        }
+        return Metadata.hash(identity(), size(), null);
+    }
+
+    /**
+     * Sets the times through the name the file was opened under, which fails with {@code
+     * no-entry} once the file no longer has it.
+     */
+    @Override
     public void setTimes(NewTimestamp dataAccessTimestamp, NewTimestamp dataModificationTimestamp) {
         require(DescriptorFlags.Flag.WRITE);
-        Metadata.setTimes(path(), dataAccessTimestamp, dataModificationTimestamp);
+        Path current = currentPath();
+        if (current == null) {
+            throw ErrorCodes.error(ErrorCode.NO_ENTRY);
+        }
+        Metadata.setTimes(current, dataAccessTimestamp, dataModificationTimestamp);
     }
 
     /** Accepts any advice and acts on none, which the spec allows. */
@@ -219,6 +270,28 @@ public final class HostFile extends HostDescriptor {
         if (!dropped) {
             dropped = true;
             shared.release();
+        }
+    }
+
+    /** The name this file still has, or {@code null} once it was renamed, removed or replaced. */
+    private Path currentPath() {
+        Path current;
+        try {
+            current = path();
+        } catch (ErrorCodeException e) {
+            return null;
+        }
+        if (fileKey() == null) {
+            return Files.exists(current, LinkOption.NOFOLLOW_LINKS) ? current : null;
+        }
+        return fileKey().equals(Metadata.fileKey(current)) ? current : null;
+    }
+
+    private long size() {
+        try {
+            return channel.size();
+        } catch (IOException e) {
+            throw ErrorCodes.failed(e);
         }
     }
 
