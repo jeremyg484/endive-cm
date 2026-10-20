@@ -193,6 +193,22 @@ class DefaultFileSystemTest {
         assertFails(ErrorCode.BAD_DESCRIPTOR, () -> file.read(BigInteger.ONE, BigInteger.ZERO));
     }
 
+    /** Once the host is closed, a guest still holding a directory opens nothing more. */
+    @Test
+    void aClosedHostOpensNoMoreFiles() {
+        Descriptor data;
+        try (var wasi = WasiPreview2.builder().withDirectory("data", root).build()) {
+            data = wasi.preopens().getDirectories().get(0).f0();
+        }
+
+        assertFails(
+                ErrorCode.BAD_DESCRIPTOR,
+                () ->
+                        data.openAt(
+                                NOFOLLOW, "late", OpenFlags.of(OpenFlags.Flag.CREATE), READ_WRITE));
+        assertFalse(Files.exists(root.resolve("late")));
+    }
+
     /** A named pipe is read and written without offsets, and opening one would block. */
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})

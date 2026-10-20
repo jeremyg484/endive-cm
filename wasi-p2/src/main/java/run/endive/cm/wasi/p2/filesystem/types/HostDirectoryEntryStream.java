@@ -15,8 +15,9 @@ final class HostDirectoryEntryStream implements DirectoryEntryStream {
 
     private final Iterator<DirectoryEntry> entries;
 
+    /** Takes over {@code entries} without copying them. */
     HostDirectoryEntryStream(List<DirectoryEntry> entries) {
-        this.entries = List.copyOf(entries).iterator();
+        this.entries = entries.iterator();
     }
 
     /** The next entry, or {@code null} once every entry has been read. */

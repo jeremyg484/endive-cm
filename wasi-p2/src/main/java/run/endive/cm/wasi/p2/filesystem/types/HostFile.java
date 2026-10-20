@@ -95,6 +95,7 @@ public final class HostFile extends HostDescriptor {
             boolean create,
             boolean exclusive,
             boolean truncate) {
+        files.requireOpen();
         Set<OpenOption> options = new HashSet<>();
         options.add(LinkOption.NOFOLLOW_LINKS);
         if (flags.has(DescriptorFlags.Flag.READ)) {

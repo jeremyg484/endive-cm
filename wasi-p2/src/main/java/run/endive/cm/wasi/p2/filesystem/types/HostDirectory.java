@@ -42,7 +42,7 @@ public final class HostDirectory extends HostDescriptor {
      * @param flags the access the guest is granted to it
      * @param poll the poll the streams of files opened through it subscribe through
      */
-    public HostDirectory(Path path, DescriptorFlags flags, HostPoll poll) {
+    HostDirectory(Path path, DescriptorFlags flags, HostPoll poll) {
         this(path, flags, poll, new OpenFiles());
     }
 

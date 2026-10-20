@@ -28,7 +28,7 @@ public class HostPreopens implements Host {
      * @param directories each host directory, keyed by the name the guest sees it under
      * @param poll the poll file streams subscribe through
      */
-    public HostPreopens(Map<String, Path> directories, HostPoll poll) {
+    HostPreopens(Map<String, Path> directories, HostPoll poll) {
         this(directories, poll, new OpenFiles());
     }
 
