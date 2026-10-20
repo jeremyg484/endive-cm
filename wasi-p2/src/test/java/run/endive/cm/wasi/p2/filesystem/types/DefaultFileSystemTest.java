@@ -230,6 +230,25 @@ class DefaultFileSystemTest {
         assertFalse(Files.exists(root.resolve("target")));
     }
 
+    /** A file asked to be written synchronously opens with the host doing so, and says it does. */
+    @Test
+    void theSyncFlagsAreHonored() {
+        DescriptorFlags synced =
+                DescriptorFlags.of(
+                        DescriptorFlags.Flag.READ,
+                        DescriptorFlags.Flag.WRITE,
+                        DescriptorFlags.Flag.FILE_INTEGRITY_SYNC,
+                        DescriptorFlags.Flag.DATA_INTEGRITY_SYNC,
+                        DescriptorFlags.Flag.REQUESTED_WRITE_SYNC);
+
+        Descriptor file =
+                sandbox.openAt(NOFOLLOW, "journal", OpenFlags.of(OpenFlags.Flag.CREATE), synced);
+        file.write("entry".getBytes(UTF_8), BigInteger.ZERO);
+
+        assertEquals(synced, file.getFlags());
+        assertEquals(BigInteger.valueOf(5), file.stat().size());
+    }
+
     private static void assertFails(ErrorCode expected, Executable operation) {
         ErrorCodeException e = assertThrows(ErrorCodeException.class, operation);
         assertEquals(expected, e.error());

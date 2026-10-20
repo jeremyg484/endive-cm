@@ -108,6 +108,13 @@ public final class HostFile extends HostDescriptor {
         if (truncate) {
             options.add(StandardOpenOption.TRUNCATE_EXISTING);
         }
+        // requested-write-sync needs nothing more, as reads follow writes that are already synced.
+        if (flags.has(DescriptorFlags.Flag.FILE_INTEGRITY_SYNC)) {
+            options.add(StandardOpenOption.SYNC);
+        }
+        if (flags.has(DescriptorFlags.Flag.DATA_INTEGRITY_SYNC)) {
+            options.add(StandardOpenOption.DSYNC);
+        }
         try {
             return new HostFile(root, path, flags, poll, files, FileChannel.open(path, options));
         } catch (IOException | UnsupportedOperationException e) {
