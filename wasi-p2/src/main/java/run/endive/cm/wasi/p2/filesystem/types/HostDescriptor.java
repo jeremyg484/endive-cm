@@ -74,9 +74,9 @@ public abstract class HostDescriptor implements Descriptor {
         return fileKey;
     }
 
-    /** The object as it was opened, by its file key or else by the path it was opened at. */
+    /** The object as it was opened, by its file key, or by its absolute path when unreadable. */
     Object identity() {
-        return fileKey == null ? path : fileKey;
+        return fileKey == null ? path.toAbsolutePath() : fileKey;
     }
 
     /**

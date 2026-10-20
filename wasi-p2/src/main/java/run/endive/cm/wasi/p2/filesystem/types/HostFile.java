@@ -4,11 +4,12 @@ import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -43,6 +44,7 @@ public final class HostFile extends HostDescriptor {
 
     private final SharedChannel shared;
     private boolean dropped;
+    private volatile FileTime lastModified;
 
     private HostFile(
             Path root,
@@ -198,19 +200,20 @@ public final class HostFile extends HostDescriptor {
 
     @Override
     public DescriptorStat stat() {
-        Path current = currentPath();
-        return current == null
+        BasicFileAttributes attributes = currentAttributes();
+        return attributes == null
                 ? Metadata.detached(DescriptorType.REGULAR_FILE, size())
-                : Metadata.stat(current);
+                : Metadata.stat(path(), attributes);
     }
 
+    /**
+     * A hash of the file as it was opened, so renaming it changes nothing. Once it no longer has
+     * its name, the last modification time seen through it stands in.
+     */
     @Override
     public MetadataHashValue metadataHash() {
-        Path current = currentPath();
-        if (current != null) {
-            return Metadata.hash(current);
-        }
-        return Metadata.hash(identity(), size(), null);
+        currentAttributes();
+        return Metadata.hash(identity(), size(), lastModified);
     }
 
     /**
@@ -220,11 +223,10 @@ public final class HostFile extends HostDescriptor {
     @Override
     public void setTimes(NewTimestamp dataAccessTimestamp, NewTimestamp dataModificationTimestamp) {
         require(DescriptorFlags.Flag.WRITE);
-        Path current = currentPath();
-        if (current == null) {
+        if (currentAttributes() == null) {
             throw ErrorCodes.error(ErrorCode.NO_ENTRY);
         }
-        Metadata.setTimes(current, dataAccessTimestamp, dataModificationTimestamp);
+        Metadata.setTimes(path(), dataAccessTimestamp, dataModificationTimestamp);
     }
 
     /** Accepts any advice and acts on none, which the spec allows. */
@@ -286,18 +288,24 @@ public final class HostFile extends HostDescriptor {
         }
     }
 
-    /** The name this file still has, or {@code null} once it was renamed, removed or replaced. */
-    private Path currentPath() {
+    /**
+     * The attributes of this file under the name it was opened with, or {@code null} once it was
+     * renamed, removed or replaced.
+     */
+    private BasicFileAttributes currentAttributes() {
+        BasicFileAttributes attributes;
         Path current;
         try {
             current = path();
+            attributes = Metadata.attributesOrNull(current);
         } catch (ErrorCodeException e) {
             return null;
         }
-        if (fileKey() == null) {
-            return Files.exists(current, LinkOption.NOFOLLOW_LINKS) ? current : null;
+        if (attributes == null || !identity().equals(Metadata.identity(current, attributes))) {
+            return null;
         }
-        return fileKey().equals(Metadata.fileKey(current)) ? current : null;
+        lastModified = attributes.lastModifiedTime();
+        return attributes;
     }
 
     private long size() {

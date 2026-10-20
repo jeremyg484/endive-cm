@@ -47,7 +47,11 @@ final class Metadata {
 
     /** The attributes of {@code path}. */
     static DescriptorStat stat(Path path) {
-        BasicFileAttributes attributes = attributes(path);
+        return stat(path, attributes(path));
+    }
+
+    /** The attributes of {@code path}, whose basic ones are already read. */
+    static DescriptorStat stat(Path path, BasicFileAttributes attributes) {
         Map<String, Object> unix = unixAttributes(path);
         Object links = unix.get("nlink");
         Object changed = unix.get("ctime");
@@ -80,13 +84,28 @@ final class Metadata {
                 type, BigInteger.ZERO, BigInteger.valueOf(size), null, null, null);
     }
 
-    /** What identifies the object {@code path} names, or {@code null} where the host has none. */
+    /**
+     * What identifies the object {@code path} names, or {@code null} when it cannot be read.
+     *
+     * @see #identity(Path, BasicFileAttributes)
+     */
     static Object fileKey(Path path) {
         try {
-            return Files.readAttributes(path, BasicFileAttributes.class, NOFOLLOW).fileKey();
+            return identity(path, Files.readAttributes(path, BasicFileAttributes.class, NOFOLLOW));
         } catch (IOException | UnsupportedOperationException e) {
             return null;
         }
+    }
+
+    /**
+     * What identifies the object {@code path} names. Where the host has no file key, its absolute
+     * path and creation time stand in, so a replacement under the same name differs.
+     */
+    static Object identity(Path path, BasicFileAttributes attributes) {
+        Object fileKey = attributes.fileKey();
+        return fileKey == null
+                ? Arrays.asList(path.toAbsolutePath(), attributes.creationTime())
+                : fileKey;
     }
 
     /** The type of the object {@code path} names. */
@@ -126,11 +145,7 @@ final class Metadata {
      */
     static MetadataHashValue hash(Path path) {
         BasicFileAttributes attributes = attributes(path);
-        Object fileKey = attributes.fileKey();
-        return hash(
-                fileKey == null ? path.toAbsolutePath() : fileKey,
-                attributes.size(),
-                attributes.lastModifiedTime());
+        return hash(identity(path, attributes), attributes.size(), attributes.lastModifiedTime());
     }
 
     /**

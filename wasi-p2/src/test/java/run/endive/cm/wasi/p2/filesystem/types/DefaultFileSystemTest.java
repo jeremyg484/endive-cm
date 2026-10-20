@@ -3,6 +3,7 @@ package run.endive.cm.wasi.p2.filesystem.types;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -22,6 +23,7 @@ import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.Descriptor;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.DescriptorFlags;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.ErrorCode;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.ErrorCodeException;
+import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.MetadataHashValue;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.OpenFlags;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.PathFlags;
 import run.endive.cm.wasi.p2.io.poll.HostPoll;
@@ -247,6 +249,21 @@ class DefaultFileSystemTest {
 
         assertEquals(synced, file.getFlags());
         assertEquals(BigInteger.valueOf(5), file.stat().size());
+    }
+
+    /** Renaming an open file leaves its hash as it was, and changing it does not. */
+    @Test
+    void theHashOfAnOpenFileSurvivesARename() {
+        Descriptor file =
+                sandbox.openAt(NOFOLLOW, "a.txt", OpenFlags.of(OpenFlags.Flag.CREATE), READ_WRITE);
+        file.write("hello".getBytes(UTF_8), BigInteger.ZERO);
+        MetadataHashValue before = file.metadataHash();
+
+        sandbox.renameAt("a.txt", sandbox, "b.txt");
+
+        assertEquals(before, file.metadataHash());
+        file.write("more".getBytes(UTF_8), BigInteger.valueOf(5));
+        assertNotEquals(before, file.metadataHash());
     }
 
     private static void assertFails(ErrorCode expected, Executable operation) {
