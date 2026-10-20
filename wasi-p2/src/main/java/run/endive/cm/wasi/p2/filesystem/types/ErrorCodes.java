@@ -24,8 +24,10 @@ import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.ErrorCodeException;
  * The ways a filesystem operation fails, as the exception the bindings turn into an {@code
  * error-code}.
  *
- * <p>The JDK reports many failures only as a {@link FileSystemException} carrying the host's
- * message, so the messages the C libraries of Linux and macOS give in English are recognized too.
+ * <p>The JDK reports many failures only through the host's message, in a {@link
+ * FileSystemException} or in the plain {@link IOException} a file channel throws. The messages the
+ * C libraries of Linux and macOS give in English are recognized, while a JVM running under another
+ * locale reports those failures as {@code io}.
  *
  * @see <a href="https://github.com/WebAssembly/WASI/blob/v0.2.12/proposals/filesystem/wit/types.wit">wasi:filesystem/types</a>
  */
@@ -145,14 +147,13 @@ public final class ErrorCodes {
                 || cause instanceof NonWritableChannelException) {
             return ErrorCode.BAD_DESCRIPTOR;
         }
-        if (cause instanceof FileSystemException) {
-            ErrorCode code = reasonCode(((FileSystemException) cause).getReason());
-            if (code != null) {
-                return code;
-            }
-        }
         if (cause instanceof IOException) {
-            return ErrorCode.IO;
+            String reason =
+                    cause instanceof FileSystemException
+                            ? ((FileSystemException) cause).getReason()
+                            : cause.getMessage();
+            ErrorCode code = reasonCode(reason);
+            return code == null ? ErrorCode.IO : code;
         }
         return null;
     }

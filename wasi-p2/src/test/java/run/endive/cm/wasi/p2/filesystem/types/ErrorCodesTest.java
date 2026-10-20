@@ -52,6 +52,17 @@ class ErrorCodesTest {
                 ErrorCodes.codeOf(new AtomicMoveNotSupportedException("a", "b", "other mount")));
     }
 
+    /** A file channel reports a failed read, write or truncation as a plain IOException. */
+    @Test
+    void aChannelMessageHasItsCode() {
+        assertEquals(
+                ErrorCode.INSUFFICIENT_SPACE,
+                ErrorCodes.codeOf(new IOException("No space left on device")));
+        assertEquals(ErrorCode.QUOTA, ErrorCodes.codeOf(new IOException("Disk quota exceeded")));
+        assertEquals(
+                ErrorCode.FILE_TOO_LARGE, ErrorCodes.codeOf(new IOException("File too large")));
+    }
+
     @Test
     void aWrappedFailureHasTheCodeOfItsCause() {
         assertEquals(
