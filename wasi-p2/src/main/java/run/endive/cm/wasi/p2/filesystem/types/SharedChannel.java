@@ -15,12 +15,23 @@ final class SharedChannel {
 
     private final FileChannel channel;
     private final OpenFiles files;
+    private final boolean appending;
     private final AtomicInteger holders = new AtomicInteger(1);
 
     /** A channel held by its first holder, which {@code files} closes if nothing else does. */
     SharedChannel(FileChannel channel, OpenFiles files) {
+        this(channel, files, false);
+    }
+
+    /**
+     * A channel held by its first holder, which {@code files} closes if nothing else does.
+     *
+     * @param appending whether the channel was opened to append
+     */
+    SharedChannel(FileChannel channel, OpenFiles files, boolean appending) {
         this.channel = channel;
         this.files = files;
+        this.appending = appending;
         files.add(this);
     }
 
@@ -32,6 +43,20 @@ final class SharedChannel {
     void writeFully(ByteBuffer contents, long position) throws IOException {
         while (contents.hasRemaining()) {
             channel.write(contents, position + contents.position());
+        }
+    }
+
+    /**
+     * Writes all of {@code contents} at the end of the file. A channel opened to append puts each
+     * write there whoever else writes the file, and any other first reads where the end is.
+     */
+    void append(ByteBuffer contents) throws IOException {
+        if (!appending) {
+            writeFully(contents, channel.size());
+            return;
+        }
+        while (contents.hasRemaining()) {
+            channel.write(contents);
         }
     }
 

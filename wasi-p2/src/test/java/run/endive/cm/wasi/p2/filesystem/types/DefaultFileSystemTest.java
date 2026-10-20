@@ -26,6 +26,7 @@ import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.ErrorCodeException;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.MetadataHashValue;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.OpenFlags;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.PathFlags;
+import run.endive.cm.wasi.p2.bindings.wasi.io.streams.OutputStream;
 import run.endive.cm.wasi.p2.io.poll.HostPoll;
 
 /**
@@ -264,6 +265,46 @@ class DefaultFileSystemTest {
         assertEquals(before, file.metadataHash());
         file.write("more".getBytes(UTF_8), BigInteger.valueOf(5));
         assertNotEquals(before, file.metadataHash());
+    }
+
+    /** A file sized zero but holding data, as under {@code /proc}, is read all the same. */
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void aFileSizedZeroIsStillRead() throws IOException {
+        HostDirectory proc =
+                new HostDirectory(Path.of("/proc/self").toRealPath(), READ, new HostPoll());
+        Descriptor status = proc.openAt(NOFOLLOW, "status", EXISTING, READ);
+
+        byte[] read = status.read(BigInteger.valueOf(4096), BigInteger.ZERO).f0();
+
+        assertTrue(new String(read, UTF_8).startsWith("Name:"));
+    }
+
+    /** Appends from two streams at once each land at the end, so neither overwrites the other. */
+    @Test
+    void appendsFromTwoStreamsAllLand() throws InterruptedException {
+        sandbox.openAt(NOFOLLOW, "log", OpenFlags.of(OpenFlags.Flag.CREATE), READ_WRITE);
+        int records = 500;
+        Thread[] writers = new Thread[2];
+        for (int w = 0; w < writers.length; w++) {
+            OutputStream log =
+                    sandbox.openAt(NOFOLLOW, "log", EXISTING, READ_WRITE).appendViaStream();
+            String name = String.valueOf((char) ('a' + w));
+            writers[w] =
+                    new Thread(
+                            () -> {
+                                for (int i = 0; i < records; i++) {
+                                    log.blockingWriteAndFlush(
+                                            String.format("%s%08d\n", name, i).getBytes(UTF_8));
+                                }
+                            });
+            writers[w].start();
+        }
+        for (Thread writer : writers) {
+            writer.join();
+        }
+
+        assertEquals(BigInteger.valueOf(2L * records * 10), sandbox.statAt(NOFOLLOW, "log").size());
     }
 
     private static void assertFails(ErrorCode expected, Executable operation) {

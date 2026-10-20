@@ -61,9 +61,12 @@ final class HostFileOutputStream extends HostOutputStream {
     protected void writeBytes(byte[] contents) {
         checkOpen();
         try {
-            long at = append ? file.channel().size() : position;
-            file.writeFully(ByteBuffer.wrap(contents), at);
-            position = at + contents.length;
+            if (append) {
+                file.append(ByteBuffer.wrap(contents));
+            } else {
+                file.writeFully(ByteBuffer.wrap(contents), position);
+                position += contents.length;
+            }
         } catch (IOException e) {
             closed = true;
             throw StreamErrors.failed(e);

@@ -42,6 +42,9 @@ public final class HostFile extends HostDescriptor {
     /** The most one {@code read} returns, so a guest asking for more cannot exhaust the heap. */
     static final int MAX_READ = 1 << 20;
 
+    /** How far a read tries past the size a file reports, which some files leave at zero. */
+    static final int MIN_ATTEMPT = 8 * 1024;
+
     private final SharedChannel shared;
     private boolean dropped;
     private volatile FileTime lastModified;
@@ -131,7 +134,8 @@ public final class HostFile extends HostDescriptor {
 
     /**
      * Up to {@code length} bytes from {@code offset}, and whether they reach the end of the file.
-     * No more than {@value #MAX_READ} bytes are returned by one call.
+     * No more than {@value #MAX_READ} bytes are returned by one call. A read goes past the size the
+     * file reports, so a file still growing or one sized zero, as under {@code /proc}, is read.
      *
      * @see <a href="https://github.com/WebAssembly/WASI/blob/v0.2.12/proposals/filesystem/wit/types.wit">wasi:filesystem/types, read</a>
      */
@@ -139,23 +143,24 @@ public final class HostFile extends HostDescriptor {
     public Tuple2<byte[], Boolean> read(BigInteger length, BigInteger offset) {
         require(DescriptorFlags.Flag.READ);
         try {
-            long size = shared.channel().size();
+            FileChannel channel = shared.channel();
+            long size = channel.size();
             long position = clamp(offset);
-            if (position >= size) {
-                return Tuple2.of(new byte[0], true);
+            int wanted = (int) Math.min(clamp(length), MAX_READ);
+            if (wanted == 0) {
+                return Tuple2.of(new byte[0], position >= size);
             }
-            int count = (int) Math.min(Math.min(clamp(length), size - position), MAX_READ);
+            int count = (int) Math.min(wanted, Math.max(size - position, MIN_ATTEMPT));
             ByteBuffer buffer = ByteBuffer.allocate(count);
-            while (buffer.hasRemaining()) {
-                if (shared.channel().read(buffer, position + buffer.position()) < 0) {
-                    break;
-                }
+            boolean end = false;
+            while (buffer.hasRemaining() && !end) {
+                end = channel.read(buffer, position + buffer.position()) < 0;
             }
             byte[] bytes =
                     buffer.position() == count
                             ? buffer.array()
                             : Arrays.copyOf(buffer.array(), buffer.position());
-            return Tuple2.of(bytes, position + bytes.length >= size);
+            return Tuple2.of(bytes, end || (size > 0 && position + bytes.length >= size));
         } catch (IOException e) {
             throw ErrorCodes.failed(e);
         }
@@ -269,14 +274,33 @@ public final class HostFile extends HostDescriptor {
 
     /**
      * A stream writing at the end of the file, which keeps the file open after this descriptor is
-     * dropped.
+     * dropped. It writes through a channel of its own opened to append, so each write lands at the
+     * end whoever else writes the file. Once the file no longer has its name, it writes at the
+     * size it reads first instead.
      *
      * @see <a href="https://github.com/WebAssembly/WASI/blob/v0.2.12/proposals/filesystem/wit/types.wit">wasi:filesystem/types, append-via-stream</a>
      */
     @Override
     public OutputStream appendViaStream() {
         require(DescriptorFlags.Flag.WRITE);
-        return HostFileOutputStream.appending(poll(), shared);
+        if (currentAttributes() == null) {
+            return HostFileOutputStream.appending(poll(), shared);
+        }
+        Path current = path();
+        FileChannel channel =
+                ErrorCodes.call(
+                        () ->
+                                FileChannel.open(
+                                        current,
+                                        StandardOpenOption.WRITE,
+                                        StandardOpenOption.APPEND,
+                                        LinkOption.NOFOLLOW_LINKS));
+        SharedChannel appender = new SharedChannel(channel, files(), true);
+        try {
+            return HostFileOutputStream.appending(poll(), appender);
+        } finally {
+            appender.release();
+        }
     }
 
     /** Lets go of the file, which closes once no stream opened from it is left either. */
