@@ -25,8 +25,8 @@ public class HostPreopens implements Host {
     /**
      * Each directory is granted with read and directory mutation access.
      *
-     * @param directories each host directory, keyed by the name the guest sees it under
-     * @param poll the poll file streams subscribe through
+     * @param directories each host directory, keyed by its name in the guest
+     * @param poll the poll behind the subscriptions of file streams
      */
     HostPreopens(Map<String, Path> directories, HostPoll poll) {
         this(directories, poll, new OpenFiles());
@@ -35,8 +35,8 @@ public class HostPreopens implements Host {
     /**
      * Each directory is granted with read and directory mutation access.
      *
-     * @param directories each host directory, keyed by the name the guest sees it under
-     * @param poll the poll file streams subscribe through
+     * @param directories each host directory, keyed by its name in the guest
+     * @param poll the poll behind the subscriptions of file streams
      * @param files where the files opened through the directories are tracked
      */
     public HostPreopens(Map<String, Path> directories, HostPoll poll, OpenFiles files) {
@@ -47,9 +47,9 @@ public class HostPreopens implements Host {
      * Each directory is granted with read access, and with directory mutation access unless it is
      * read-only.
      *
-     * @param directories each host directory, keyed by the name the guest sees it under
+     * @param directories each host directory, keyed by its name in the guest
      * @param readOnly the names of the directories the guest may only read
-     * @param poll the poll file streams subscribe through
+     * @param poll the poll behind the subscriptions of file streams
      * @param files where the files opened through the directories are tracked
      */
     public HostPreopens(

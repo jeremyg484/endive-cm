@@ -208,7 +208,7 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
             return grant(guest, host, true);
         }
 
-        private Builder grant(String guest, Path host, boolean readable) {
+        private Builder grant(String guest, Path host, boolean readOnly) {
             Objects.requireNonNull(guest, "guest");
             Objects.requireNonNull(host, "host");
             if (!Files.isDirectory(host)) {
@@ -218,8 +218,8 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
                 throw new IllegalArgumentException("a directory is already granted as " + guest);
             }
             directories.put(guest, host);
-            if (readable) {
-                readOnly.add(guest);
+            if (readOnly) {
+                this.readOnly.add(guest);
             }
             return this;
         }

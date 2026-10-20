@@ -41,10 +41,10 @@ public abstract class HostDescriptor implements Descriptor {
     private final Object fileKey;
 
     /**
-     * @param root the preopened directory {@code path} was reached from
+     * @param root the preopened directory holding {@code path}
      * @param path the host object this descriptor names
      * @param flags the access the guest is granted to it
-     * @param poll the poll the streams this opens subscribe through
+     * @param poll the poll behind the subscriptions of the streams this opens
      * @param files where the files opened through this descriptor are tracked
      */
     protected HostDescriptor(

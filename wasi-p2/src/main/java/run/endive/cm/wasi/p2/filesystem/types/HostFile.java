@@ -214,7 +214,7 @@ public final class HostFile extends HostDescriptor {
 
     /**
      * A hash of the file as it was opened, so renaming it changes nothing. Once it no longer has
-     * its name, the last modification time seen through it stands in.
+     * its name, the last modification time seen through it takes the place of the current one.
      */
     @Override
     public MetadataHashValue metadataHash() {
