@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.file.AccessDeniedException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.FileAlreadyExistsException;
@@ -46,6 +47,9 @@ class ErrorCodesTest {
                                 "Too many levels of symbolic links or unable to access attributes"
                                         + " of symbolic link")));
         assertEquals(ErrorCode.IO, ErrorCodes.codeOf(reason("Something unheard of")));
+        assertEquals(
+                ErrorCode.CROSS_DEVICE,
+                ErrorCodes.codeOf(new AtomicMoveNotSupportedException("a", "b", "other mount")));
     }
 
     @Test

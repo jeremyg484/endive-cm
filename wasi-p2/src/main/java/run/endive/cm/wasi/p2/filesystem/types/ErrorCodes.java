@@ -6,6 +6,7 @@ import java.nio.channels.ClosedChannelException;
 import java.nio.channels.NonReadableChannelException;
 import java.nio.channels.NonWritableChannelException;
 import java.nio.file.AccessDeniedException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.FileAlreadyExistsException;
@@ -120,6 +121,9 @@ public final class ErrorCodes {
         }
         if (cause instanceof AccessDeniedException) {
             return ErrorCode.ACCESS;
+        }
+        if (cause instanceof AtomicMoveNotSupportedException) {
+            return ErrorCode.CROSS_DEVICE;
         }
         if (cause instanceof NotLinkException) {
             return ErrorCode.INVALID;

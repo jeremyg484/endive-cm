@@ -201,6 +201,35 @@ class DefaultFileSystemTest {
         assertFails(ErrorCode.UNSUPPORTED, () -> sandbox.openAt(NOFOLLOW, "fifo", EXISTING, READ));
     }
 
+    /** The host renames over the old file in one step rather than removing it first. */
+    @Test
+    void aRenameReplacesAnExistingFile() throws IOException {
+        Files.write(root.resolve("tmp"), "new".getBytes(UTF_8));
+        Files.write(root.resolve("config"), "old".getBytes(UTF_8));
+
+        sandbox.renameAt("tmp", sandbox, "config");
+
+        assertEquals("new", Files.readString(root.resolve("config")));
+        assertFalse(Files.exists(root.resolve("tmp")));
+    }
+
+    /** As with {@code O_EXCL}, a link in the way is an existing file, even one that dangles. */
+    @Test
+    void anExclusiveCreateRefusesALinkInTheWay() {
+        sandbox.symlinkAt("target", "lock");
+        OpenFlags exclusive = OpenFlags.of(OpenFlags.Flag.CREATE, OpenFlags.Flag.EXCLUSIVE);
+
+        assertFails(
+                ErrorCode.EXIST,
+                () ->
+                        sandbox.openAt(
+                                PathFlags.of(PathFlags.Flag.SYMLINK_FOLLOW),
+                                "lock",
+                                exclusive,
+                                READ_WRITE));
+        assertFalse(Files.exists(root.resolve("target")));
+    }
+
     private static void assertFails(ErrorCode expected, Executable operation) {
         ErrorCodeException e = assertThrows(ErrorCodeException.class, operation);
         assertEquals(expected, e.error());

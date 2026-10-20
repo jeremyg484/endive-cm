@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.Descriptor;
@@ -154,7 +155,9 @@ public final class HostDirectory extends HostDescriptor {
 
     /**
      * Opens a directory as another {@code HostDirectory} and a regular file as a {@link HostFile}.
-     * A symbolic link left unfollowed fails with {@code loop}, as {@code O_NOFOLLOW} does. Anything
+     * A symbolic link left unfollowed fails with {@code loop}, as {@code O_NOFOLLOW} does, and an
+     * exclusive create fails with {@code exist} whenever the path names a link, as {@code O_EXCL}
+     * does. Anything
      * else, such as a named pipe or a device, fails with {@code unsupported}, since a file is read
      * and written at an offset and opening a pipe would block the guest.
      *
@@ -177,26 +180,31 @@ public final class HostDirectory extends HostDescriptor {
             throw ErrorCodes.error(ErrorCode.INVALID);
         }
         Path target = resolve(pathFlags, path);
-        if (path.endsWith("/") && !Files.exists(target, NOFOLLOW)) {
-            throw ErrorCodes.error(create ? ErrorCode.IS_DIRECTORY : ErrorCode.NO_ENTRY);
+        if (create && exclusive) {
+            Path named =
+                    pathFlags.has(PathFlags.Flag.SYMLINK_FOLLOW) ? resolve(false, path) : target;
+            if (Metadata.attributesOrNull(named) != null) {
+                throw ErrorCodes.error(ErrorCode.EXIST);
+            }
         }
-        if (create && exclusive && Files.exists(target, NOFOLLOW)) {
-            throw ErrorCodes.error(ErrorCode.EXIST);
-        }
-        if (Files.isSymbolicLink(target)) {
+        BasicFileAttributes attributes = Metadata.attributesOrNull(target);
+        if (attributes == null) {
+            if (path.endsWith("/")) {
+                throw ErrorCodes.error(create ? ErrorCode.IS_DIRECTORY : ErrorCode.NO_ENTRY);
+            }
+            if (directoryOnly) {
+                throw ErrorCodes.error(ErrorCode.NO_ENTRY);
+            }
+        } else if (attributes.isSymbolicLink()) {
             throw ErrorCodes.error(ErrorCode.LOOP);
-        }
-        if (Files.isDirectory(target, NOFOLLOW)) {
+        } else if (attributes.isDirectory()) {
             if (flags.has(DescriptorFlags.Flag.WRITE) || create || truncate) {
                 throw ErrorCodes.error(ErrorCode.IS_DIRECTORY);
             }
             return new HostDirectory(root(), target, flags, poll(), files());
-        }
-        if (directoryOnly) {
-            throw ErrorCodes.error(
-                    Files.exists(target, NOFOLLOW) ? ErrorCode.NOT_DIRECTORY : ErrorCode.NO_ENTRY);
-        }
-        if (Files.exists(target, NOFOLLOW) && !Files.isRegularFile(target, NOFOLLOW)) {
+        } else if (directoryOnly) {
+            throw ErrorCodes.error(ErrorCode.NOT_DIRECTORY);
+        } else if (!attributes.isRegularFile()) {
             throw ErrorCodes.error(ErrorCode.UNSUPPORTED);
         }
         return HostFile.open(
@@ -231,8 +239,8 @@ public final class HostDirectory extends HostDescriptor {
     }
 
     /**
-     * Replaces whatever the new path names, as POSIX {@code rename} does, provided both name a
-     * directory or neither does.
+     * Replaces whatever the new path names in one atomic step, as POSIX {@code rename} does,
+     * provided both name a directory or neither does.
      *
      * @see <a href="https://github.com/WebAssembly/WASI/blob/v0.2.12/proposals/filesystem/wit/types.wit">wasi:filesystem/types, rename-at</a>
      */
@@ -247,12 +255,14 @@ public final class HostDirectory extends HostDescriptor {
         if (from.equals(path()) || to.equals(target.path())) {
             throw ErrorCodes.error(ErrorCode.INVALID);
         }
-        if (!Files.exists(from, NOFOLLOW)) {
+        BasicFileAttributes source = Metadata.attributesOrNull(from);
+        if (source == null) {
             throw ErrorCodes.error(ErrorCode.NO_ENTRY);
         }
-        boolean fromDirectory = Files.isDirectory(from, NOFOLLOW);
-        if (Files.exists(to, NOFOLLOW)) {
-            boolean toDirectory = Files.isDirectory(to, NOFOLLOW);
+        boolean fromDirectory = source.isDirectory();
+        BasicFileAttributes replaced = Metadata.attributesOrNull(to);
+        if (replaced != null) {
+            boolean toDirectory = replaced.isDirectory();
             if (fromDirectory && !toDirectory) {
                 throw ErrorCodes.error(ErrorCode.NOT_DIRECTORY);
             }
@@ -266,7 +276,14 @@ public final class HostDirectory extends HostDescriptor {
         if (fromDirectory && to.startsWith(from)) {
             throw ErrorCodes.error(ErrorCode.INVALID);
         }
-        ErrorCodes.run(() -> Files.move(from, to, StandardCopyOption.REPLACE_EXISTING));
+        // Without ATOMIC_MOVE the JDK deletes the target first, and copies across devices.
+        ErrorCodes.run(
+                () ->
+                        Files.move(
+                                from,
+                                to,
+                                StandardCopyOption.ATOMIC_MOVE,
+                                StandardCopyOption.REPLACE_EXISTING));
     }
 
     /**

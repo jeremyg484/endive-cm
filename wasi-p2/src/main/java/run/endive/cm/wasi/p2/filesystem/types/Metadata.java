@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributeView;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -57,6 +58,17 @@ final class Metadata {
                 datetime(attributes.lastAccessTime()),
                 datetime(attributes.lastModifiedTime()),
                 datetime(changed instanceof FileTime ? (FileTime) changed : null));
+    }
+
+    /** The attributes of {@code path} itself, or {@code null} when nothing is there. */
+    static BasicFileAttributes attributesOrNull(Path path) {
+        try {
+            return Files.readAttributes(path, BasicFileAttributes.class, NOFOLLOW);
+        } catch (NoSuchFileException e) {
+            return null;
+        } catch (IOException | UnsupportedOperationException e) {
+            throw ErrorCodes.failed(e);
+        }
     }
 
     /**

@@ -5,7 +5,6 @@ import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayDeque;
@@ -106,7 +105,7 @@ final class PathResolver {
             }
             Path candidate =
                     join(directory, resolved).resolve(component(directory.getFileSystem(), name));
-            BasicFileAttributes attributes = attributes(candidate);
+            BasicFileAttributes attributes = Metadata.attributesOrNull(candidate);
             boolean link = attributes != null && attributes.isSymbolicLink();
             if (link && (followFinal || !pending.isEmpty())) {
                 if (++expansions > MAX_SYMLINK_EXPANSIONS) {
@@ -139,17 +138,6 @@ final class PathResolver {
         }
         if (!attributes.isDirectory()) {
             throw ErrorCodes.error(ErrorCode.NOT_DIRECTORY);
-        }
-    }
-
-    /** The attributes of {@code path} itself, or {@code null} when nothing is there. */
-    private static BasicFileAttributes attributes(Path path) {
-        try {
-            return Files.readAttributes(path, BasicFileAttributes.class, NOFOLLOW);
-        } catch (NoSuchFileException e) {
-            return null;
-        } catch (IOException e) {
-            throw ErrorCodes.failed(e);
         }
     }
 
