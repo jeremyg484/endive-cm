@@ -10,12 +10,17 @@ import java.util.concurrent.CompletableFuture;
 import run.endive.cm.wasi.p2.sockets.NameResolver;
 
 /** A {@link NameResolver} backed by a Netty one, which cancels Netty's lookup along with its own. */
-final class NettyNameResolver implements NameResolver {
+public final class NettyNameResolver implements NameResolver {
 
     private final io.netty.resolver.NameResolver<InetAddress> resolver;
 
     NettyNameResolver(io.netty.resolver.NameResolver<InetAddress> resolver) {
         this.resolver = Objects.requireNonNull(resolver, "resolver");
+    }
+
+    /** Resolves the names a guest looks up with {@code resolver}, which the embedder closes. */
+    public static NameResolver of(io.netty.resolver.NameResolver<InetAddress> resolver) {
+        return new NettyNameResolver(resolver);
     }
 
     @Override

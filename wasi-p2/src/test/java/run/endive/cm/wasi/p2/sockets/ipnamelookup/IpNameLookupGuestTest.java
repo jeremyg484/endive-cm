@@ -117,7 +117,7 @@ class IpNameLookupGuestTest {
         return WasiPreview2.builder()
                 .withScheduler(group)
                 .withNetworkPolicy(LOOKUPS)
-                .withTransport(() -> resolver)
+                .withNameResolver(resolver)
                 .build();
     }
 

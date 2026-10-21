@@ -96,6 +96,21 @@
         <version>${netty.version}</version>
       </dependency>
       <dependency>
+        <groupId>io.netty</groupId>
+        <artifactId>netty-transport-classes-epoll</artifactId>
+        <version>${netty.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.netty</groupId>
+        <artifactId>netty-transport-classes-io_uring</artifactId>
+        <version>${netty.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.netty</groupId>
+        <artifactId>netty-transport-classes-kqueue</artifactId>
+        <version>${netty.version}</version>
+      </dependency>
+      <dependency>
         <groupId>io.roastedroot</groupId>
         <artifactId>zerofs</artifactId>
         <version>${zerofs.version}</version>
@@ -204,6 +219,20 @@
         <groupId>com.google.testing.compile</groupId>
         <artifactId>compile-testing</artifactId>
         <version>${google-compile-testing.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.netty</groupId>
+        <artifactId>netty-transport-native-epoll</artifactId>
+        <version>${netty.version}</version>
+        <classifier>linux-x86_64</classifier>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.netty</groupId>
+        <artifactId>netty-transport-native-io_uring</artifactId>
+        <version>${netty.version}</version>
+        <classifier>linux-x86_64</classifier>
         <scope>test</scope>
       </dependency>
       <dependency>

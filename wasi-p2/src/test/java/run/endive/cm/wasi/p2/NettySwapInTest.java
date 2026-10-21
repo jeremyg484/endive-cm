@@ -4,8 +4,8 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.netty.channel.EventLoopGroup;
@@ -33,6 +33,8 @@ import run.endive.cm.wasi.p2.bindings.wasi.filesystem.types.PathFlags;
 import run.endive.cm.wasi.p2.bindings.wasi.io.poll.Pollable;
 import run.endive.cm.wasi.p2.bindings.wasi.io.streams.InputStream;
 import run.endive.cm.wasi.p2.bindings.wasi.io.streams.OutputStream;
+import run.endive.cm.wasi.p2.bindings.wasi.sockets.ipnamelookup.ResolveAddressStream;
+import run.endive.cm.wasi.p2.bindings.wasi.sockets.network.IpAddress;
 import run.endive.cm.wasi.p2.sockets.NetworkPolicy;
 import run.endive.cm.wasi.p2.sockets.network.HostNetwork;
 
@@ -141,21 +143,39 @@ class NettySwapInTest {
     }
 
     @Test
-    void grantingTheNetworkNeedsTheEmbeddersEventLoopGroup() {
-        var builder = WasiPreview2.builder().withNetworkPolicy(NetworkPolicy.allowAll());
+    void aGuestGrantedTheNetworkNeedsNoScheduler() {
+        try (var wasi =
+                WasiPreview2.builder().withNetworkPolicy(NetworkPolicy.allowAll()).build()) {
+            Pollable timeout =
+                    wasi.monotonicClock().subscribeDuration(BigInteger.valueOf(1_000_000));
 
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, builder::build);
-
-        assertTrue(e.getMessage().contains("NioIoHandler"), e.getMessage());
+            assertEquals(List.of(0L), wasi.poll().poll(List.of(timeout)));
+            assertNotNull(firstAddressOf(wasi, "localhost"));
+        }
     }
 
+    /** Netty's resolver answers localhost from the hosts file, on the group the network made. */
     @Test
-    void grantingTheNetworkNeedsANettyScheduler() {
-        var builder =
+    void aSchedulerOutsideNettyKeepsTheTimersWhileTheNetworkRunsElsewhere() {
+        try (var wasi =
                 WasiPreview2.builder()
                         .withScheduler(eventLoop)
-                        .withNetworkPolicy(NetworkPolicy.allowAll());
+                        .withNetworkPolicy(NetworkPolicy.allowAll())
+                        .build()) {
+            Pollable timeout =
+                    wasi.monotonicClock().subscribeDuration(BigInteger.valueOf(1_000_000));
 
-        assertThrows(IllegalArgumentException.class, builder::build);
+            assertEquals(List.of(0L), wasi.poll().poll(List.of(timeout)));
+            assertNotNull(firstAddressOf(wasi, "localhost"));
+        }
+        assertFalse(eventLoop.isShuttingDown());
+    }
+
+    private static IpAddress firstAddressOf(WasiPreview2 wasi, String name) {
+        ResolveAddressStream stream =
+                wasi.ipNameLookup()
+                        .resolveAddresses(wasi.instanceNetwork().instanceNetwork(), name);
+        wasi.poll().poll(List.of(stream.subscribe()));
+        return stream.resolveNextAddress();
     }
 }

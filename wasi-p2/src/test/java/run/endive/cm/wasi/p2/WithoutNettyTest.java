@@ -1,5 +1,6 @@
 package run.endive.cm.wasi.p2;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,6 +32,13 @@ class WithoutNettyTest {
         assertThrows(
                 ClassNotFoundException.class,
                 () -> Class.forName("io.netty.channel.EventLoopGroup"));
+    }
+
+    /** Frameworks list a class's methods, which fails if a signature names a missing class. */
+    @Test
+    void theHostsMethodsAreListedWithoutNetty() {
+        assertDoesNotThrow(WasiPreview2.class::getMethods);
+        assertDoesNotThrow(WasiPreview2.Builder.class::getMethods);
     }
 
     @Test

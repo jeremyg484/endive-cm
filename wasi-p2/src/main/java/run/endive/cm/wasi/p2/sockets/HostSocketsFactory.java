@@ -21,22 +21,22 @@ public final class HostSocketsFactory {
     /**
      * @param policy what the guest may do on the network
      * @param poll the poll everything this creates subscribes through
-     * @param scheduler what runs the network, which the caller shuts down
-     * @param transport what else the embedder supplies, or {@code null} to create everything
+     * @param scheduler the host's scheduler, which the caller shuts down, or {@code null} for none
+     * @param nameResolver what resolves the names the guest looks up, or {@code null} for Netty's
      * @throws IllegalStateException if the policy grants something and Netty is missing
-     * @throws IllegalArgumentException if the policy grants something and {@code scheduler} is not
-     *     a Netty event loop group running NIO channels
+     * @throws IllegalArgumentException if the policy grants something and {@code scheduler} is a
+     *     Netty event loop group whose transport is not one Netty ships
      */
     public static HostSockets create(
             NetworkPolicy policy,
             HostPoll poll,
             ScheduledExecutorService scheduler,
-            Transport transport) {
+            NameResolver nameResolver) {
         if (!grantsNetwork(policy)) {
             return new DeniedNetwork();
         }
         requireNetty();
-        return NettyNetwork.start(poll, scheduler, transport);
+        return NettyNetwork.start(poll, scheduler, nameResolver);
     }
 
     /** Whether {@code policy} grants anything, which is when the guest needs Netty. */

@@ -1,5 +1,6 @@
 package run.endive.cm.wasi.p2.sockets;
 
+import java.util.concurrent.ScheduledExecutorService;
 import run.endive.cm.wasi.p2.bindings.wasi.sockets.ipnamelookup.ResolveAddressStream;
 import run.endive.cm.wasi.p2.bindings.wasi.sockets.network.ErrorCode;
 import run.endive.cm.wasi.p2.bindings.wasi.sockets.network.IpAddressFamily;
@@ -19,6 +20,11 @@ final class DeniedNetwork
                 run.endive.cm.wasi.p2.bindings.wasi.sockets.ipnamelookup.Host,
                 run.endive.cm.wasi.p2.bindings.wasi.sockets.tcpcreatesocket.Host,
                 run.endive.cm.wasi.p2.bindings.wasi.sockets.udpcreatesocket.Host {
+
+    @Override
+    public ScheduledExecutorService eventLoopGroup() {
+        return null;
+    }
 
     @Override
     public run.endive.cm.wasi.p2.bindings.wasi.sockets.ipnamelookup.Host ipNameLookup() {
