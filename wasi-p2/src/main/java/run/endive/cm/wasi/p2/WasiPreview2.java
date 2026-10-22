@@ -72,21 +72,27 @@ public final class WasiPreview2 implements ImportsWorld.Imports, AutoCloseable {
         } else {
             this.scheduler = defaultScheduler();
         }
-        this.monotonicClock = new HostMonotonicClock(scheduler, poll);
-        this.wallClock =
-                builder.clock == null
-                        ? new HostWallClock()
-                        : new HostWallClock(builder.clock, builder.clockResolution);
-        this.types = new HostTypes();
-        this.preopens = new HostPreopens(builder.directories, builder.readOnly, poll, files);
-        this.random = builder.random == null ? new HostRandom() : new HostRandom(builder.random);
-        this.insecure =
-                builder.insecureRandom == null
-                        ? new HostInsecure()
-                        : new HostInsecure(builder.insecureRandom);
-        this.insecureSeed =
-                builder.insecureSeed == null ? new HostInsecureSeed() : builder.insecureSeed;
-        this.instanceNetwork = new HostInstanceNetwork(builder.networkPolicy);
+        try {
+            this.monotonicClock = new HostMonotonicClock(scheduler, poll);
+            this.wallClock =
+                    builder.clock == null
+                            ? new HostWallClock()
+                            : new HostWallClock(builder.clock, builder.clockResolution);
+            this.types = new HostTypes();
+            this.preopens = new HostPreopens(builder.directories, builder.readOnly, poll, files);
+            this.random =
+                    builder.random == null ? new HostRandom() : new HostRandom(builder.random);
+            this.insecure =
+                    builder.insecureRandom == null
+                            ? new HostInsecure()
+                            : new HostInsecure(builder.insecureRandom);
+            this.insecureSeed =
+                    builder.insecureSeed == null ? new HostInsecureSeed() : builder.insecureSeed;
+            this.instanceNetwork = new HostInstanceNetwork(builder.networkPolicy);
+        } catch (RuntimeException e) {
+            close();
+            throw e;
+        }
     }
 
     public static Builder builder() {

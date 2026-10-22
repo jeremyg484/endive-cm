@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.netty.channel.EventLoopGroup;
@@ -18,11 +19,14 @@ import io.roastedroot.zerofs.Configuration;
 import io.roastedroot.zerofs.ZeroFs;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.nio.file.ClosedFileSystemException;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -171,11 +175,37 @@ class NettySwapInTest {
         assertFalse(eventLoop.isShuttingDown());
     }
 
+    /** A build failing once the network has started leaves none of the network's threads running. */
+    @Test
+    void aFailedBuildReleasesTheNetwork() throws IOException, InterruptedException {
+        Set<Thread> before = networkThreads();
+        FileSystem fs = ZeroFs.newFileSystem(Configuration.unix());
+        var builder =
+                WasiPreview2.builder()
+                        .withNetworkPolicy(NetworkPolicy.allowAll())
+                        .withDirectory("data", Files.createDirectory(fs.getPath("/data")));
+        fs.close();
+
+        assertThrows(ClosedFileSystemException.class, builder::build);
+        for (Thread thread : networkThreads()) {
+            if (!before.contains(thread)) {
+                thread.join(5_000);
+                assertFalse(thread.isAlive(), thread.getName());
+            }
+        }
+    }
+
     private static IpAddress firstAddressOf(WasiPreview2 wasi, String name) {
         ResolveAddressStream stream =
                 wasi.ipNameLookup()
                         .resolveAddresses(wasi.instanceNetwork().instanceNetwork(), name);
         wasi.poll().poll(List.of(stream.subscribe()));
         return stream.resolveNextAddress();
+    }
+
+    private static Set<Thread> networkThreads() {
+        return Thread.getAllStackTraces().keySet().stream()
+                .filter(thread -> thread.getName().startsWith("endive-wasi-p2-network"))
+                .collect(Collectors.toSet());
     }
 }
