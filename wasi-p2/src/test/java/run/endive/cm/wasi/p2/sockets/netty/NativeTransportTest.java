@@ -9,6 +9,8 @@ import io.netty.channel.IoHandlerFactory;
 import io.netty.channel.MultiThreadIoEventLoopGroup;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollIoHandler;
+import io.netty.channel.kqueue.KQueue;
+import io.netty.channel.kqueue.KQueueIoHandler;
 import io.netty.channel.uring.IoUring;
 import io.netty.channel.uring.IoUringIoHandler;
 import java.math.BigInteger;
@@ -38,6 +40,13 @@ class NativeTransportTest {
         assumeTrue(IoUring.isAvailable(), "io_uring is not available here");
 
         resolvesLocalhostOn(IoUringIoHandler.newFactory());
+    }
+
+    @Test
+    void theNetworkRunsOnKQueue() {
+        assumeTrue(KQueue.isAvailable(), "kqueue is not available here");
+
+        resolvesLocalhostOn(KQueueIoHandler.newFactory());
     }
 
     /** Netty's resolver answers localhost from the hosts file, on the transport's channels. */
