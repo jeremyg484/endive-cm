@@ -168,6 +168,7 @@
             <configuration>
               <excludes>
                 <exclude>**/WithoutNettyTest.java</exclude>
+                <exclude>**/WithoutNativeTransportsTest.java</exclude>
               </excludes>
             </configuration>
           </execution>
@@ -184,6 +185,27 @@
               </includes>
               <classpathDependencyExcludes>
                 <classpathDependencyExclude>io.netty:*</classpathDependencyExclude>
+              </classpathDependencyExcludes>
+            </configuration>
+          </execution>
+          <execution>
+            <!-- The native transports are provided too, so an embedder using NIO may leave them
+                 out. This runs the test proving the network still picks its channels then. -->
+            <id>without-native-transports</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/WithoutNativeTransportsTest.java</include>
+              </includes>
+              <classpathDependencyExcludes>
+                <classpathDependencyExclude>io.netty:netty-transport-classes-epoll</classpathDependencyExclude>
+                <classpathDependencyExclude>io.netty:netty-transport-classes-io_uring</classpathDependencyExclude>
+                <classpathDependencyExclude>io.netty:netty-transport-classes-kqueue</classpathDependencyExclude>
+                <classpathDependencyExclude>io.netty:netty-transport-native-epoll</classpathDependencyExclude>
+                <classpathDependencyExclude>io.netty:netty-transport-native-io_uring</classpathDependencyExclude>
+                <classpathDependencyExclude>io.netty:netty-transport-native-kqueue</classpathDependencyExclude>
               </classpathDependencyExcludes>
             </configuration>
           </execution>
